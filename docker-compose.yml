@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  # ── Ollama ─────────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: apex_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── PostgreSQL (production storage) ────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: apex_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apexsecret}
+      POSTGRES_DB: ${POSTGRES_DB:-apex_rag}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apex} -d ${POSTGRES_DB:-apex_rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ApexRAG FastAPI Service ─────────────────────────────────────────────
+  apex_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apex_api
+    ports:
+      - "8000:8000"
+    environment:
+      APEX_DB_URL: postgresql+asyncpg://${POSTGRES_USER:-apex}:${POSTGRES_PASSWORD:-apexsecret}@postgres:5432/${POSTGRES_DB:-apex_rag}
+      APEX_OLLAMA_HOST: http://ollama:11434
+      APEX_MODEL: ${APEX_MODEL:-llama3.1}
+      APEX_LOG_LEVEL: ${APEX_LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  postgres_data:
