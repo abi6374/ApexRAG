@@ -94,7 +94,9 @@ class TestMarkdownParser:
 
     def test_only_text_no_headings(self) -> None:
         sections = _parse_markdown_to_tree("Just some plain text without headings.")
-        assert sections == []
+        assert len(sections) == 1
+        assert sections[0].title == "Document"
+        assert sections[0].content == "Just some plain text without headings."
 
 
 # ---------------------------------------------------------------------------
