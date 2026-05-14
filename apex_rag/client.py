@@ -29,7 +29,7 @@ from types import TracebackType
 from typing import Any, Self, Sequence
 
 from apex_rag.ingestion import IngestionEngine, Summariser
-from apex_rag.navigation import NavigationAgent, NavigationResult
+from apex_rag.navigation import NavigationAgent, NavigationResult, AggregatorAgent
 from apex_rag.providers import AsyncLLM, OllamaProvider
 from apex_rag.storage import DocumentNode, PageIndexEntry, StorageEngine
 from apex_rag.utils import ReasoningTrace, logger
@@ -64,12 +64,14 @@ class ApexIndex:
         storage: StorageEngine,
         ingestor: IngestionEngine,
         agent: NavigationAgent,
+        aggregator: AggregatorAgent,
         *,
         trace_enabled: bool = True,
     ) -> None:
         self._storage = storage
         self._ingestor = ingestor
         self._agent = agent
+        self._aggregator = aggregator
         self._trace_enabled = trace_enabled
         self._lock = asyncio.Lock()
 
@@ -83,6 +85,7 @@ class ApexIndex:
         model: str | AsyncLLM = "llama3.1",
         summariser_model: str | AsyncLLM | None = None,
         verifier_model: str | AsyncLLM | None = None,
+        aggregator_model: str | AsyncLLM | None = None,
         ollama_host: str = "http://localhost:11434",
         max_concurrent_summaries: int = 4,
         parser_backend: str = "markitdown",
@@ -102,6 +105,7 @@ class ApexIndex:
             summariser_model:          Model for ingestion summaries (defaults to `model`).
             verifier_model:            Model for leaf verification (defaults to `model`).
                                        Use a smaller/faster model here (e.g. phi3).
+            aggregator_model:          Model for multi-document synthesis.
             max_concurrent_summaries:  Ingestion parallelism (tune to GPU VRAM).
             parser_backend:            "markitdown" | "docling" | "plaintext".
             trace_enabled:             Print live color-coded navigation trace.
@@ -123,6 +127,7 @@ class ApexIndex:
         nav_model = _resolve_llm(model)
         summ_model = _resolve_llm(summariser_model, fallback=nav_model)
         verif_model = _resolve_llm(verifier_model, fallback=nav_model)
+        aggr_model = _resolve_llm(aggregator_model, fallback=nav_model)
 
         summariser = Summariser(
             llm=summ_model,
@@ -144,7 +149,9 @@ class ApexIndex:
             trace=trace,
         )
 
-        instance = cls(storage, ingestor, agent, trace_enabled=trace_enabled)
+        aggregator = AggregatorAgent(model=aggr_model)
+
+        instance = cls(storage, ingestor, agent, aggregator, trace_enabled=trace_enabled)
         logger.info(
             "ApexIndex ready | db=%s | verify=%s",
             db_url.split("?")[0],
@@ -238,6 +245,7 @@ class ApexIndex:
         doc_id: str,
         *,
         root_node_id: int | None = None,
+        event_queue: asyncio.Queue | None = None,
     ) -> NavigationResult | None:
         """
         Navigate the document tree to answer `question`.
@@ -250,6 +258,7 @@ class ApexIndex:
             question:     Natural-language query.
             doc_id:       Target document (returned by ingest()).
             root_node_id: Restrict to a subtree (optional).
+            event_queue:  Optional asyncio.Queue for real-time status updates.
 
         Returns:
             NavigationResult with .content, .path, .trace, .verified,
@@ -259,7 +268,45 @@ class ApexIndex:
             query=question,
             doc_id=doc_id,
             root_node_id=root_node_id,
+            event_queue=event_queue,
         )
+
+    async def query_global(
+        self,
+        question: str,
+        *,
+        event_queue: asyncio.Queue | None = None,
+        synthesize: bool = True,
+    ) -> NavigationResult | str | None:
+        """
+        Query across ALL indexed documents.
+
+        First, the agent identifies the most relevant documents based on their
+        top-level summaries, then performs a structural search within each
+        candidate until an answer is found.
+
+        Args:
+            question:    Natural-language query.
+            event_queue: Optional asyncio.Queue for real-time status updates.
+            synthesize:  If True, use AggregatorAgent to synthesize a final answer.
+
+        Returns:
+            NavigationResult, synthesized string, or None.
+        """
+        result = await self._agent.find_global(
+            query=question,
+            event_queue=event_queue,
+        )
+        
+        if result and synthesize:
+            if event_queue:
+                await event_queue.put({"event": "synthesize_start"})
+            answer = await self._aggregator.synthesize(question, [result])
+            if event_queue:
+                await event_queue.put({"event": "synthesize_done", "answer": answer})
+            return answer
+            
+        return result
 
     # -- Tree & Index API ---------------------------------------------------
 

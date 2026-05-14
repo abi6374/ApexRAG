@@ -110,6 +110,8 @@ def mock_storage(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     get_node, get_children, and list_documents are async-patched.
     """
     storage = MagicMock(spec=StorageEngine)
+    storage._engine = MagicMock()
+    storage._engine.url = "sqlite+aiosqlite:///mock.db"
 
     async def fake_get_node(session: object, node_id: int) -> DocumentNode | None:
         return TREE.get(node_id)
@@ -123,6 +125,9 @@ def mock_storage(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     storage.get_node = AsyncMock(side_effect=fake_get_node)
     storage.get_children = AsyncMock(side_effect=fake_get_children)
     storage.list_documents = AsyncMock(return_value=[DOC_ID])
+    storage.get_cached_query = AsyncMock(return_value=None)
+    storage.insert_cache_entry = AsyncMock()
+    storage.search_children = AsyncMock(return_value=[])
 
     # session() must return an async context manager
     session_cm = MagicMock()
@@ -154,6 +159,8 @@ def make_llm_responses(decisions: list[tuple[int | None, str]]):
         self: NavigationAgent,
         query: str,
         children: list[DocumentNode],
+        session: any = None,
+        **kwargs: any,
     ) -> tuple[int | None, int | None, str]:
         idx = call_index["i"]
         call_index["i"] += 1

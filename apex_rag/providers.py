@@ -98,3 +98,69 @@ class OpenAIProvider:
             max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
+
+
+class GroqProvider:
+    """
+    High-speed provider for Groq API (requires `pip install groq`).
+    
+    Usage:
+        llm = GroqProvider("llama3-70b-8192", api_key="gsk_...")
+    """
+
+    def __init__(
+        self,
+        model: str = "llama3-70b-8192",
+        api_key: str | None = None,
+    ) -> None:
+        from groq import AsyncGroq
+        self.model = model
+        self._client = AsyncGroq(api_key=api_key)
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 150,
+    ) -> str:
+        response = await self._client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content or ""
+
+
+class AnthropicProvider:
+    """
+    Provider for Anthropic Claude API (requires `pip install anthropic`).
+    
+    Usage:
+        llm = AnthropicProvider("claude-3-5-sonnet-20240620", api_key="sk-ant-...")
+    """
+
+    def __init__(
+        self,
+        model: str = "claude-3-5-sonnet-20240620",
+        api_key: str | None = None,
+    ) -> None:
+        from anthropic import AsyncAnthropic
+        self.model = model
+        self._client = AsyncAnthropic(api_key=api_key)
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 150,
+    ) -> str:
+        response = await self._client.messages.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return response.content[0].text if response.content else ""

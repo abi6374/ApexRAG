@@ -111,6 +111,21 @@ _VERIFY_RE = re.compile(
     r'\{.*?"answers_query"\s*:\s*(?P<val>true|false).*?\}', re.DOTALL | re.IGNORECASE
 )
 
+_SELECT_DOC_PROMPT = """\
+You are a document librarian. Given a query, identify which document(s) are most likely to contain the answer.
+
+User Query: "{query}"
+
+Available Documents:
+{docs_text}
+
+Task:
+Return the ID(s) of the most relevant documents.
+
+Respond ONLY with valid JSON:
+{{"chosen_doc_ids": ["<id1>", "<id2>"], "reason": "<why>"}}
+"""
+
 
 # ---------------------------------------------------------------------------
 # Navigation Agent
@@ -159,6 +174,7 @@ class NavigationAgent:
         doc_id: str,
         *,
         root_node_id: int | None = None,
+        event_queue: asyncio.Queue | None = None,
     ) -> NavigationResult | None:
         """
         Navigate the document tree to find the leaf best answering `query`.
@@ -167,11 +183,30 @@ class NavigationAgent:
             query:        Natural-language question.
             doc_id:       Document to search (from ingestion).
             root_node_id: Restrict search to a subtree (optional).
+            event_queue:  Optional asyncio.Queue for real-time status updates.
 
         Returns:
             NavigationResult, or None if the query cannot be answered.
         """
         async with self._storage.session() as session:
+            # 1. Semantic Cache Check (Fast Path)
+            cache_entry = await self._storage.get_cached_query(session, query, doc_id)
+            if cache_entry:
+                node = await self._storage.get_node(session, cache_entry.node_id)
+                if node and node.content:
+                    logger.info("Semantic Cache HIT: %r -> %s", query, node.path)
+                    if event_queue:
+                        await event_queue.put({"event": "cache_hit", "node_id": node.id, "path": node.path})
+                    return NavigationResult(
+                        content=node.content,
+                        node_id=node.id,
+                        path=node.path,
+                        title=node.title,
+                        trace=[(node.id, node.title)],
+                        verified=True,
+                        confidence=1.0,
+                    )
+
             if root_node_id is not None:
                 root_node = await self._storage.get_node(session, root_node_id)
                 root_nodes = [root_node] if root_node else []
@@ -188,6 +223,8 @@ class NavigationAgent:
 
             first = root_nodes[0]
             self._trace.start(query, first.id)
+            if event_queue:
+                await event_queue.put({"event": "start", "query": query})
 
             traversal_trace: list[tuple[int, str]] = []
             visited: set[int] = set()
@@ -199,12 +236,98 @@ class NavigationAgent:
                     current_node=root,
                     traversal_trace=traversal_trace,
                     visited=visited,
+                    event_queue=event_queue,
                 )
                 if result is not None:
+                    # 2. Populate Cache on success
+                    await self._storage.insert_cache_entry(session, query, doc_id, result.node_id)
                     self._trace.finish(found=True)
+                    if event_queue:
+                        await event_queue.put({"event": "finish", "found": True})
                     return result
 
             self._trace.finish(found=False)
+            if event_queue:
+                await event_queue.put({"event": "finish", "found": False})
+            return None
+
+    async def find_global(
+        self,
+        query: str,
+        *,
+        event_queue: asyncio.Queue | None = None,
+    ) -> NavigationResult | None:
+        """
+        Query across ALL documents in the index.
+        First identifies relevant documents using Hybrid Search (FTS5 + Agentic),
+        then navigates them.
+        """
+        async with self._storage.session() as session:
+            doc_ids = await self._storage.list_documents(session)
+            if not doc_ids:
+                return None
+
+            # 1. Hybrid Pruning: Use FTS5 (Keyword) to find top documents first
+            fts_doc_ids: list[str] = []
+            if "sqlite" in str(self._storage._engine.url):
+                # Search FTS table for document roots
+                stmt = __import__("sqlalchemy").text(
+                    "SELECT DISTINCT doc_id FROM document_nodes "
+                    "WHERE id IN (SELECT node_id FROM document_nodes_fts WHERE document_nodes_fts MATCH :q) "
+                    "LIMIT 5"
+                )
+                result = await session.execute(stmt, {"q": query})
+                fts_doc_ids = [row[0] for row in result.all()]
+
+            # 2. Agentic Selection: Refine candidates with LLM if multiple docs exist
+            if len(doc_ids) > 1:
+                # Fetch root nodes for pruning
+                root_nodes = []
+                for did in doc_ids:
+                    roots = await self._storage.get_children(session, parent_id=None, doc_id=did)
+                    if roots:
+                        root_nodes.append(roots[0])
+
+                docs_text = "\n".join(
+                    f"[{n.doc_id}] {n.title}: {truncate(n.summary, 120)}"
+                    for n in root_nodes
+                )
+                prompt = _SELECT_DOC_PROMPT.format(query=query, docs_text=docs_text)
+                
+                if event_queue:
+                    await event_queue.put({"event": "global_start", "query": query})
+
+                raw = await self._model.generate(prompt=prompt, temperature=0.0)
+                
+                try:
+                    match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
+                    data = json.loads(match.group(0)) if match else json.loads(raw.strip())
+                    chosen_ids = data.get("chosen_doc_ids", [])
+                except (json.JSONDecodeError, KeyError):
+                    chosen_ids = fts_doc_ids or doc_ids
+            else:
+                chosen_ids = doc_ids
+
+            # Merge FTS and Agentic results, preserving order
+            final_candidates = []
+            for did in chosen_ids:
+                if did not in final_candidates:
+                    final_candidates.append(did)
+            for did in fts_doc_ids:
+                if did not in final_candidates:
+                    final_candidates.append(did)
+
+            if event_queue:
+                await event_queue.put({"event": "global_chosen", "doc_ids": final_candidates})
+
+            # 3. Navigate chosen documents in order
+            for did in final_candidates:
+                if did not in doc_ids:
+                    continue
+                result = await self.find(query, did, event_queue=event_queue)
+                if result:
+                    return result
+
             return None
 
     # -- Recursive navigation -----------------------------------------------
@@ -216,6 +339,7 @@ class NavigationAgent:
         current_node: DocumentNode,
         traversal_trace: list[tuple[int, str]],
         visited: set[int],
+        event_queue: asyncio.Queue | None = None,
     ) -> NavigationResult | None:
         """
         Depth-first navigation with multi-candidate and verification.
@@ -228,16 +352,29 @@ class NavigationAgent:
 
         traversal_trace.append((current_node.id, current_node.title))
         self._trace.enter_node(current_node.id, current_node.summary, current_node.path)
+        if event_queue:
+            await event_queue.put({
+                "event": "enter",
+                "node_id": current_node.id,
+                "title": current_node.title,
+                "path": current_node.path,
+                "summary": current_node.summary
+            })
 
         # ── Leaf node ──────────────────────────────────────────────────────
         if current_node.is_leaf:
             content = current_node.content or ""
             self._trace.leaf_reached(current_node.id, content)
+            if event_queue:
+                await event_queue.put({"event": "leaf", "node_id": current_node.id, "content_preview": content[:100]})
 
             if self._verify_leaves:
                 verified, confidence = await self._verify_leaf(
                     query, current_node.title, content
                 )
+                if event_queue:
+                    await event_queue.put({"event": "verify", "node_id": current_node.id, "verified": verified, "confidence": confidence})
+
                 if not verified:
                     self._trace.backtrack(
                         current_node.id,
@@ -286,9 +423,13 @@ class NavigationAgent:
             )
 
         self._trace.exploring_children(current_node.id, len(children))
+        if event_queue:
+            await event_queue.put({"event": "explore", "node_id": current_node.id, "child_count": len(children)})
 
-        chosen_id, fallback_id, reason = await self._ask_llm(query, children)
+        chosen_id, fallback_id, reason = await self._ask_llm(query, children, session=session)
         self._trace.agent_choice(chosen_id, reason)
+        if event_queue:
+            await event_queue.put({"event": "choice", "node_id": current_node.id, "chosen_id": chosen_id, "fallback_id": fallback_id, "reason": reason})
 
         # Build ordered candidate list: [chosen, fallback, remaining...]
         candidate_ids: list[int] = []
@@ -306,6 +447,8 @@ class NavigationAgent:
         # If LLM returned NONE and no fallback, backtrack immediately
         if chosen_id is None and fallback_id is None:
             self._trace.backtrack(current_node.id, current_node.parent_id)
+            if event_queue:
+                await event_queue.put({"event": "backtrack", "node_id": current_node.id})
             return None
 
         for candidate_id in candidate_ids:
@@ -318,12 +461,15 @@ class NavigationAgent:
                 current_node=child,
                 traversal_trace=traversal_trace,
                 visited=visited,
+                event_queue=event_queue,
             )
             if result is not None:
                 return result
 
         # All candidates exhausted
         self._trace.backtrack(current_node.id, current_node.parent_id)
+        if event_queue:
+            await event_queue.put({"event": "backtrack", "node_id": current_node.id})
         return None
 
     # -- LLM calls ----------------------------------------------------------
@@ -333,18 +479,29 @@ class NavigationAgent:
         self,
         query: str,
         children: list[DocumentNode],
+        session: Any = None,
     ) -> tuple[int | None, int | None, str]:
         """
-        Ask Ollama which child(ren) to explore.
+        Ask Ollama which child(ren) to explore, providing keyword search hints.
 
         Returns:
             (chosen_id, fallback_id, reason)
         """
-        children_text = "\n".join(
-            f"[{c.id}] {c.title}{' ('+c.page_range+')' if c.page_range else ''}\n"
-            f"       Summary: {truncate(c.summary, 140)}"
-            for c in children
-        )
+        # Get keyword hints if session is available
+        hints: dict[int, float] = {}
+        if session is not None:
+            parent_id = children[0].parent_id if children else None
+            doc_id = children[0].doc_id if children else None
+            scored = await self._storage.search_children(session, parent_id, query, doc_id)
+            hints = {n.id: s for n, s in scored}
+
+        children_text = ""
+        for c in children:
+            hint_str = f" [Keyword Match Score: {hints[c.id]:.1f}]" if c.id in hints else ""
+            children_text += (
+                f"[{c.id}] {c.title}{' ('+c.page_range+')' if c.page_range else ''}{hint_str}\n"
+                f"       Summary: {truncate(c.summary, 140)}\n"
+            )
 
         prompt = _NAVIGATE_PROMPT.format(
             query=query,
@@ -354,7 +511,7 @@ class NavigationAgent:
         raw = await self._model.generate(
             prompt=prompt,
             temperature=0.0,
-            max_tokens=120,
+            max_tokens=150,
         )
 
         return self._parse_navigate_response(raw.strip(), children)
@@ -477,3 +634,46 @@ class NavigationAgent:
 
         logger.warning("Verify parse failure: %s", truncate(raw, 100))
         return True, 0.5  # Optimistic default to avoid over-rejection
+
+
+# ---------------------------------------------------------------------------
+# Aggregator Agent — Multi-document Synthesis
+# ---------------------------------------------------------------------------
+
+_SYNTHESIZE_PROMPT = """\
+You are a senior analyst. Synthesize the following information retrieved from multiple document sections into a single, comprehensive answer to the user's query.
+
+User Query: "{query}"
+
+Retrieved Sections:
+{context}
+
+Final Answer:"""
+
+
+class AggregatorAgent:
+    """
+    Collects multiple NavigationResults and synthesizes them into a single report.
+    """
+
+    def __init__(self, model: AsyncLLM) -> None:
+        self._model = model
+
+    async def synthesize(self, query: str, results: list[NavigationResult]) -> str:
+        if not results:
+            return "No information found."
+        
+        if len(results) == 1:
+            return results[0].content
+
+        context = ""
+        for i, res in enumerate(results):
+            context += f"Source {i+1} [{res.title}]:\n{res.content}\n\n"
+
+        prompt = _SYNTHESIZE_PROMPT.format(query=query, context=context)
+        
+        return await self._model.generate(
+            prompt=prompt,
+            temperature=0.3,
+            max_tokens=500,
+        )

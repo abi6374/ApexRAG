@@ -30,9 +30,9 @@ except PackageNotFoundError:
 
 from apex_rag.client import ApexIndex
 from apex_rag.ingestion import IngestionEngine, ParsedSection, Summariser
-from apex_rag.navigation import NavigationAgent, NavigationResult
-from apex_rag.providers import AsyncLLM, OllamaProvider, OpenAIProvider
-from apex_rag.storage import DocumentNode, PageIndexEntry, StorageEngine
+from apex_rag.navigation import NavigationAgent, NavigationResult, AggregatorAgent
+from apex_rag.providers import AsyncLLM, OllamaProvider, OpenAIProvider, GroqProvider, AnthropicProvider
+from apex_rag.storage import DocumentNode, PageIndexEntry, StorageEngine, QueryCache
 from apex_rag.utils import ReasoningTrace, logger, set_log_level
 
 __all__ = [
@@ -41,6 +41,7 @@ __all__ = [
     # Navigation
     "NavigationAgent",
     "NavigationResult",
+    "AggregatorAgent",
     # Ingestion
     "IngestionEngine",
     "Summariser",
@@ -49,10 +50,13 @@ __all__ = [
     "AsyncLLM",
     "OllamaProvider",
     "OpenAIProvider",
+    "GroqProvider",
+    "AnthropicProvider",
     # Storage
     "StorageEngine",
     "DocumentNode",
     "PageIndexEntry",
+    "QueryCache",
     # Observability
     "ReasoningTrace",
     "logger",

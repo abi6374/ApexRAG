@@ -223,6 +223,28 @@ class PageIndexEntry(Base):
         }
 
 
+class QueryCache(Base):
+    """
+    Semantic cache for high-precision leaf node results.
+    
+    Stores successful (verified) query -> node_id mappings.
+    """
+    __tablename__ = "query_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    query_text: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    node_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("document_nodes.id", ondelete="CASCADE"), nullable=False
+    )
+    hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Storage Engine
 # ---------------------------------------------------------------------------
@@ -299,6 +321,13 @@ class StorageEngine:
         """Create all tables if they don't already exist."""
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            
+            # Enable FTS5 for SQLite if applicable
+            if "sqlite" in str(self._engine.url):
+                await conn.execute(__import__("sqlalchemy").text(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS document_nodes_fts "
+                    "USING fts5(node_id UNINDEXED, title, summary)"
+                ))
 
     async def drop_schema(self) -> None:
         """Drop all ApexRAG tables — use with caution in tests only."""
@@ -329,6 +358,14 @@ class StorageEngine:
         session.add(node)
         await session.flush()
         await session.refresh(node)
+
+        # Sync with FTS table if SQLite
+        if "sqlite" in str(self._engine.url):
+            await session.execute(__import__("sqlalchemy").text(
+                "INSERT INTO document_nodes_fts (node_id, title, summary) "
+                "VALUES (:nid, :title, :summary)"
+            ), {"nid": node.id, "title": node.title, "summary": node.summary})
+
         return node
 
     async def get_node(self, session: AsyncSession, node_id: int) -> DocumentNode | None:
@@ -367,6 +404,43 @@ class StorageEngine:
         )
         result = await session.execute(stmt)
         return result.scalars().all()
+
+    async def search_children(
+        self,
+        session: AsyncSession,
+        parent_id: int | None,
+        query: str,
+        doc_id: str | None = None,
+    ) -> Sequence[tuple[DocumentNode, float]]:
+        """
+        Search children of a node by keyword and return them with a simple score.
+        Score is based on title match (weight 2.0) and summary match (weight 1.0).
+        """
+        stmt = select(DocumentNode).where(DocumentNode.parent_id == parent_id)
+        if doc_id:
+            stmt = stmt.where(DocumentNode.doc_id == doc_id)
+        
+        result = await session.execute(stmt)
+        nodes = result.scalars().all()
+        
+        scored_nodes = []
+        query_terms = query.lower().split()
+        
+        for node in nodes:
+            score = 0.0
+            title_lower = node.title.lower()
+            summary_lower = node.summary.lower()
+            
+            for term in query_terms:
+                if term in title_lower:
+                    score += 2.0
+                if term in summary_lower:
+                    score += 1.0
+            
+            if score > 0:
+                scored_nodes.append((node, score))
+        
+        return sorted(scored_nodes, key=lambda x: x[1], reverse=True)
 
     async def update_summary(
         self, session: AsyncSession, node_id: int, summary: str
@@ -475,3 +549,30 @@ class StorageEngine:
             await session.delete(node)
         logger.info("Deleted %d nodes for doc_id=%r", count, doc_id)
         return count
+
+    # -- Cache CRUD ---------------------------------------------------------
+
+    async def get_cached_query(
+        self, session: AsyncSession, query: str, doc_id: str
+    ) -> QueryCache | None:
+        """Fetch a cached query mapping if it exists."""
+        stmt = select(QueryCache).where(
+            QueryCache.query_text == query.lower().strip(),
+            QueryCache.doc_id == doc_id,
+        )
+        result = await session.execute(stmt)
+        cache_entry = result.scalar_one_or_none()
+        if cache_entry:
+            cache_entry.hit_count += 1
+        return cache_entry
+
+    async def insert_cache_entry(
+        self, session: AsyncSession, query: str, doc_id: str, node_id: int
+    ) -> None:
+        """Persist a new query -> node_id mapping to the cache."""
+        entry = QueryCache(
+            query_text=query.lower().strip(),
+            doc_id=doc_id,
+            node_id=node_id,
+        )
+        session.add(entry)
