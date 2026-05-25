@@ -5,7 +5,7 @@ Navigation Strategy for 99.999% accuracy:
   1. EXPLORE  — LLM chooses the best child based on Semantic Map summaries.
   2. RECURSE  — Enter that child and repeat until a leaf is reached.
   3. VERIFY   — At the leaf, ask the LLM: "Does this section actually answer
-                the query?" If YES → return. If NO → backtrack and try siblings.
+                the query?" If YES -> return. If NO -> backtrack and try siblings.
   4. BACKTRACK — If all children of a node are exhausted, return None to the
                  parent (which then tries its own siblings).
   5. MULTI-CANDIDATE — The LLM may return up to 2 ranked candidates at each
@@ -19,10 +19,13 @@ All decisions are emitted to the ReasoningTrace for full observability.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
+
+from sqlalchemy import text as sa_text
 
 from apex_rag.providers import AsyncLLM
 from apex_rag.storage import DocumentNode, StorageEngine
@@ -45,7 +48,7 @@ class NavigationResult:
         title:      Section title of the found leaf.
         trace:      Ordered list of (node_id, title) pairs traversed.
         verified:   Whether the LLM verified this leaf answers the query.
-        confidence: Self-reported confidence from the verification step (0–1).
+        confidence: Self-reported confidence from the verification step (0-1).
     """
 
     content: str
@@ -174,7 +177,7 @@ class NavigationAgent:
         doc_id: str,
         *,
         root_node_id: int | None = None,
-        event_queue: asyncio.Queue | None = None,
+        event_queue: asyncio.Queue[Any] | None = None,
     ) -> NavigationResult | None:
         """
         Navigate the document tree to find the leaf best answering `query`.
@@ -207,9 +210,11 @@ class NavigationAgent:
                         confidence=1.0,
                     )
 
+            root_nodes: list[DocumentNode] = []
             if root_node_id is not None:
                 root_node = await self._storage.get_node(session, root_node_id)
-                root_nodes = [root_node] if root_node else []
+                if root_node:
+                    root_nodes = [root_node]
             else:
                 root_nodes = list(
                     await self._storage.get_children(
@@ -230,7 +235,7 @@ class NavigationAgent:
             visited: set[int] = set()
 
             for root in root_nodes:
-                result = await self._navigate(
+                nav_result: NavigationResult | None = await self._navigate(
                     query=query,
                     session=session,
                     current_node=root,
@@ -238,13 +243,13 @@ class NavigationAgent:
                     visited=visited,
                     event_queue=event_queue,
                 )
-                if result is not None:
+                if nav_result is not None:
                     # 2. Populate Cache on success
-                    await self._storage.insert_cache_entry(session, query, doc_id, result.node_id)
+                    await self._storage.insert_cache_entry(session, query, doc_id, nav_result.node_id)
                     self._trace.finish(found=True)
                     if event_queue:
                         await event_queue.put({"event": "finish", "found": True})
-                    return result
+                    return nav_result
 
             self._trace.finish(found=False)
             if event_queue:
@@ -255,7 +260,7 @@ class NavigationAgent:
         self,
         query: str,
         *,
-        event_queue: asyncio.Queue | None = None,
+        event_queue: asyncio.Queue[Any] | None = None,
     ) -> NavigationResult | None:
         """
         Query across ALL documents in the index.
@@ -269,9 +274,9 @@ class NavigationAgent:
 
             # 1. Hybrid Pruning: Use FTS5 (Keyword) to find top documents first
             fts_doc_ids: list[str] = []
-            if "sqlite" in str(self._storage._engine.url):
+            if self._storage.is_sqlite:
                 # Search FTS table for document roots
-                stmt = __import__("sqlalchemy").text(
+                stmt = sa_text(
                     "SELECT DISTINCT doc_id FROM document_nodes "
                     "WHERE id IN (SELECT node_id FROM document_nodes_fts WHERE document_nodes_fts MATCH :q) "
                     "LIMIT 5"
@@ -282,7 +287,7 @@ class NavigationAgent:
             # 2. Agentic Selection: Refine candidates with LLM if multiple docs exist
             if len(doc_ids) > 1:
                 # Fetch root nodes for pruning
-                root_nodes = []
+                root_nodes: list[DocumentNode] = []
                 for did in doc_ids:
                     roots = await self._storage.get_children(session, parent_id=None, doc_id=did)
                     if roots:
@@ -293,12 +298,12 @@ class NavigationAgent:
                     for n in root_nodes
                 )
                 prompt = _SELECT_DOC_PROMPT.format(query=query, docs_text=docs_text)
-                
+
                 if event_queue:
                     await event_queue.put({"event": "global_start", "query": query})
 
                 raw = await self._model.generate(prompt=prompt, temperature=0.0)
-                
+
                 try:
                     match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
                     data = json.loads(match.group(0)) if match else json.loads(raw.strip())
@@ -324,9 +329,9 @@ class NavigationAgent:
             for did in final_candidates:
                 if did not in doc_ids:
                     continue
-                result = await self.find(query, did, event_queue=event_queue)
-                if result:
-                    return result
+                nav_result = await self.find(query, did, event_queue=event_queue)
+                if nav_result:
+                    return nav_result
 
             return None
 
@@ -339,7 +344,7 @@ class NavigationAgent:
         current_node: DocumentNode,
         traversal_trace: list[tuple[int, str]],
         visited: set[int],
-        event_queue: asyncio.Queue | None = None,
+        event_queue: asyncio.Queue[Any] | None = None,
     ) -> NavigationResult | None:
         """
         Depth-first navigation with multi-candidate and verification.
@@ -361,7 +366,7 @@ class NavigationAgent:
                 "summary": current_node.summary
             })
 
-        # ── Leaf node ──────────────────────────────────────────────────────
+        # -- Leaf node ----------------------------------------------------
         if current_node.is_leaf:
             content = current_node.content or ""
             self._trace.leaf_reached(current_node.id, content)
@@ -402,14 +407,14 @@ class NavigationAgent:
                     confidence=1.0,
                 )
 
-        # ── Internal node: fetch children and ask LLM ─────────────────────
+        # -- Internal node: fetch children and ask LLM --------------------
         children = [
             c for c in await self._storage.get_children(session, parent_id=current_node.id)
             if c.id not in visited
         ]
 
         if not children:
-            # Node has children in DB but all visited or none → treat as leaf
+            # Node has children in DB but all visited or none -> treat as leaf
             fallback_content = current_node.summary or current_node.title
             self._trace.leaf_reached(current_node.id, fallback_content)
             return NavigationResult(
@@ -452,13 +457,13 @@ class NavigationAgent:
             return None
 
         for candidate_id in candidate_ids:
-            child = id_to_child.get(candidate_id)
-            if child is None or child.id in visited:
+            child_node = id_to_child.get(candidate_id)
+            if child_node is None or child_node.id in visited:
                 continue
             result = await self._navigate(
                 query=query,
                 session=session,
-                current_node=child,
+                current_node=child_node,
                 traversal_trace=traversal_trace,
                 visited=visited,
                 event_queue=event_queue,
@@ -621,7 +626,7 @@ class NavigationAgent:
         if match:
             answers = match.group("val").lower() == "true"
             # Try to find a confidence number
-            conf_match = re.search(r'"confidence"\s*:\s*([0-9.]+)', raw)
+            conf_match = re.search(r'\"confidence"\s*:\s*([0-9.]+)', raw)
             confidence = float(conf_match.group(1)) if conf_match else 0.7
             return answers, min(max(confidence, 0.0), 1.0)
 
@@ -662,7 +667,7 @@ class AggregatorAgent:
     async def synthesize(self, query: str, results: list[NavigationResult]) -> str:
         if not results:
             return "No information found."
-        
+
         if len(results) == 1:
             return results[0].content
 
@@ -671,7 +676,7 @@ class AggregatorAgent:
             context += f"Source {i+1} [{res.title}]:\n{res.content}\n\n"
 
         prompt = _SYNTHESIZE_PROMPT.format(query=query, context=context)
-        
+
         return await self._model.generate(
             prompt=prompt,
             temperature=0.3,

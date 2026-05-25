@@ -1,98 +1,71 @@
-# ⚡ ApexRAG
+<p align="center">
+  <img src="https://img.shields.io/badge/ApexRAG-v0.2.0--dev-6366f1?style=for-the-badge" alt="ApexRAG">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Production Ready](https://img.shields.io/badge/status-production--grade-green.svg)]()
+<p align="center">
+  <strong>The High-Accuracy, Local-First Structural Retrieval Infrastructure.</strong><br>
+  <em>Stop guessing with vectors. Start navigating with agents.</em>
+</p>
 
-**The High-Accuracy, Local-First Agentic RAG Library.**
-*Stop searching vectors. Start navigating documents.*
+## 🚀 Overview
 
-Traditional RAG uses vector similarity to find "relevant" chunks, which often leads to **retrieval hallucinations** because models lack document context. **ApexRAG** replaces similarity search with **structural, agentic navigation**. It parses your documents into a decision tree, synthesizes a "Semantic Map" for every node, and uses an LLM agent to navigate the tree with 99.99% accuracy.
+ApexRAG has evolved from a simple RAG wrapper into a **Multi-Agent, Structural Reasoning Engine** built for enterprise deployments.
 
----
+Traditional RAG relies on vector proximity, chopping documents into arbitrary chunks and losing crucial structural context (like section headings, table definitions, and document hierarchy), leading to hallucinations. 
 
-## 🚀 Why ApexRAG?
+ApexRAG solves this by converting documents into a **Universal Document AST (Abstract Syntax Tree)** and using an Orchestrator of specialized LLM Agents (Planner, Navigator, Critic) to explicitly "walk" the document's structure to find exact, verifiable answers.
 
-| Feature | Vector RAG | **ApexRAG (Agentic)** |
-| :--- | :--- | :--- |
-| **Logic** | Semantic "Proximity" | Structural Navigation |
-| **Accuracy** | ~70-85% (Top-K) | **99.99% (Verified Leaf)** |
-| **Hallucination** | High (Context mixing) | **Near-Zero (Strict Path)** |
-| **Tables/Layouts** | Often broken | **Fully preserved via Docling** |
-| **Backtracking** | Impossible | **Native (Agentic loops)** |
-| **Latency** | Milliseconds | Seconds (High-precision) |
+## 🏗️ The 3-Phase Architecture
 
----
+### Phase 1: Structural Foundation
+- **Universal Document AST:** Documents (PDFs, Markdown, source code) are parsed into strict hierarchical trees (`ASTNode`), preserving exact paragraph-to-heading relationships.
+- **Deterministic Retrievers:** Initial filtering uses keyword density, FTS5, and structural heading overlap to locate candidate branches without expensive LLM calls.
+- **Strict Verification:** A `StrictLeafVerifier` engine empirically checks if a found node actually answers the query, acting as a firewall against hallucination.
 
-## 🏗️ How it Works
+### Phase 2: Structural Reasoning Engine
+- **Multi-Agent Orchestrator:** Complex queries are managed by three agents working in concert:
+    - **Planner Agent:** Breaks down complex, multi-hop queries (e.g., "Compare Q2 and Q3 revenue") into discrete sub-queries.
+    - **Navigator Agent:** Explores the AST tree and Semantic Map signposts to find the correct data for each sub-query.
+    - **Critic Agent:** Evaluates the aggregated context to ensure *all* sub-queries were answered before synthesizing the final response.
+- **Structural Retrieval Graph (SRG):** Nodes can have `GraphEdge` relations to other nodes (e.g., `REFERENCES_TABLE`), enabling non-linear reasoning.
 
-```mermaid
-graph TD
-    A[Query: 'What are Q3 Revenues?'] --> B{Agent at Root}
-    B -->|Scan Summaries| C[Chapter 1: Summary]
-    B -->|Scan Summaries| D[Chapter 2: Financials]
-    D -->|Enter Branch| E{Agent at Branch}
-    E -->|Evaluate| F[Q1 Data]
-    E -->|Evaluate| G[Q2 Data]
-    E -->|Evaluate| H[Q3 Data]
-    H -->|Verify| I[Leaf: Verified Q3 Revenue]
-    I --> J[Return Exact Content]
-    F -.->|Backtrack| E
-```
+### Phase 3: Enterprise Ecosystem Platform
+- **Multi-Tenant RBAC:** Core SQLAlchemy models (`NodeData`, `SemanticModelData`, `GraphEdgeData`) and FastAPI middlewares strictly enforce data isolation via `tenant_id` boundaries.
+- **Distributed Ingestion:** A `DistributedIndexer` protocol allows for massive horizontal scaling of document parsing using Celery or Redis queues.
+- **Code Intelligence:** Includes a `PythonCodeParser` that extracts ASTs from source code to enable structural code reasoning.
+- **OpenTelemetry:** Every agent action (`[PLANNING]`, `[NAVIGATING]`) is wrapped in distributed traces for production monitoring.
 
-1.  **Ingest:** Convert files (PDF/DOCX) to Markdown and build a hierarchical section tree.
-2.  **Synthesize:** Generate 30-word "Semantic Map" summaries for every node in the tree.
-3.  **Navigate:** An LLM Agent reads summaries and chooses which branch to enter.
-4.  **Verify:** Every leaf is verified against the query. If it fails, the agent backtracks and tries siblings.
+## 📦 Quick Start
 
----
-
-## ⚡ Quick Start
-
-### 1. Install
 ```bash
 pip install apex-rag
 ```
 
-### 2. Ingest & Query
 ```python
 import asyncio
-from apex_rag import ApexIndex
+from apex_rag import ApexIndex, Orchestrator
+from apex_rag.enterprise.auth.models import TenantContext
 
 async def main():
-    async with await ApexIndex.create(model="llama3.1") as index:
-        # 1. Ingest a document
-        doc_id = await index.ingest("quarterly_report.pdf")
-
-        # 2. Query with agentic navigation
-        result = await index.query("What was the Q3 revenue growth?", doc_id)
-
-        if result.verified:
-            print(f"✅ Found in {result.title}: {result.content}")
-            print(f"📍 Path: {result.path}")
+    # Setup Tenant Context
+    ctx = TenantContext(tenant_id="corp-abc", user_id="user-1", roles=["admin"])
+    
+    async with await ApexIndex.create() as index:
+        # Ingest preserving structure
+        doc_id = await index.ingest("financial_report.md", tenant_id=ctx.tenant_id)
+        
+        # Multi-Agent Reasoning Query
+        # Uses the Planner -> Navigator -> Critic loop internally
+        result = await index.orchestrate_query("Compare the revenue between Q2 and Q3", doc_id)
+        print(result)
 
 asyncio.run(main())
 ```
 
----
-
-## 🛠️ Advanced Features
-
-*   **Hybrid Root Search:** Combines BM25 keyword matching with LLM reasoning for ultra-fast document selection.
-*   **Semantic Caching:** Instant cache hits for recurring or semantically similar queries.
-*   **Multimodal Ready:** Deep integration with IBM Docling for complex table and layout extraction.
-*   **Web Dashboard:** Includes a visual tree explorer and book-style page index.
-
----
-
 ## 📖 Documentation
 
-Check out the [User Manual](./USER_MANUAL.md) for detailed guides on:
-- Production deployment with PostgreSQL.
-- Tuning navigation concurrency and LLM models.
-- Customizing the ingestion pipeline.
-
----
+- [Full Architecture Details](docs/ARCHITECTURE.md)
+- [API Reference](docs/api/apex-index.md)
 
 ## 📄 License
-MIT License. Created by [G S Abinivas].
+MIT License.

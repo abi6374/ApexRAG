@@ -1,0 +1,15 @@
+# ── Issue Template Chooser ──────────────────────────────────────────────────
+# Controls the behavior of the "New Issue" button on GitHub.
+# See: https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Read the Docs
+    url: https://github.com/abinivas-17/apex-rag#readme
+    about: Check the README and User Manual before opening an issue.
+  - name: 💬 Discussions
+    url: https://github.com/abinivas-17/apex-rag/discussions
+    about: Ask questions and share ideas with the community.
+  - name: 🔒 Report a Security Vulnerability
+    url: https://github.com/abinivas-17/apex-rag/security/advisories/new
+    about: Please report security vulnerabilities privately.

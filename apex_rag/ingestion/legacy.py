@@ -48,16 +48,18 @@ class ParsedSection:
         path:       LTree-style path, e.g. "1.2.3".
         page_start: First page this section appears on (0 = unknown).
         page_end:   Last page (inclusive).
+        image_data: Base64 or path to an image associated with this section (multimodal).
     """
 
     level: int
     title: str
     content: str
-    children: list["ParsedSection"] = field(default_factory=list)
+    children: list[ParsedSection] = field(default_factory=list)
     position: int = 1
     path: str = "1"
     page_start: int = 0
     page_end: int = 0
+    image_data: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +96,7 @@ def _parse_markdown_to_tree(markdown: str) -> list[ParsedSection]:
 
     matches = list(_HEADING_RE.finditer(markdown))
 
-    for i, match in enumerate(matches):
+    for match in matches:
         level = len(match.group(1))
         title = match.group(2).strip()
 
@@ -191,13 +193,13 @@ def _chunk_large_sections(sections: list[ParsedSection], max_chars: int = 3000) 
         if section.content and len(section.content) > max_chars and not section.children:
             chunks = _split_text(section.content, max_chars)
             if len(chunks) > 1:
-                for i, chunk_text in enumerate(chunks):
+                for chunk_idx, chunk_text in enumerate(chunks):
                     sub = ParsedSection(
                         level=section.level + 1,
-                        title=f"{section.title} (Part {i+1})",
+                        title=f"{section.title} (Part {chunk_idx+1})",
                         content=chunk_text,
-                        position=i + 1,
-                        path=build_ltree_path(section.path, i + 1),
+                        position=chunk_idx + 1,
+                        path=build_ltree_path(section.path, chunk_idx + 1),
                         page_start=section.page_start,
                         page_end=section.page_end,
                     )
@@ -210,7 +212,7 @@ def _split_text(text: str, chunk_size: int) -> list[str]:
     """Split text into chunks by double newline (paragraphs)."""
     paragraphs = text.split("\n\n")
     chunks = []
-    current_chunk = []
+    current_chunk: list[str] = []
     current_len = 0
 
     for p in paragraphs:
@@ -245,10 +247,21 @@ Content:
 
 Summary (30 words max):"""
 
+_VISION_SUMMARY_PROMPT = """\
+You are a vision-enabled document indexing assistant.
+Analyze the provided image and its context to generate a summary in EXACTLY 30 words or fewer.
+Describe what this image represents (chart, diagram, photo) and its key data or message.
+
+Section title: {title}
+Context: {content}
+
+Vision Summary (30 words max):"""
+
 
 class Summariser:
     """
     Generates 30-word Semantic Map summaries using a pluggable LLM.
+    Supports multimodal inputs (text + images).
 
     Args:
         llm:            An instance implementing the AsyncLLM protocol.
@@ -258,33 +271,46 @@ class Summariser:
     def __init__(
         self,
         llm: AsyncLLM,
-        max_concurrent: int = 4,
+        max_concurrent: int = 10,  # Increased for faster large-doc ingestion
     ) -> None:
         self._llm = llm
         self._semaphore = asyncio.Semaphore(max_concurrent)
 
     @async_retry(max_attempts=3, backoff_base=2.0, exceptions=(Exception,))
-    async def summarise(self, title: str, content: str) -> str:
+    async def summarise(self, title: str, content: str, image_data: str | None = None) -> str:
         """
-        Call Ollama to produce a ≤30-word summary for a section.
-
-        Falls back to a truncated version of the content if Ollama is
-        unavailable after all retries.
+        Call LLM to produce a ≤30-word summary for a section.
+        If image_data is provided, uses vision capabilities.
         """
-        if not content.strip():
+        if not content.strip() and not image_data:
             return title[:120]
 
-        prompt = _SUMMARY_PROMPT.format(
-            title=title,
-            content=truncate(content, 2000),
-        )
-
-        async with self._semaphore:
-            summary = await self._llm.generate(
-                prompt=prompt,
-                temperature=0.1,
-                max_tokens=60,
+        if image_data:
+            prompt = _VISION_SUMMARY_PROMPT.format(
+                title=title,
+                content=truncate(content, 1000),
             )
+        else:
+            prompt = _SUMMARY_PROMPT.format(
+                title=title,
+                content=truncate(content, 2000),
+            )
+
+        try:
+            async with self._semaphore:
+                summary = await self._llm.generate(
+                    prompt=prompt,
+                    temperature=0.1,
+                    max_tokens=60,
+                    images=[image_data] if image_data else None,
+                )
+        except Exception as e:
+            logger.error("LLM generation failed for section %r: %s", title, e)
+            raise
+
+        if not summary or not summary.strip():
+            logger.warning("LLM returned empty summary for section %r. Content length: %d", title, len(content))
+            return title[:120]
 
         summary = summary.strip()
         # Normalise: strip newlines, truncate to 300 chars just in case
@@ -293,13 +319,13 @@ class Summariser:
 
     async def summarise_many(
         self,
-        items: list[tuple[str, str]],  # (title, content)
+        items: list[tuple[str, str, str | None]],  # (title, content, image_data)
     ) -> list[str]:
         """
-        Summarise many (title, content) pairs concurrently.
+        Summarise many items concurrently.
         Concurrency is bounded by `self._semaphore`.
         """
-        tasks = [self.summarise(title, content) for title, content in items]
+        tasks = [self.summarise(t, c, img) for t, c, img in items]
         return await asyncio.gather(*tasks, return_exceptions=False)
 
 
@@ -330,6 +356,7 @@ class IngestionEngine:
         self._summariser = summariser
         self._backend = parser_backend
         self._executor = executor or ThreadPoolExecutor(max_workers=2, thread_name_prefix="apex_parse")
+        self._owns_executor = executor is None
 
     # -- Public API ---------------------------------------------------------
 
@@ -423,6 +450,30 @@ class IngestionEngine:
         )
         return doc_id
 
+    # -- Lifecycle ----------------------------------------------------------
+
+    def shutdown(self, wait: bool = True) -> None:
+        """
+        Shut down the internal thread pool executor.
+
+        Call this when the engine is no longer needed to free up threads.
+        Safe to call multiple times; no-op if an external executor was
+        passed at construction time.
+
+        Args:
+            wait: If True (default), wait for all running tasks to finish.
+        """
+        if self._owns_executor:
+            self._executor.shutdown(wait=wait)
+            logger.debug("IngestionEngine executor shut down")
+
+    def __del__(self) -> None:
+        """Ensure executor is shut down on garbage collection."""
+        if hasattr(self, '_owns_executor') and self._owns_executor:
+            executor = getattr(self, '_executor', None)
+            if executor is not None:
+                executor.shutdown(wait=False)
+
     # -- Internal helpers ---------------------------------------------------
 
     async def _convert_to_markdown(self, path: Path) -> str:
@@ -445,7 +496,7 @@ class IngestionEngine:
     def _markitdown_convert(path: Path) -> str:
         """Synchronous markitdown conversion (runs in thread pool)."""
         try:
-            from markitdown import MarkItDown  # type: ignore[import]
+            from markitdown import MarkItDown
             md = MarkItDown()
             result = md.convert(str(path))
             return result.text_content
@@ -455,11 +506,31 @@ class IngestionEngine:
 
     @staticmethod
     def _docling_convert(path: Path) -> str:
-        """Synchronous docling conversion (runs in thread pool)."""
+        """
+        Synchronous docling conversion (runs in thread pool).
+        Extracts images and embeds them as base64 in the markdown
+        (or placeholders that we can parse).
+        """
         try:
-            from docling.document_converter import DocumentConverter  # type: ignore[import]
-            converter = DocumentConverter()
+            from docling.datamodel.base_models import InputFormat
+            from docling.document_converter import (  # type: ignore[attr-defined]
+                DocumentConverter,
+                PdfPipelineOptions,
+            )
+
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.images_scale = 2.0
+            pipeline_options.generate_page_images = True
+            pipeline_options.table_structure_options.do_rectification = True
+
+            converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: pipeline_options
+                }
+            )
             result = converter.convert(str(path))
+
+            # Export to markdown with image references
             return result.document.export_to_markdown()
         except ImportError:
             logger.warning("docling not installed; reading file as plain text.")
@@ -486,7 +557,7 @@ class IngestionEngine:
         # Batch-summarise all sibling sections at this level
         summaries: list[str]
         if synthesize and self._summariser:
-            items = [(s.title, s.content) for s in sections]
+            items = [(s.title, s.content, s.image_data) for s in sections]
             summaries = await self._summariser.summarise_many(items)
         else:
             summaries = [
@@ -496,7 +567,7 @@ class IngestionEngine:
         # Persist nodes and recurse into children
         child_tasks = []
         for section, summary in zip(sections, summaries, strict=True):
-            is_leaf = not section.children and bool(section.content)
+            is_leaf = not section.children and (bool(section.content) or bool(section.image_data))
             node = DocumentNode(
                 doc_id=doc_id,
                 parent_id=parent_id,
@@ -545,9 +616,9 @@ class IngestionEngine:
                     )
                 )
 
-        # Recurse into children concurrently
-        if child_tasks:
-            await asyncio.gather(*child_tasks)
+        # Recurse into children sequentially (SQLAlchemy sessions are NOT thread-safe)
+        for task in child_tasks:
+            await task
 
     @staticmethod
     def _compute_doc_id(path: Path) -> str:

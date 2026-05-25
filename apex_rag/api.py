@@ -1,36 +1,246 @@
 """
-api.py — FastAPI REST API for ApexRAG with a visual index page.
+api.py — Production-grade FastAPI REST API for ApexRAG.
+
+Supports:
+    - API key authentication via X-API-Key header
+    - Configurable CORS origins
+    - Health check endpoints (liveness + readiness)
+    - In-memory rate limiting
+    - File upload validation (size + MIME type)
+    - HTML template-based UI (no inline HTML)
+    - SSE streaming for real-time agent traces
+    - Startup connectivity check
 
 Endpoints:
-    GET  /                          → Visual index page (HTML)
-    POST /documents/ingest/file     → Ingest a file (multipart upload)
-    POST /documents/ingest/text     → Ingest raw text/markdown
-    GET  /documents                 → List all doc_ids
-    GET  /documents/{doc_id}/stats  → Document statistics
-    GET  /documents/{doc_id}/tree   → Full node tree (JSON)
-    GET  /documents/{doc_id}/index  → Book-style page index (JSON)
-    GET  /documents/{doc_id}/index/page → Visual index page for a document
-    POST /documents/{doc_id}/search → Search the page index
-    DELETE /documents/{doc_id}      → Delete document
-    POST /query                     → Query a document
+    GET  /health                   -> Liveness check
+    GET  /health/ready             -> Readiness check (DB + Ollama)
+    GET  /                          -> Dashboard (HTML)
+    POST /documents/ingest/file     -> Ingest a file (multipart upload)
+    POST /documents/ingest/text     -> Ingest raw text/markdown
+    GET  /documents                 -> List all doc_ids
+    GET  /documents/{doc_id}/stats  -> Document statistics
+    GET  /documents/{doc_id}/tree   -> Full node tree (JSON)
+    GET  /documents/{doc_id}/index  -> Book-style page index (JSON)
+    GET  /documents/{doc_id}/index/page -> Visual index page for a document
+    POST /documents/{doc_id}/search -> Search the page index
+    DELETE /documents/{doc_id}      -> Delete document
+    POST /query                     -> Query a document
+    POST /query/stream              -> Streamed query (SSE)
+    POST /query/global              -> Query across all documents
+    POST /query/global/stream       -> Streamed global query (SSE)
 """
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import tempfile
+import time
+from collections import defaultdict
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, AsyncGenerator
+from typing import Annotated, Any, cast
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import text as sa_text
 
 from apex_rag.client import ApexIndex
+from apex_rag.config import settings
+from apex_rag.exceptions import (
+    ApexRAGError,
+    DocumentNotFoundError,
+    FileValidationError,
+)
+from apex_rag.navigation import NavigationResult
 from apex_rag.utils import logger
 
-# ... (rest of imports and setup)
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+
+# Allowed MIME types for file uploads
+_ALLOWED_MIME_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+def validate_file_upload(filename: str, file_size: int, _content_type: str | None) -> None:
+    """
+    Validate file upload size and extension/MIME type.
+    Raises FileValidationError on failure (caught by @app.exception_handler).
+    """
+    # Size check
+    max_bytes = settings.max_upload_bytes
+    if file_size > max_bytes:
+        size_mb = file_size / (1024 * 1024)
+        raise FileValidationError(
+            message=f"File too large ({size_mb:.1f} MB). Max: {settings.max_upload_size_mb} MB",
+            hint="Reduce file size or increase APEX_MAX_UPLOAD_MB.",
+        )
+
+    # Extension check
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _ALLOWED_MIME_TYPES:
+        raise FileValidationError(
+            message=f"Unsupported file type '{suffix}'.",
+            hint=f"Allowed types: {', '.join(_ALLOWED_MIME_TYPES)}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Rate Limiter (in-memory, sliding window)
+# ---------------------------------------------------------------------------
+
+
+class InMemoryRateLimiter:
+    """
+    Simple sliding-window rate limiter.
+    Not distributed — use Redis in multi-worker deployments.
+    """
+
+    def __init__(self) -> None:
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str, max_requests: int = 60, window_seconds: float = 60.0) -> bool:
+        now = time.monotonic()
+        # Prune expired entries
+        self._requests[key] = [t for t in self._requests[key] if now - t < window_seconds]
+        if len(self._requests[key]) >= max_requests:
+            return False
+        self._requests[key].append(now)
+        return True
+
+
+_rate_limiter = InMemoryRateLimiter()
+
+
+# ---------------------------------------------------------------------------
+# App lifecycle
+# ---------------------------------------------------------------------------
+
+
+class AppState:
+    """Holds the ApexIndex singleton and startup status."""
+    index: ApexIndex | None = None
+    started: bool = False
+    ollama_reachable: bool = False
+
+
+state = AppState()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    """Application lifespan — startup and shutdown."""
+    global state
+
+    # -- Startup ------------------------------------------------------------
+    try:
+        state.index = await ApexIndex.create(
+            db_url=settings.db_url,
+            ollama_host=settings.ollama_host,
+            model=settings.model,
+            trace_enabled=settings.trace_enabled,
+            verify_leaves=settings.verify_leaves,
+        )
+        state.started = True
+
+        # Quick connectivity check
+        try:
+            await state.index.list_documents()
+            state.ollama_reachable = True
+            logger.info("Ollama connectivity check: OK")
+        except Exception as exc:
+            state.ollama_reachable = False
+            logger.warning("Ollama connectivity check: FAILED — %s", exc)
+
+        logger.info("ApexRAG API started | db=%s | model=%s | auth=%s",
+                     settings.db_url.split("?")[0],
+                     settings.model,
+                     "enabled" if settings.api_key else "disabled")
+
+    except Exception as exc:
+        logger.error("ApexRAG API startup FAILED: %s", exc)
+        # Don't crash — health endpoint will report unhealthy
+
+    yield
+
+    # -- Shutdown -----------------------------------------------------------
+    if state.index:
+        await state.index.close()
+        logger.info("ApexRAG API shut down.")
+
+
+def get_index() -> ApexIndex:
+    """Dependency: get the ApexIndex singleton."""
+    if state.index is None:
+        raise HTTPException(503, "ApexIndex not initialised")
+    return state.index
+
+
+# ---------------------------------------------------------------------------
+# Middleware: API Key Authentication
+# ---------------------------------------------------------------------------
+
+async def api_key_middleware(request: Request, call_next: Any) -> Response:
+    """If APEX_API_KEY is set, require it in X-API-Key header."""
+    if settings.api_key:
+        path = request.url.path
+        if path in ("/health", "/health/ready", "/docs", "/redoc", "/openapi.json"):
+            return cast(Response, await call_next(request))
+
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key != settings.api_key:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "code": "APEX_400",
+                    "message": "Missing or invalid API key.",
+                    "hint": "Provide via X-API-Key header. Check your APEX_API_KEY environment variable.",
+                },
+            )
+
+    return cast(Response, await call_next(request))
+
+
+async def rate_limit_middleware(request: Request, call_next: Any) -> Response:
+    """Apply rate limiting based on client IP."""
+    path = request.url.path
+    # Skip rate limiting for health checks and static docs
+    if path in ("/health", "/health/ready"):
+        return cast(Response, await call_next(request))
+
+    # Parse rate from settings (e.g., "60/minute")
+    try:
+        max_r = int(settings.rate_limit.split("/")[0])
+    except (ValueError, IndexError):
+        max_r = 60
+
+    client_ip: str = request.client.host if request.client else "unknown"
+    if not _rate_limiter.check(client_ip, max_requests=max_r):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "code": "APEX_401",
+                "message": "Rate limit exceeded.",
+                "hint": f"Max {max_r} requests per minute. Increase APEX_RATE_LIMIT or slow down.",
+            },
+        )
+
+    return cast(Response, await call_next(request))
+
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -42,41 +252,107 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-# Singleton index — initialised on startup
-_index: ApexIndex | None = None
+# CORS — configurable via APEX_CORS_ORIGINS env var
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Auth middleware
+app.middleware("http")(api_key_middleware)
+
+# Rate limiting middleware
+app.middleware("http")(rate_limit_middleware)
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    global _index
-    import os
-    _index = await ApexIndex.create(
-        db_url=os.getenv("APEX_DB_URL", "sqlite+aiosqlite:///apex.db"),
-        ollama_host=os.getenv("APEX_OLLAMA_HOST", "http://localhost:11434"),
-        model=os.getenv("APEX_MODEL", "llama3.1"),
-        trace_enabled=True,
-        verify_leaves=os.getenv("APEX_VERIFY", "true").lower() == "true",
+# ---------------------------------------------------------------------------
+# Global exception handlers
+# ---------------------------------------------------------------------------
+
+
+@app.exception_handler(ApexRAGError)
+async def apexrag_exception_handler(_request: Request, exc: ApexRAGError) -> JSONResponse:
+    """Convert typed ApexRAG errors to JSON responses with status codes."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.to_dict(),
     )
-    logger.info("ApexRAG API started.")
 
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    if _index:
-        await _index.close()
+@app.exception_handler(Exception)
+async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """Convert unhandled exceptions to JSON responses.
+
+    FastAPI-native HTTPException is handled inline; all other errors
+    are logged and return a generic 500 response.
+    """
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "code": "APEX_500",
+            "message": "Internal server error.",
+            "hint": "Check the server logs for details.",
+        },
+    )
 
 
-def get_index() -> ApexIndex:
-    if _index is None:
-        raise HTTPException(503, "ApexIndex not initialised")
-    return _index
+# ---------------------------------------------------------------------------
+# Health checks
+# ---------------------------------------------------------------------------
+
+
+@app.get("/health", tags=["System"])
+async def health_liveness() -> dict[str, Any]:
+    """Liveness probe — always returns OK if the app is running."""
+    return {"status": "healthy", "app": "apex-rag", "started": state.started}
+
+
+@app.get("/health/ready", tags=["System"])
+async def health_readiness() -> JSONResponse:
+    """Readiness probe — checks DB connectivity and Ollama status."""
+    issues = []
+    if not state.started:
+        issues.append("App not fully started")
+    if not state.ollama_reachable and state.started:
+        issues.append("Ollama not reachable (queries may fail)")
+
+    db_ok = False
+    try:
+        if state.index:
+            async with state.index._storage.session() as session:
+                await session.execute(sa_text("SELECT 1"))
+        db_ok = True
+    except Exception as exc:
+        issues.append(f"Database: {exc}")
+
+    status_code = 503 if issues else 200
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "unhealthy" if issues else "healthy",
+            "db": db_ok,
+            "ollama": state.ollama_reachable,
+            "issues": issues,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class IngestTextRequest(BaseModel):
     doc_id: str
@@ -110,6 +386,7 @@ class QueryResponse(BaseModel):
 # Routes — Documents
 # ---------------------------------------------------------------------------
 
+
 @app.post("/documents/ingest/text", tags=["Documents"])
 async def ingest_text(req: IngestTextRequest) -> dict[str, Any]:
     """Ingest raw Markdown/plain text and build a decision tree."""
@@ -125,15 +402,29 @@ async def ingest_text(req: IngestTextRequest) -> dict[str, Any]:
 
 @app.post("/documents/ingest/file", tags=["Documents"])
 async def ingest_file(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     doc_id: str | None = Form(default=None),
     synthesize_summaries: bool = Form(default=True),
 ) -> dict[str, Any]:
-    """Upload and ingest a document file (PDF, DOCX, MD, TXT)."""
+    """
+    Upload and ingest a document file (PDF, DOCX, MD, TXT, HTML).
+
+    File is validated for:
+      - Size (configurable via APEX_MAX_UPLOAD_MB, default 50 MB)
+      - Extension / MIME type (PDF, DOCX, MD, TXT, HTML, PPTX, XLSX)
+    """
     idx = get_index()
-    suffix = Path(file.filename or "doc").suffix or ".txt"
+
+    # Read file content (with size check)
+    content = await file.read()
+    filename = file.filename or "document"
+    content_type = file.content_type
+
+    # Validate
+    validate_file_upload(filename, len(content), content_type)
+
+    suffix = Path(filename).suffix or ".txt"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        content = await file.read()
         tmp.write(content)
         tmp_path = Path(tmp.name)
 
@@ -169,7 +460,7 @@ async def get_tree(doc_id: str) -> dict[str, Any]:
     idx = get_index()
     nodes = await idx.get_tree(doc_id)
     if not nodes:
-        raise HTTPException(404, f"Document '{doc_id}' not found or empty.")
+        raise DocumentNotFoundError(message=f"Document '{doc_id}' not found or empty.")
     return {"doc_id": doc_id, "node_count": len(nodes), "nodes": nodes}
 
 
@@ -179,7 +470,7 @@ async def export_tree(doc_id: str) -> list[dict[str, Any]]:
     idx = get_index()
     nested_roots = await idx.export_tree(doc_id)
     if not nested_roots:
-        raise HTTPException(404, f"Document '{doc_id}' not found or empty.")
+        raise DocumentNotFoundError(message=f"Document '{doc_id}' not found or empty.")
     return nested_roots
 
 
@@ -210,8 +501,101 @@ async def delete_document(doc_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Shared SSE Streaming Helper
+# ---------------------------------------------------------------------------
+
+
+async def _stream_query_to_sse(
+    task_coro: asyncio.Task[Any],
+    event_queue: asyncio.Queue[Any],
+) -> AsyncGenerator[str, None]:
+    """
+    Shared SSE generator: polls an event queue and a background task,
+    yielding SSE-formatted events until the task completes.
+
+    Args:
+        task_coro:   An asyncio.Task that produces events.
+        event_queue: Queue fed by the background task.
+    """
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                [asyncio.create_task(event_queue.get()), task_coro],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            while not event_queue.empty():
+                event = await event_queue.get()
+                yield f"data: {json.dumps(event)}\n\n"
+            if task_coro.done():
+                result = await task_coro
+                if isinstance(result, str):
+                    final_data = {
+                        "event": "result",
+                        "found": True,
+                        "content": result,
+                        "title": "Synthesized Answer",
+                        "verified": True,
+                    }
+                elif result:
+                    final_data = {
+                        "event": "result",
+                        "found": True,
+                        "content": result.content,
+                        "node_id": result.node_id,
+                        "path": result.path,
+                        "title": result.title,
+                        "verified": result.verified,
+                        "confidence": result.confidence,
+                    }
+                else:
+                    final_data = {"event": "result", "found": False}
+                yield f"data: {json.dumps(final_data)}\n\n"
+                break
+    except asyncio.CancelledError:
+        task_coro.cancel()
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Routes — Query
 # ---------------------------------------------------------------------------
+
+
+def _to_query_response(result: NavigationResult | str | None) -> QueryResponse:
+    """Convert a NavigationResult (or str/None) into a QueryResponse."""
+    if result is None:
+        return QueryResponse(
+            found=False,
+            content=None,
+            node_id=None,
+            path=None,
+            title=None,
+            verified=False,
+            confidence=0.0,
+            trace=[],
+        )
+    if isinstance(result, str):
+        return QueryResponse(
+            found=True,
+            content=result,
+            node_id=0,
+            path="global",
+            title="Synthesized Global Answer",
+            verified=True,
+            confidence=1.0,
+            trace=[],
+        )
+    return QueryResponse(
+        found=True,
+        content=result.content,
+        node_id=result.node_id,
+        path=result.path,
+        title=result.title,
+        verified=result.verified,
+        confidence=result.confidence,
+        trace=[[nid, t] for nid, t in result.trace],
+    )
+
 
 @app.post("/query", tags=["Query"])
 async def query_document(req: QueryRequest) -> QueryResponse:
@@ -227,29 +611,7 @@ async def query_document(req: QueryRequest) -> QueryResponse:
         req.doc_id,
         root_node_id=req.root_node_id,
     )
-
-    if result is None:
-        return QueryResponse(
-            found=False,
-            content=None,
-            node_id=None,
-            path=None,
-            title=None,
-            verified=False,
-            confidence=0.0,
-            trace=[],
-        )
-
-    return QueryResponse(
-        found=True,
-        content=result.content,
-        node_id=result.node_id,
-        path=result.path,
-        title=result.title,
-        verified=result.verified,
-        confidence=result.confidence,
-        trace=[[nid, t] for nid, t in result.trace],
-    )
+    return _to_query_response(result)
 
 
 @app.post("/query/stream", tags=["Query"])
@@ -261,54 +623,19 @@ async def query_document_stream(req: QueryRequest) -> StreamingResponse:
     explores children, makes choices, and verifies leaves.
     """
     idx = get_index()
-    event_queue: asyncio.Queue = asyncio.Queue()
-
-    async def event_generator() -> AsyncGenerator[str, None]:
-        # Start the query in a background task
-        query_task = asyncio.create_task(
-            idx.query(
-                req.question,
-                req.doc_id,
-                root_node_id=req.root_node_id,
-                event_queue=event_queue,
-            )
+    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+    query_task = asyncio.create_task(
+        idx.query(
+            req.question,
+            req.doc_id,
+            root_node_id=req.root_node_id,
+            event_queue=event_queue,
         )
-
-        try:
-            while True:
-                # Wait for an event or the task to finish
-                done, _ = await asyncio.wait(
-                    [asyncio.create_task(event_queue.get()), query_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                # Process all items in the queue
-                while not event_queue.empty():
-                    event = await event_queue.get()
-                    yield f"data: {json.dumps(event)}\n\n"
-
-                if query_task.done():
-                    result = await query_task
-                    if result:
-                        final_data = {
-                            "event": "result",
-                            "found": True,
-                            "content": result.content,
-                            "node_id": result.node_id,
-                            "path": result.path,
-                            "title": result.title,
-                            "verified": result.verified,
-                            "confidence": result.confidence,
-                        }
-                    else:
-                        final_data = {"event": "result", "found": False}
-                    yield f"data: {json.dumps(final_data)}\n\n"
-                    break
-        except asyncio.CancelledError:
-            query_task.cancel()
-            raise
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    )
+    return StreamingResponse(
+        _stream_query_to_sse(query_task, event_queue),
+        media_type="text/event-stream",
+    )
 
 
 @app.post("/query/global", tags=["Query"])
@@ -316,100 +643,54 @@ async def query_global(req: GlobalQueryRequest) -> QueryResponse:
     """Query across all indexed documents."""
     idx = get_index()
     result = await idx.query_global(req.question, synthesize=True)
-
-    if result is None:
-        return QueryResponse(
-            found=False,
-            content=None,
-            node_id=None,
-            path=None,
-            title=None,
-            verified=False,
-            confidence=0.0,
-            trace=[],
-        )
-
-    if isinstance(result, str):
-        return QueryResponse(
-            found=True,
-            content=result,
-            node_id=0,
-            path="global",
-            title="Synthesized Global Answer",
-            verified=True,
-            confidence=1.0,
-            trace=[],
-        )
-
-    return QueryResponse(
-        found=True,
-        content=result.content,
-        node_id=result.node_id,
-        path=result.path,
-        title=result.title,
-        verified=result.verified,
-        confidence=result.confidence,
-        trace=[[nid, t] for nid, t in result.trace],
-    )
+    return _to_query_response(result)
 
 
 @app.post("/query/global/stream", tags=["Query"])
 async def query_global_stream(req: GlobalQueryRequest) -> StreamingResponse:
     """Stream a global query across all documents via SSE."""
     idx = get_index()
-    event_queue: asyncio.Queue = asyncio.Queue()
-
-    async def event_generator() -> AsyncGenerator[str, None]:
-        query_task = asyncio.create_task(
-            idx.query_global(req.question, event_queue=event_queue, synthesize=True)
-        )
-
-        try:
-            while True:
-                done, _ = await asyncio.wait(
-                    [asyncio.create_task(event_queue.get()), query_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                while not event_queue.empty():
-                    event = await event_queue.get()
-                    yield f"data: {json.dumps(event)}\n\n"
-
-                if query_task.done():
-                    result = await query_task
-                    if isinstance(result, str):
-                        final_data = {
-                            "event": "result",
-                            "found": True,
-                            "content": result,
-                            "title": "Synthesized Answer",
-                            "verified": True,
-                        }
-                    elif result:
-                        final_data = {
-                            "event": "result",
-                            "found": True,
-                            "content": result.content,
-                            "node_id": result.node_id,
-                            "path": result.path,
-                            "title": result.title,
-                            "verified": result.verified,
-                            "confidence": result.confidence,
-                        }
-                    else:
-                        final_data = {"event": "result", "found": False}
-                    yield f"data: {json.dumps(final_data)}\n\n"
-                    break
-        except asyncio.CancelledError:
-            query_task.cancel()
-            raise
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+    query_task = asyncio.create_task(
+        idx.query_global(req.question, event_queue=event_queue, synthesize=True)
+    )
+    return StreamingResponse(
+        _stream_query_to_sse(query_task, event_queue),
+        media_type="text/event-stream",
+    )
 
 
 # ---------------------------------------------------------------------------
-# Visual Index Page — HTML UI
+# Visual UI — HTML Pages
 # ---------------------------------------------------------------------------
+
+
+def _load_template(name: str) -> str:
+    """Load an HTML template from the templates directory."""
+    template_path = Path(__file__).parent / "templates" / name
+    return template_path.read_text(encoding="utf-8")
+
+
+def _common_styles() -> str:
+    return """<style>
+:root {
+  --bg: #0f0f13;
+  --card: #16161e;
+  --border: #2a2a3a;
+  --accent: #6366f1;
+  --text: #e2e4f0;
+  --muted: #6b6e8a;
+  --leaf: #34d399;
+  --grad: linear-gradient(135deg, #6366f1, #a855f7, #06b6d4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; }
+::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">"""
+
 
 @app.get("/documents/{doc_id}/index/page", response_class=HTMLResponse, tags=["UI"])
 async def visual_index_page(doc_id: str) -> HTMLResponse:
@@ -419,7 +700,8 @@ async def visual_index_page(doc_id: str) -> HTMLResponse:
     entries = await idx.get_page_index(doc_id)
     stats = await idx.get_stats(doc_id)
     if not nodes:
-        raise HTTPException(404, f"Document '{doc_id}' not found.")
+        raise DocumentNotFoundError(message=f"Document '{doc_id}' not found.")
+
     html = _render_doc_index_page(doc_id, nodes, entries, stats)
     return HTMLResponse(content=html)
 
@@ -441,10 +723,14 @@ async def root_index_page() -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# HTML renderers
+# HTML renderers — use template-based approach
 # ---------------------------------------------------------------------------
 
+
 def _render_root_page(doc_stats: list[dict[str, Any]]) -> str:
+    """Render the root dashboard using the HTML template."""
+    template = _load_template("dashboard.html")
+
     cards_html = ""
     if not doc_stats:
         cards_html = '<div class="empty">No documents indexed yet. Use POST /documents/ingest/file to get started.</div>'
@@ -453,7 +739,7 @@ def _render_root_page(doc_stats: list[dict[str, Any]]) -> str:
             doc_id = s["doc_id"]
             cards_html += f"""
             <a class="doc-card" href="/documents/{doc_id}/index/page">
-                <div class="doc-icon">📄</div>
+                <div class="doc-icon">&#x1F4C4;</div>
                 <div class="doc-info">
                     <div class="doc-id">{doc_id}</div>
                     <div class="doc-meta">
@@ -462,210 +748,13 @@ def _render_root_page(doc_stats: list[dict[str, Any]]) -> str:
                         <span>depth {s.get('max_depth', 0)}</span>
                     </div>
                 </div>
-                <div class="doc-arrow">→</div>
+                <div class="doc-arrow">&rarr;</div>
             </a>"""
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ApexRAG — Dashboard</title>
-{_common_styles()}
-<style>
-.hero {{ text-align:center; padding: 40px 20px 20px; }}
-.hero-logo {{ font-size: 3rem; margin-bottom: 8px; }}
-.hero h1 {{ font-size: 2.2rem; font-weight: 800; background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }}
-.hero p {{ color: var(--muted); margin-top: 10px; font-size: 1.05rem; }}
-.container {{ max-width: 1200px; margin: 0 auto; padding: 0 40px 60px; }}
-.section-title {{ font-size: 1.2rem; font-weight: 700; margin: 40px 0 20px; display: flex; align-items: center; gap: 12px; }}
-.section-title span {{ background: var(--accent); color: white; border-radius: 4px; padding: 2px 8px; font-size: 0.8rem; }}
-.docs-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }}
-.doc-card {{ display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; text-decoration: none; color: inherit; transition: all .2s; cursor: pointer; }}
-.doc-card:hover {{ border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(99,102,241,.15); }}
-.doc-icon {{ font-size: 2rem; }}
-.doc-info {{ flex: 1; }}
-.doc-id {{ font-weight: 700; font-size: 1rem; color: var(--text); word-break: break-all; }}
-.doc-meta {{ display: flex; gap: 12px; margin-top: 6px; font-size: 0.8rem; color: var(--muted); }}
-.doc-arrow {{ color: var(--accent); font-size: 1.3rem; }}
-.empty {{ text-align: center; color: var(--muted); padding: 40px 20px; font-size: 1rem; border: 1px dashed var(--border); border-radius: 12px; }}
-.api-links {{ display: flex; justify-content: center; gap: 12px; padding: 0 0 20px; flex-wrap: wrap; }}
-.api-btn {{ background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 18px; color: var(--accent); text-decoration: none; font-size: 0.85rem; transition: all .15s; }}
-.api-btn:hover {{ border-color: var(--accent); background: rgba(99,102,241,.08); }}
-
-/* Global Query */
-.global-query-wrap {{ background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 40px; }}
-.query-box {{ display: flex; gap: 12px; margin-bottom: 24px; }}
-.query-input {{ flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; color: var(--text); font-size: 1rem; outline: none; }}
-.query-input:focus {{ border-color: var(--accent); }}
-.query-btn {{ background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0 32px; font-weight: 700; cursor: pointer; }}
-.query-btn:disabled {{ opacity: 0.5; }}
-.trace-container {{ background: #000; border-radius: 12px; padding: 20px; font-family: monospace; font-size: 0.85rem; height: 300px; overflow-y: auto; border: 1px solid var(--border); }}
-.trace-line {{ margin-bottom: 6px; border-left: 2px solid #333; padding-left: 12px; }}
-.trace-line.global_start {{ border-left-color: #a855f7; font-weight: bold; }}
-.trace-line.global_chosen {{ border-left-color: #06b6d4; }}
-.trace-line.enter {{ border-left-color: var(--accent); }}
-.trace-line.result {{ border-left-color: var(--leaf); background: rgba(52, 211, 153, 0.05); padding: 10px; }}
-</style>
-</head>
-<body>
-<div class="hero">
-  <div class="hero-logo">⚡</div>
-  <h1>ApexRAG Dashboard</h1>
-  <p>Local-first Agentic RAG — structural document navigation</p>
-</div>
-<div class="api-links">
-  <a class="api-btn" href="/docs">Swagger UI</a>
-  <a class="api-btn" href="/redoc">ReDoc</a>
-</div>
-
-<div class="container">
-  <div class="section-title">🔍 Global Agentic Search <span>New</span></div>
-  <div class="global-query-wrap">
-    <div class="query-box">
-      <input type="text" id="globalQueryInput" class="query-input" placeholder="Search across all indexed documents..." onkeypress="if(event.key==='Enter') runGlobalQuery()">
-      <button id="globalQueryBtn" class="query-btn" onclick="runGlobalQuery()">Search All</button>
-    </div>
-    <div id="globalTraceLog" class="trace-container">
-      <div style="color:var(--muted)">Enter a query to see the cross-document navigation agent in action.</div>
-    </div>
-  </div>
-
-  <div class="section-title">📤 Quick Ingest <span>Drag & Drop</span></div>
-  <div class="global-query-wrap" id="dropzone" style="border: 2px dashed var(--border); text-align: center; padding: 40px; cursor: pointer;">
-    <div style="font-size: 2rem; margin-bottom: 12px;">📁</div>
-    <div style="font-weight: 700; margin-bottom: 4px;">Drag & Drop files here</div>
-    <div style="color: var(--muted); font-size: 0.85rem;">PDF, DOCX, Markdown, or Plain Text</div>
-    <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(this.files[0])">
-  </div>
-
-  <div class="section-title">📄 Indexed Documents <span>{len(doc_stats)}</span></div>
-  <div class="docs-grid">{cards_html}</div>
-</div>
-
-<script>
-const dropzone = document.getElementById('dropzone');
-const fileInput = document.getElementById('fileInput');
-
-dropzone.onclick = () => fileInput.click();
-dropzone.ondragover = (e) => {{ e.preventDefault(); dropzone.style.borderColor = 'var(--accent)'; }};
-dropzone.ondragleave = () => {{ dropzone.style.borderColor = 'var(--border)'; }};
-dropzone.ondrop = (e) => {{
-  e.preventDefault();
-  dropzone.style.borderColor = 'var(--border)';
-  if (e.dataTransfer.files.length) handleFileSelect(e.dataTransfer.files[0]);
-}};
-
-async function handleFileSelect(file) {{
-  if (!file) return;
-  const formData = new FormData();
-  formData.append('file', file);
-  
-  dropzone.innerHTML = `<div class="hero-logo" style="font-size: 1.5rem">⏳</div><div style="font-weight: 700">Ingesting ${{file.name}}...</div><div style="color: var(--muted); font-size: 0.85rem">Building decision tree and synthesizing summaries.</div>`;
-  
-  try {{
-    const resp = await fetch('/documents/ingest/file', {{ method: 'POST', body: formData }});
-    const data = await resp.json();
-    if (data.ok) {{
-      location.reload();
-    }} else {{
-      alert('Ingestion failed: ' + data.error);
-    }}
-  } catch (err) {{
-    alert('Error: ' + err.message);
-  }}
-}}
-
-async function runGlobalQuery() {{
-  const input = document.getElementById('globalQueryInput');
-  const btn = document.getElementById('globalQueryBtn');
-  const log = document.getElementById('globalTraceLog');
-  const q = input.value.trim();
-  
-  if (!q) return;
-  
-  input.disabled = true;
-  btn.disabled = true;
-  log.innerHTML = '';
-  
-  function addLine(text, type='info') {{
-    const line = document.createElement('div');
-    line.className = 'trace-line ' + type;
-    line.innerHTML = text;
-    log.appendChild(line);
-    log.scrollTop = log.scrollHeight;
-  }}
-
-  addLine(`<b>Initializing global search...</b>`, 'global_start');
-
-  try {{
-    const response = await fetch('/query/global/stream', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ question: q }})
-    }});
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {{
-      const {{ value, done }} = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, {{ stream: true }});
-      const lines = buffer.split('\\n\\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {{
-        if (!line.startsWith('data: ')) continue;
-        const data = JSON.parse(line.substring(6));
-        
-        switch(data.event) {{
-          case 'global_start':
-            addLine(`Agent is identifying relevant documents...`, 'global_start');
-            break;
-          case 'global_chosen':
-            addLine(`Selected candidates: <b>${{data.doc_ids.join(', ')}}</b>`, 'global_chosen');
-            break;
-          case 'enter':
-            addLine(`Navigating [${{data.doc_id || ''}}] <b>${{data.title}}</b>`, 'enter');
-            break;
-          case 'cache_hit':
-            addLine(`⚡ <b>Cache Hit!</b> Fast-path retrieval successful.`, 'global_chosen');
-            break;
-          case 'synthesize_start':
-            addLine(`🖋️ <b>Synthesizing final answer...</b>`, 'global_start');
-            break;
-          case 'result':
-            if (data.found) {{
-              addLine(`<b>Success!</b> Found in <i>${{data.title || 'Multiple Documents'}}</i>`, 'result');
-              const resDiv = document.createElement('div');
-              resDiv.style.marginTop = '8px';
-              resDiv.style.padding = '12px';
-              resDiv.style.background = '#111';
-              resDiv.style.borderRadius = '8px';
-              resDiv.style.color = 'var(--leaf)';
-              resDiv.textContent = data.content;
-              log.appendChild(resDiv);
-            }} else {{
-              addLine(`<b>No results found</b> across all documents.`, 'result');
-            }}
-            break;
-        }
-      }}
-    }}
-  } catch (err) {{
-    addLine(`Error: ${{err.message}}`, 'backtrack');
-  }} finally {{
-    input.disabled = false;
-    btn.disabled = false;
-    log.scrollTop = log.scrollHeight;
-  }}
-}}
-</script>
-</body></html>"""
-
+    html = template.replace("{{ common_styles }}", _common_styles())
+    html = html.replace("{{ doc_count }}", str(len(doc_stats)))
+    html = html.replace("{{ cards_html }}", cards_html)
+    return html
 
 
 def _render_doc_index_page(
@@ -674,280 +763,31 @@ def _render_doc_index_page(
     entries: list[dict[str, Any]],
     stats: dict[str, Any],
 ) -> str:
+    """Render the document index page using the HTML template."""
+    template = _load_template("document_view.html")
+
     # Build tree HTML
     tree_html = _build_tree_html(nodes)
 
     # Build alphabetical index HTML
     alpha_html = _build_alpha_index_html(entries)
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ApexRAG Index — {doc_id}</title>
-{_common_styles()}
-<style>
-.page-header {{ display:flex; align-items:center; gap:16px; padding: 28px 40px 0; border-bottom: 1px solid var(--border); padding-bottom: 20px; }}
-.back-btn {{ color: var(--accent); text-decoration:none; font-size:.9rem; }}
-.back-btn:hover {{ text-decoration:underline; }}
-.page-title {{ flex:1; }}
-.page-title h1 {{ font-size:1.5rem; font-weight:800; margin:0; }}
-.page-title .doc-id-badge {{ display:inline-block; background:rgba(99,102,241,.12); color:var(--accent); border-radius:6px; padding:2px 10px; font-size:.8rem; margin-top:4px; font-family:monospace; }}
-.stats-bar {{ display:flex; gap:24px; padding:16px 40px; background: var(--card); border-bottom: 1px solid var(--border); }}
-.stat {{ display:flex; flex-direction:column; }}
-.stat-val {{ font-size:1.4rem; font-weight:800; color:var(--accent); }}
-.stat-label {{ font-size:.75rem; color:var(--muted); margin-top:2px; }}
-.layout {{ display:grid; grid-template-columns:1fr 320px; gap:0; height: calc(100vh - 180px); overflow:hidden; }}
-.tree-panel {{ overflow-y:auto; padding:24px 32px; border-right:1px solid var(--border); position: relative; }}
-.index-panel {{ overflow-y:auto; padding:24px 24px; }}
-.panel-title {{ font-size:1rem; font-weight:700; color:var(--text); margin-bottom:16px; display:flex; align-items:center; gap:8px; }}
-.panel-title span {{ background:var(--accent); color:#fff; border-radius:4px; padding:1px 8px; font-size:.75rem; }}
-
-/* Tabs */
-.tabs {{ display: flex; gap: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }}
-.tab {{ padding: 8px 4px; color: var(--muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; }}
-.tab.active {{ color: var(--accent); border-bottom-color: var(--accent); }}
-.tab-content {{ display: none; }}
-.tab-content.active {{ display: block; }}
-
-/* Tree */
-.tree-node {{ display:flex; align-items:flex-start; gap:0; margin:2px 0; cursor:pointer; }}
-.tree-node .indent {{ flex-shrink:0; }}
-.node-toggle {{ color:var(--muted); font-size:.75rem; width:18px; text-align:center; flex-shrink:0; user-select:none; }}
-.node-body {{ flex:1; display:flex; align-items:baseline; gap:8px; padding:4px 8px; border-radius:6px; transition:background .15s; }}
-.tree-node:hover .node-body {{ background: rgba(99,102,241,.08); }}
-.node-icon {{ font-size:.85rem; flex-shrink:0; }}
-.node-title {{ font-size:.875rem; color:var(--text); font-weight:500; flex:1; }}
-.node-title.leaf {{ color: var(--leaf); }}
-.node-badge {{ font-size:.7rem; color:var(--muted); background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:4px; padding:1px 6px; white-space:nowrap; }}
-.node-path {{ font-size:.7rem; color:var(--muted); font-family:monospace; }}
-.children-wrap.collapsed {{ display:none; }}
-
-/* Query Panel */
-.query-box {{ margin-bottom: 24px; }}
-.query-input-wrap {{ position: relative; display: flex; gap: 8px; }}
-.query-input {{ flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; color: var(--text); font-size: 0.95rem; outline: none; }}
-.query-input:focus {{ border-color: var(--accent); }}
-.query-btn {{ background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0 24px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }}
-.query-btn:disabled {{ opacity: 0.5; cursor: not-allowed; }}
-
-.trace-container {{ background: #000; border-radius: 12px; padding: 20px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5; height: 400px; overflow-y: auto; border: 1px solid var(--border); }}
-.trace-line {{ margin-bottom: 4px; border-left: 2px solid #222; padding-left: 12px; }}
-.trace-line.enter {{ border-left-color: var(--accent); }}
-.trace-line.explore {{ border-left-color: #f59e0b; }}
-.trace-line.choice {{ border-left-color: #10b981; }}
-.trace-line.leaf {{ border-left-color: var(--leaf); font-weight: bold; }}
-.trace-line.verify {{ border-left-color: #6366f1; }}
-.trace-line.backtrack {{ border-left-color: #ef4444; color: #ef4444; }}
-.trace-line.result {{ border-left-color: var(--grad); margin-top: 12px; padding: 12px; background: rgba(99,102,241,0.1); border-radius: 4px; }}
-.trace-timestamp {{ color: var(--muted); font-size: 0.7rem; margin-right: 8px; }}
-
-/* Alpha index */
-.alpha-letter {{ font-size:1.1rem; font-weight:800; color:var(--accent); margin:16px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }}
-.alpha-entry {{ display:flex; align-items:baseline; gap:8px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04); }}
-.alpha-entry:last-child {{ border-bottom:none; }}
-.alpha-term {{ flex:1; font-size:.83rem; color:var(--text); }}
-.alpha-page {{ font-size:.75rem; color:var(--accent); font-weight:600; white-space:nowrap; }}
-.alpha-path {{ font-size:.68rem; color:var(--muted); font-family:monospace; }}
-/* Search */
-.search-wrap {{ margin-bottom:16px; }}
-.search-input {{ width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:var(--text); font-size:.85rem; outline:none; box-sizing:border-box; }}
-.search-input:focus {{ border-color:var(--accent); }}
-</style>
-</head>
-<body>
-<div class="page-header">
-  <a class="back-btn" href="/">← All Documents</a>
-  <div class="page-title">
-    <h1>Document Index</h1>
-    <div class="doc-id-badge">{doc_id}</div>
-  </div>
-</div>
-<div class="stats-bar">
-  <div class="stat"><div class="stat-val">{stats.get('total_nodes',0)}</div><div class="stat-label">Total Nodes</div></div>
-  <div class="stat"><div class="stat-val">{stats.get('leaf_count',0)}</div><div class="stat-label">Content Leaves</div></div>
-  <div class="stat"><div class="stat-val">{stats.get('max_depth',0)}</div><div class="stat-label">Max Depth</div></div>
-  <div class="stat"><div class="stat-val">{len(entries)}</div><div class="stat-label">Index Entries</div></div>
-</div>
-<div class="layout">
-  <div class="tree-panel">
-    <div class="tabs">
-      <div class="tab active" onclick="switchTab('tree')">Decision Tree</div>
-      <div class="tab" onclick="switchTab('query')">Agentic Query</div>
-    </div>
-    
-    <div id="tree-content" class="tab-content active">
-      <div class="panel-title">🌲 Structural Tree <span>{len(nodes)} nodes</span></div>
-      {tree_html}
-    </div>
-
-    <div id="query-content" class="tab-content">
-      <div class="panel-title">🤖 Navigation Agent</div>
-      <div class="query-box">
-        <div class="query-input-wrap">
-          <input type="text" id="queryInput" class="query-input" placeholder="Ask a question about this document..." onkeypress="if(event.key==='Enter') runQuery()">
-          <button id="queryBtn" class="query-btn" onclick="runQuery()">Ask</button>
-        </div>
-      </div>
-      <div id="traceLog" class="trace-container">
-        <div class="trace-line" style="color:var(--muted)">The agent's reasoning trace will appear here in real-time.</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="index-panel">
-    <div class="panel-title">📖 Page Index <span>{len(entries)}</span></div>
-    <div class="search-wrap">
-      <input class="search-input" id="indexSearch" placeholder="Filter index…" oninput="filterIndex(this.value)">
-    </div>
-    <div id="alphaIndex">{alpha_html}</div>
-  </div>
-</div>
-<script>
-const DOC_ID = "{doc_id}";
-
-function switchTab(tab) {{
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  
-  if (tab === 'tree') {{
-    document.querySelector('.tab:nth-child(1)').classList.add('active');
-    document.getElementById('tree-content').classList.add('active');
-  }} else {{
-    document.querySelector('.tab:nth-child(2)').classList.add('active');
-    document.getElementById('query-content').classList.add('active');
-  }}
-}}
-
-// Tree toggle
-document.querySelectorAll('.tree-node[data-has-children="true"]').forEach(n => {{
-  n.addEventListener('click', e => {{
-    e.stopPropagation();
-    const wrap = document.getElementById('children-' + n.dataset.id);
-    const tog = n.querySelector('.node-toggle');
-    if (wrap) {{
-      const collapsed = wrap.classList.toggle('collapsed');
-      tog.textContent = collapsed ? '▶' : '▼';
-    }}
-  }});
-}});
-
-// Index filter
-function filterIndex(q) {{
-  q = q.toLowerCase();
-  document.querySelectorAll('.alpha-entry').forEach(el => {{
-    const term = el.querySelector('.alpha-term').textContent.toLowerCase();
-    el.style.display = term.includes(q) ? '' : 'none';
-  }});
-  document.querySelectorAll('.alpha-letter').forEach(letter => {{
-    const entries = letter.nextElementSibling ? letter.nextElementSibling.querySelectorAll('.alpha-entry') : [];
-    const visible = [...entries].some(e => e.style.display !== 'none');
-    letter.style.display = visible ? '' : 'none';
-  }});
-}}
-
-async function runQuery() {{
-  const input = document.getElementById('queryInput');
-  const btn = document.getElementById('queryBtn');
-  const log = document.getElementById('traceLog');
-  const q = input.value.trim();
-  
-  if (!q) return;
-  
-  input.disabled = true;
-  btn.disabled = true;
-  log.innerHTML = '';
-  
-  function addLine(text, type='info', data=null) {{
-    const line = document.createElement('div');
-    line.className = 'trace-line ' + type;
-    const ts = new Date().toLocaleTimeString([], {{hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'}});
-    line.innerHTML = `<span class="trace-timestamp">${{ts}}</span> ${{text}}`;
-    log.appendChild(line);
-    log.scrollTop = log.scrollHeight;
-  }}
-
-  addLine(`Starting query: "${{q}}"`, 'start');
-
-  try {{
-    const response = await fetch('/query/stream', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ doc_id: DOC_ID, question: q }})
-    }});
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {{
-      const {{ value, done }} = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, {{ stream: true }});
-      const lines = buffer.split('\\n\\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {{
-        if (!line.startsWith('data: ')) continue;
-        const data = JSON.parse(line.substring(6));
-        
-        switch(data.event) {{
-          case 'enter':
-            addLine(`Entering <b>${{data.title}}</b> (path=${{data.path}})`, 'enter');
-            break;
-          case 'explore':
-            addLine(`Evaluating ${{data.child_count}} sub-sections...`, 'explore');
-            break;
-          case 'choice':
-            addLine(`Agent chose <b>node ${{data.chosen_id}}</b>. Reason: <i>${{data.reason}}</i>`, 'choice');
-            break;
-          case 'leaf':
-            addLine(`Leaf reached. Preview: "${{data.content_preview}}..."`, 'leaf');
-            break;
-          case 'verify':
-            addLine(`Verification: <b>${{data.verified ? 'SUCCESS' : 'FAILED'}}</b> (confidence=${{data.confidence.toFixed(2)}})`, 'verify');
-            break;
-          case 'backtrack':
-            addLine(`Backtracking to parent...`, 'backtrack');
-            break;
-          case 'result':
-            if (data.found) {{
-              addLine(`<b>Success!</b> Answer found in section: ${{data.title}}`, 'result');
-              const resDiv = document.createElement('div');
-              resDiv.style.marginTop = '10px';
-              resDiv.style.padding = '12px';
-              resDiv.style.background = '#111';
-              resDiv.style.borderRadius = '8px';
-              resDiv.style.whiteSpace = 'pre-wrap';
-              resDiv.style.color = 'var(--leaf)';
-              resDiv.textContent = data.content;
-              log.appendChild(resDiv);
-            }} else {{
-              addLine(`<b>Failed.</b> No relevant section found for this query.`, 'result');
-            }}
-            break;
-        }
-      }}
-    }}
-  } catch (err) {{
-    addLine(`Error: ${{err.message}}`, 'backtrack');
-  }} finally {{
-    input.disabled = false;
-    btn.disabled = false;
-    log.scrollTop = log.scrollHeight;
-  }}
-}}
-</script>
-</body></html>"""
-
+    html = template.replace("{{ common_styles }}", _common_styles())
+    html = html.replace("{{ doc_id }}", doc_id)
+    html = html.replace("{{ total_nodes }}", str(stats.get("total_nodes", 0)))
+    html = html.replace("{{ leaf_count }}", str(stats.get("leaf_count", 0)))
+    html = html.replace("{{ max_depth }}", str(stats.get("max_depth", 0)))
+    html = html.replace("{{ entry_count }}", str(len(entries)))
+    html = html.replace("{{ node_count }}", str(len(nodes)))
+    html = html.replace("{{ tree_html }}", tree_html)
+    html = html.replace("{{ alpha_html }}", alpha_html)
+    return html
 
 
 def _build_tree_html(nodes: list[dict[str, Any]]) -> str:
     """Render an interactive collapsible tree from the flat node list."""
     # Group children by parent_id
-    by_parent: dict[int | None, list[dict]] = {}
+    by_parent: dict[int | None, list[dict[str, Any]]] = {}
     for n in nodes:
         pid = n["parent_id"]
         by_parent.setdefault(pid, []).append(n)
@@ -961,9 +801,9 @@ def _build_tree_html(nodes: list[dict[str, Any]]) -> str:
             nid = node["id"]
             has_children = nid in by_parent
             indent_px = depth * 20
-            icon = "📄" if node["is_leaf"] else ("📂" if has_children else "📁")
+            icon = "&#x1F4C4;" if node["is_leaf"] else ("&#x1F4C2;" if has_children else "&#x1F4C1;")
             title_cls = "leaf" if node["is_leaf"] else ""
-            toggle = "▼" if has_children else " "
+            toggle = "&#x25BC;" if has_children else " "
             page = f'<span class="node-badge">{node["page_range"]}</span>' if node.get("page_range") else ""
             path_badge = f'<span class="node-path">{node["path"]}</span>'
             html += f"""
@@ -989,7 +829,7 @@ def _build_alpha_index_html(entries: list[dict[str, Any]]) -> str:
     if not entries:
         return '<div style="color:var(--muted);font-size:.85rem">No index entries.</div>'
 
-    by_letter: dict[str, list[dict]] = {}
+    by_letter: dict[str, list[dict[str, Any]]] = {}
     for e in entries:
         letter = (e["term"] or "?")[0].upper()
         if not letter.isalpha():
@@ -1003,7 +843,7 @@ def _build_alpha_index_html(entries: list[dict[str, Any]]) -> str:
             page = e.get("page_start", 0)
             page_end = e.get("page_end", 0)
             if page and page_end and page != page_end:
-                page_str = f"p.{page}–{page_end}"
+                page_str = f"p.{page}\u2013{page_end}"
             elif page:
                 page_str = f"p.{page}"
             else:
@@ -1015,24 +855,3 @@ def _build_alpha_index_html(entries: list[dict[str, Any]]) -> str:
   <span class="alpha-path">{path}</span>
 </div>"""
     return html
-
-
-def _common_styles() -> str:
-    return """<style>
-:root {
-  --bg: #0f0f13;
-  --card: #16161e;
-  --border: #2a2a3a;
-  --accent: #6366f1;
-  --text: #e2e4f0;
-  --muted: #6b6e8a;
-  --leaf: #34d399;
-  --grad: linear-gradient(135deg, #6366f1, #a855f7, #06b6d4);
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; }
-::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-</style>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">"""

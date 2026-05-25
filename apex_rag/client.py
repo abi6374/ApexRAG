@@ -5,8 +5,8 @@ client.py — Primary user-facing API for ApexRAG.
 It is designed to be:
   - Thread-safe via asyncio locks (compatible with FastAPI, Starlette, etc.)
   - Context-manager friendly for clean resource management
-  - Simple: six main methods — ingest(), ingest_text(), query(), delete(),
-    get_tree(), get_page_index()
+  - Rich error hierarchy via `apex_rag.exceptions`
+  - Hybrid search with optional vector embeddings
   - pip-installable as a library with zero required config
 
 Typical library usage::
@@ -24,14 +24,22 @@ Typical library usage::
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self, Sequence
+from typing import Any
 
-from apex_rag.ingestion import IngestionEngine, Summariser
-from apex_rag.navigation import NavigationAgent, NavigationResult, AggregatorAgent
+from typing_extensions import Self
+
+from apex_rag.exceptions import (
+    DocumentNotFoundError,
+)
+from apex_rag.ingestion.legacy import IngestionEngine, Summariser
+from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult
 from apex_rag.providers import AsyncLLM, OllamaProvider
-from apex_rag.storage import DocumentNode, PageIndexEntry, StorageEngine
+from apex_rag.search import EmbeddingsEngine, HybridSearch
+from apex_rag.storage import StorageEngine
 from apex_rag.utils import ReasoningTrace, logger
 
 
@@ -67,11 +75,14 @@ class ApexIndex:
         aggregator: AggregatorAgent,
         *,
         trace_enabled: bool = True,
+        embeddings: EmbeddingsEngine | None = None,
     ) -> None:
         self._storage = storage
         self._ingestor = ingestor
         self._agent = agent
         self._aggregator = aggregator
+        self._search = HybridSearch(storage, embeddings=embeddings)
+        self._embeddings = embeddings
         self._trace_enabled = trace_enabled
         self._lock = asyncio.Lock()
 
@@ -92,7 +103,7 @@ class ApexIndex:
         trace_enabled: bool = True,
         verify_leaves: bool = True,
         db_echo: bool = False,
-    ) -> "ApexIndex":
+    ) -> ApexIndex:
         """
         Async factory — initialises all sub-components and ensures DB schema.
 
@@ -149,13 +160,27 @@ class ApexIndex:
             trace=trace,
         )
 
+        # Optional: EmbeddingsEngine
+        embeddings = None
+        try:
+            embeddings = EmbeddingsEngine()
+            # Non-blocking attempt to load
+            await embeddings.ensure_loaded()
+        except Exception:
+            embeddings = None
+
         aggregator = AggregatorAgent(model=aggr_model)
 
-        instance = cls(storage, ingestor, agent, aggregator, trace_enabled=trace_enabled)
+        instance = cls(
+            storage, ingestor, agent, aggregator,
+            trace_enabled=trace_enabled,
+            embeddings=embeddings,
+        )
         logger.info(
-            "ApexIndex ready | db=%s | verify=%s",
+            "ApexIndex ready | db=%s | verify=%s | vectors=%s",
             db_url.split("?")[0],
             verify_leaves,
+            "enabled" if embeddings and embeddings.is_available else "disabled",
         )
         return instance
 
@@ -189,8 +214,8 @@ class ApexIndex:
         """
         Ingest a document file into the ApexRAG decision tree.
 
-        Converts → parses → persists → generates Semantic Map summaries
-        → builds page index. All steps are async and cancellation-safe.
+        Converts -> parses -> persists -> generates Semantic Map summaries
+        -> builds page index. All steps are async and cancellation-safe.
 
         Args:
             file_path:            Path to the document (PDF, DOCX, MD, HTML, TXT).
@@ -237,6 +262,60 @@ class ApexIndex:
                 synthesize_summaries=synthesize_summaries,
             )
 
+    async def ingest_many(
+        self,
+        items: list[tuple[str, str | Path]],
+        *,
+        synthesize_summaries: bool = True,
+    ) -> list[str]:
+        """
+        Batch-ingest multiple files/texts in parallel.
+
+        Each item is either:
+          - ``(doc_id, file_path)`` for file ingestion
+          - ``(doc_id, text_content)`` for raw text ingestion
+
+        All items are ingested concurrently using asyncio.gather, which
+        significantly speeds up bulk-loading workflows.
+
+        Args:
+            items:                 List of ``(doc_id, path_or_text)`` tuples.
+            synthesize_summaries: Generate LLM summaries for all items.
+
+        Returns:
+            List of ``doc_id`` strings in the same order as ``items``.
+
+        Example::
+
+            doc_ids = await index.ingest_many([
+                ("doc1", "report.pdf"),
+                ("doc2", Path("memo.md")),
+                ("doc3", "# Manual Inline\nContent here"),
+            ])
+        """
+        async with self._lock:
+            tasks = []
+            for doc_id, source in items:
+                if isinstance(source, str) and not Path(source).exists():
+                    # Treat as raw text
+                    tasks.append(
+                        self._ingestor.ingest_text(
+                            source,
+                            doc_id=doc_id,
+                            synthesize_summaries=synthesize_summaries,
+                        )
+                    )
+                else:
+                    path = Path(source) if isinstance(source, str) else source
+                    tasks.append(
+                        self._ingestor.ingest(
+                            path,
+                            doc_id=doc_id,
+                            synthesize_summaries=synthesize_summaries,
+                        )
+                    )
+            return await asyncio.gather(*tasks)
+
     # -- Query API ----------------------------------------------------------
 
     async def query(
@@ -245,7 +324,8 @@ class ApexIndex:
         doc_id: str,
         *,
         root_node_id: int | None = None,
-        event_queue: asyncio.Queue | None = None,
+        event_queue: asyncio.Queue[Any] | None = None,
+        hybrid: bool = False,
     ) -> NavigationResult | None:
         """
         Navigate the document tree to answer `question`.
@@ -254,16 +334,45 @@ class ApexIndex:
         decisions at each level, verifies the answer at the leaf, and
         returns the exact section content — no hallucinated blending.
 
+        When ``hybrid=True``, the search combines:
+          1. Vector similarity (semantic embeddings — requires sentence-transformers)
+          2. Keyword / BM25 matches (SQLite FTS5)
+          3. Agentic navigation (LLM-guided structural tree walking)
+
         Args:
             question:     Natural-language query.
             doc_id:       Target document (returned by ingest()).
             root_node_id: Restrict to a subtree (optional).
             event_queue:  Optional asyncio.Queue for real-time status updates.
+            hybrid:       Enable hybrid search (vector + keyword + agentic).
 
         Returns:
             NavigationResult with .content, .path, .trace, .verified,
             or None if the answer could not be found.
         """
+        if hybrid and self._embeddings and self._embeddings.is_available:
+            # Hybrid ranking: combine vector + keyword + structural scores
+            # to pre-filter candidates, then enrich the query with top section titles
+            rankings = await self._search.hybrid_rank(question, doc_id)
+            if rankings:
+                # Add top section titles as context to guide the agent's navigation
+                top_titles = [n.title for n, _ in rankings[:5]]
+                hint_text = "; ".join(top_titles)
+                enriched_question = (
+                    f"{question}\n\n"
+                    f"[Hybrid search suggests these sections: {hint_text}]"
+                )
+                logger.info(
+                    "Hybrid: %d candidates ranked, enriching query with top sections",
+                    len(rankings),
+                )
+                return await self._agent.find(
+                    query=enriched_question,
+                    doc_id=doc_id,
+                    root_node_id=root_node_id,
+                    event_queue=event_queue,
+                )
+
         return await self._agent.find(
             query=question,
             doc_id=doc_id,
@@ -271,12 +380,58 @@ class ApexIndex:
             event_queue=event_queue,
         )
 
+    async def query_stream(
+        self,
+        question: str,
+        doc_id: str,
+        *,
+        event_queue: asyncio.Queue[Any] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream the navigation process token by token.
+
+        Yields SSE-style JSON events as the agent:
+        - Enters nodes
+        - Evaluates children
+        - Makes choices
+        - Verifies leaves
+        - Produces the final answer
+
+        Args:
+            question:    Natural-language query.
+            doc_id:      Target document.
+            event_queue: Optional external queue to feed events into.
+
+        Yields:
+            JSON strings with keys: event, node_id, title, path, etc.
+        """
+        # Create or use the provided event queue
+        q: asyncio.Queue[Any] = event_queue or asyncio.Queue()
+
+        # Launch the query in a background task
+        task = asyncio.create_task(
+            self.query(question, doc_id, event_queue=q)
+        )
+
+        # Yield events as they arrive
+        while True:
+            done, _ = await asyncio.wait(
+                [asyncio.create_task(q.get()), task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            while not q.empty():
+                event = await q.get()
+                yield f"data: {json.dumps(event)}\n\n"
+            if task.done():
+                break
+
     async def query_global(
         self,
         question: str,
         *,
-        event_queue: asyncio.Queue | None = None,
+        event_queue: asyncio.Queue[Any] | None = None,
         synthesize: bool = True,
+        hybrid: bool = False,
     ) -> NavigationResult | str | None:
         """
         Query across ALL indexed documents.
@@ -285,19 +440,43 @@ class ApexIndex:
         top-level summaries, then performs a structural search within each
         candidate until an answer is found.
 
+        When ``hybrid=True``, vector similarity is used to rank documents
+        before agentic navigation (requires sentence-transformers).
+
         Args:
             question:    Natural-language query.
             event_queue: Optional asyncio.Queue for real-time status updates.
             synthesize:  If True, use AggregatorAgent to synthesize a final answer.
+            hybrid:      Enable vector-based document ranking.
 
         Returns:
             NavigationResult, synthesized string, or None.
         """
+        if hybrid and self._embeddings and self._embeddings.is_available:
+            # Use vector search to find relevant docs first
+            candidates = await self._search.vector_search_global(question, top_k_docs=3)
+            if candidates:
+                for doc_id, _ in candidates:
+                    result = await self._agent.find(
+                        query=question,
+                        doc_id=doc_id,
+                        event_queue=event_queue,
+                    )
+                    if result:
+                        if synthesize:
+                            if event_queue:
+                                await event_queue.put({"event": "synthesize_start"})
+                            answer = await self._aggregator.synthesize(question, [result])
+                            if event_queue:
+                                await event_queue.put({"event": "synthesize_done", "answer": answer})
+                            return answer
+                        return result
+
         result = await self._agent.find_global(
             query=question,
             event_queue=event_queue,
         )
-        
+
         if result and synthesize:
             if event_queue:
                 await event_queue.put({"event": "synthesize_start"})
@@ -305,7 +484,7 @@ class ApexIndex:
             if event_queue:
                 await event_queue.put({"event": "synthesize_done", "answer": answer})
             return answer
-            
+
         return result
 
     # -- Tree & Index API ---------------------------------------------------
@@ -327,8 +506,8 @@ class ApexIndex:
     async def export_tree(self, doc_id: str) -> list[dict[str, Any]]:
         """
         Export the document tree as a nested JSON structure (PageIndex format).
-        
-        This perfectly matches the original PageIndex output format, where 
+
+        This perfectly matches the original PageIndex output format, where
         each node contains a 'nodes' list of its children.
 
         Returns:
@@ -336,12 +515,12 @@ class ApexIndex:
         """
         async with self._storage.session() as session:
             flat_nodes = await self._storage.get_full_tree(session, doc_id)
-            
+
         if not flat_nodes:
             return []
 
         # Convert to PageIndex dict format
-        node_dicts = {}
+        node_dicts: dict[int, dict[str, Any]] = {}
         for n in flat_nodes:
             node_dicts[n.id] = {
                 "node_id": str(n.id),
@@ -350,16 +529,17 @@ class ApexIndex:
                 "start_index": n.page_start,
                 "end_index": n.page_end,
                 "content": n.content if n.content else "",
+                "image_data": n.image_data,
                 "nodes": [],
-                "_parent_id": n.parent_id # Temporary for building tree
+                "_parent_id": n.parent_id  # Temporary for building tree
             }
 
         # Build the nested structure
-        roots = []
+        roots: list[dict[str, Any]] = []
         for n in flat_nodes:
             current = node_dicts[n.id]
-            pid = current.pop("_parent_id")
-            
+            pid = current.pop("_parent_id", None)
+
             if pid is None:
                 roots.append(current)
             else:
@@ -418,13 +598,46 @@ class ApexIndex:
 
         Returns:
             Number of DocumentNodes deleted.
+
+        Raises:
+            DocumentNotFoundError: If the doc_id does not exist.
         """
-        async with self._lock:
-            async with self._storage.session() as session:
-                return await self._storage.delete_document(session, doc_id)
+        async with self._lock, self._storage.session() as session:
+            docs: list[str] = list(await self._storage.list_documents(session))
+            if doc_id not in docs:
+                raise DocumentNotFoundError(
+                    message=f"Document '{doc_id}' not found.",
+                    hint="Use index.list_documents() to see available documents.",
+                )
+            return await self._storage.delete_document(session, doc_id)
 
     async def list_documents(self) -> list[str]:
         """Return all doc_ids currently stored in the index."""
         async with self._storage.session() as session:
             results = await self._storage.list_documents(session)
             return list(results)
+
+    async def get_document(
+        self, doc_id: str, node_id: int
+    ) -> dict[str, Any] | None:
+        """
+        Fetch a specific node by its primary key.
+
+        Args:
+            doc_id:  Document ID the node belongs to (for validation).
+            node_id: Primary key of the DocumentNode.
+
+        Returns:
+            Node dict or None if not found or doc_id mismatch.
+
+        Raises:
+            DocumentNotFoundError: If the node doesn't exist.
+        """
+        async with self._storage.session() as session:
+            node = await self._storage.get_node(session, node_id)
+            if node is None or node.doc_id != doc_id:
+                raise DocumentNotFoundError(
+                    message=f"Node {node_id} not found in document '{doc_id}'.",
+                    hint="Verify the doc_id and node_id. Use get_tree() to list available nodes.",
+                )
+            return node.to_dict()

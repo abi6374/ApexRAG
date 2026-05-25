@@ -4,15 +4,21 @@ utils.py — Async helpers, logging infrastructure, and Reasoning Trace for Apex
 The ReasoningTrace is the observability backbone: every agent decision is
 color-coded and printed to stdout in real-time, giving users a transparent
 window into the navigation process.
+
+Supports both Rich (default) and JSON log formats via APEX_LOG_FORMAT env var.
+JSON format is ideal for production log aggregation (DataDog, ELK, Grafana Loki).
 """
 
 from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import logging
+import os
 import time
 from collections.abc import Callable, Coroutine
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from rich.console import Console
@@ -40,15 +46,57 @@ _APEX_THEME = Theme(
 console = Console(theme=_APEX_THEME, highlight=False)
 
 # ---------------------------------------------------------------------------
-# Standard Logger (Rich-enhanced)
+# JSON Log Formatter
 # ---------------------------------------------------------------------------
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(console=console, rich_tracebacks=True, markup=True)],
-)
+
+class JSONFormatter(logging.Formatter):
+    """
+    JSON log formatter for production log aggregators.
+
+    Usage:
+        from apex_rag.utils import logger
+        # Set env var: APEX_LOG_FORMAT=json
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry, ensure_ascii=False, default=str)
+
+
+# ---------------------------------------------------------------------------
+# Standard Logger (Rich-enhanced or JSON)
+# ---------------------------------------------------------------------------
+
+_LOG_FORMAT = os.getenv("APEX_LOG_FORMAT", "rich").lower()
+_LOG_LEVEL = os.getenv("APEX_LOG_LEVEL", "INFO").upper()
+
+if _LOG_FORMAT == "json":
+    logging.basicConfig(
+        level=getattr(logging, _LOG_LEVEL, logging.INFO),
+        format="%(message)s",
+        handlers=[logging.StreamHandler()],
+    )
+    # Replace formatter with JSON
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(JSONFormatter())
+else:
+    logging.basicConfig(
+        level=getattr(logging, _LOG_LEVEL, logging.INFO),
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(console=console, rich_tracebacks=True, markup=True)],
+    )
 
 logger = logging.getLogger("apex_rag")
 

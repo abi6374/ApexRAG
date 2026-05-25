@@ -20,8 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apex_rag.navigation import NavigationAgent, NavigationResult
-from apex_rag.providers import AsyncLLM
+from apex_rag.navigation import NavigationAgent
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import ReasoningTrace
 

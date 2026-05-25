@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
-from apex_rag.ingestion import ParsedSection, _parse_markdown_to_tree, _count_nodes
+from apex_rag.ingestion.legacy import _count_nodes, _parse_markdown_to_tree
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import build_ltree_path, path_depth
 

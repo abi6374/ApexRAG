@@ -1,12 +1,50 @@
 version: "3.9"
 
 services:
-  # ── Ollama ─────────────────────────────────────────────────────────────
+  # ── ApexRAG API Server ─────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apexrag-api
+    ports:
+      - "${APEX_PORT:-8000}:8000"
+    environment:
+      # Database — use Postgres in production (SQLite for local dev)
+      APEX_DB_URL: "${APEX_DB_URL:-sqlite+aiosqlite:///data/apex.db}"
+      # Ollama connection
+      APEX_OLLAMA_HOST: "${APEX_OLLAMA_HOST:-http://ollama:11434}"
+      APEX_MODEL: "${APEX_MODEL:-llama3.1}"
+      # Security
+      APEX_API_KEY: "${APEX_API_KEY:-}"
+      APEX_CORS_ORIGINS: "${APEX_CORS_ORIGINS:-*}"
+      APEX_RATE_LIMIT: "${APEX_RATE_LIMIT:-60/minute}"
+      # Observability
+      APEX_LOG_LEVEL: "${APEX_LOG_LEVEL:-INFO}"
+      APEX_LOG_FORMAT: "${APEX_LOG_FORMAT:-rich}"
+      APEX_TRACE_ENABLED: "${APEX_TRACE_ENABLED:-true}"
+    volumes:
+      - apex_data:/app/data
+      - ./apex_rag:/app/apex_rag:ro
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ── Ollama (local LLM) ────────────────────────────────────────────────
   ollama:
     image: ollama/ollama:latest
-    container_name: apex_ollama
+    container_name: apexrag-ollama
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-5m}"
     volumes:
       - ollama_data:/root/.ollama
     deploy:
@@ -16,55 +54,79 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
-
-  # ── PostgreSQL (production storage) ────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    container_name: apex_postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-apex}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apexsecret}
-      POSTGRES_DB: ${POSTGRES_DB:-apex_rag}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      start_period: 120s
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apex} -d ${POSTGRES_DB:-apex_rag}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
-  # ── ApexRAG FastAPI Service ─────────────────────────────────────────────
-  apex_api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: apex_api
-    ports:
-      - "8000:8000"
-    environment:
-      APEX_DB_URL: postgresql+asyncpg://${POSTGRES_USER:-apex}:${POSTGRES_PASSWORD:-apexsecret}@postgres:5432/${POSTGRES_DB:-apex_rag}
-      APEX_OLLAMA_HOST: http://ollama:11434
-      APEX_MODEL: ${APEX_MODEL:-llama3.1}
-      APEX_LOG_LEVEL: ${APEX_LOG_LEVEL:-INFO}
+  # ── Model Puller (one-shot init container) ─────────────────────────────
+  model-puller:
+    image: ollama/ollama:latest
+    container_name: apexrag-model-puller
     depends_on:
-      postgres:
-        condition: service_healthy
       ollama:
         condition: service_healthy
     volumes:
-      - ./uploads:/app/uploads
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "ollama pull ${APEX_MODEL:-llama3.1} && echo 'Model pulled successfully'"
+    restart: "no"
+
+  # ── Optional: PostgreSQL ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: apexrag-postgres
+    profiles: ["postgres"]
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: "${PG_USER:-apexrag}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD:-apexrag_secret}"
+      POSTGRES_DB: "${PG_DB:-apexrag}"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U apexrag"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Optional: Prometheus + Grafana (monitoring) ────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: apexrag-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: apexrag-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 volumes:
+  apex_data:
   ollama_data:
-  postgres_data:
+  pg_data:
+  prometheus_data:
+  grafana_data:

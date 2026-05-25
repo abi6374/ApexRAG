@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApexRAG — Dashboard</title>
+{{ common_styles }}
+<style>
+.hero {{ text-align:center; padding: 40px 20px 20px; }}
+.hero-logo {{ font-size: 3rem; margin-bottom: 8px; }}
+.hero h1 {{ font-size: 2.2rem; font-weight: 800; background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }}
+.hero p {{ color: var(--muted); margin-top: 10px; font-size: 1.05rem; }}
+.container {{ max-width: 1200px; margin: 0 auto; padding: 0 40px 60px; }}
+.section-title {{ font-size: 1.2rem; font-weight: 700; margin: 40px 0 20px; display: flex; align-items: center; gap: 12px; }}
+.section-title span {{ background: var(--accent); color: white; border-radius: 4px; padding: 2px 8px; font-size: 0.8rem; }}
+.docs-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }}
+.doc-card {{ display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; text-decoration: none; color: inherit; transition: all .2s; cursor: pointer; }}
+.doc-card:hover {{ border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(99,102,241,.15); }}
+.doc-icon {{ font-size: 2rem; }}
+.doc-info {{ flex: 1; }}
+.doc-id {{ font-weight: 700; font-size: 1rem; color: var(--text); word-break: break-all; }}
+.doc-meta {{ display: flex; gap: 12px; margin-top: 6px; font-size: 0.8rem; color: var(--muted); }}
+.doc-arrow {{ color: var(--accent); font-size: 1.3rem; }}
+.empty {{ text-align: center; color: var(--muted); padding: 40px 20px; font-size: 1rem; border: 1px dashed var(--border); border-radius: 12px; }}
+.api-links {{ display: flex; justify-content: center; gap: 12px; padding: 0 0 20px; flex-wrap: wrap; }}
+.api-btn {{ background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 18px; color: var(--accent); text-decoration: none; font-size: 0.85rem; transition: all .15s; }}
+.api-btn:hover {{ border-color: var(--accent); background: rgba(99,102,241,.08); }}
+
+/* Global Query */
+.global-query-wrap {{ background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 40px; }}
+.query-box {{ display: flex; gap: 12px; margin-bottom: 24px; }}
+.query-input {{ flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; color: var(--text); font-size: 1rem; outline: none; }}
+.query-input:focus {{ border-color: var(--accent); }}
+.query-btn {{ background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0 32px; font-weight: 700; cursor: pointer; }}
+.query-btn:disabled {{ opacity: 0.5; }}
+.trace-container {{ background: #000; border-radius: 12px; padding: 20px; font-family: monospace; font-size: 0.85rem; height: 300px; overflow-y: auto; border: 1px solid var(--border); }}
+.trace-line {{ margin-bottom: 6px; border-left: 2px solid #333; padding-left: 12px; }}
+.trace-line.global_start {{ border-left-color: #a855f7; font-weight: bold; }}
+.trace-line.global_chosen {{ border-left-color: #06b6d4; }}
+.trace-line.enter {{ border-left-color: var(--accent); }}
+.trace-line.result {{ border-left-color: var(--leaf); background: rgba(52, 211, 153, 0.05); padding: 10px; }}
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="hero-logo">⚡</div>
+  <h1>ApexRAG Dashboard</h1>
+  <p>Local-first Agentic RAG — structural document navigation</p>
+</div>
+<div class="api-links">
+  <a class="api-btn" href="/docs">Swagger UI</a>
+  <a class="api-btn" href="/redoc">ReDoc</a>
+</div>
+
+<div class="container">
+  <div class="section-title">🔍 Global Agentic Search <span>New</span></div>
+  <div class="global-query-wrap">
+    <div class="query-box">
+      <input type="text" id="globalQueryInput" class="query-input" placeholder="Search across all indexed documents..." onkeypress="if(event.key==='Enter') runGlobalQuery()">
+      <button id="globalQueryBtn" class="query-btn" onclick="runGlobalQuery()">Search All</button>
+    </div>
+    <div id="globalTraceLog" class="trace-container">
+      <div style="color:var(--muted)">Enter a query to see the cross-document navigation agent in action.</div>
+    </div>
+  </div>
+
+  <div class="section-title">📤 Quick Ingest <span>Drag & Drop</span></div>
+  <div class="global-query-wrap" id="dropzone" style="border: 2px dashed var(--border); text-align: center; padding: 40px; cursor: pointer;">
+    <div style="font-size: 2rem; margin-bottom: 12px;">📁</div>
+    <div style="font-weight: 700; margin-bottom: 4px;">Drag & Drop files here</div>
+    <div style="color: var(--muted); font-size: 0.85rem;">PDF, DOCX, Markdown, or Plain Text</div>
+    <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(this.files[0])">
+  </div>
+
+  <div class="section-title">📄 Indexed Documents <span>{{ doc_count }}</span></div>
+  <div class="docs-grid">{{ cards_html }}</div>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+dropzone.onclick = () => fileInput.click();
+dropzone.ondragover = (e) => { e.preventDefault(); dropzone.style.borderColor = 'var(--accent)'; };
+dropzone.ondragleave = () => { dropzone.style.borderColor = 'var(--border)'; };
+dropzone.ondrop = (e) => {
+  e.preventDefault();
+  dropzone.style.borderColor = 'var(--border)';
+  if (e.dataTransfer.files.length) handleFileSelect(e.dataTransfer.files[0]);
+};
+
+async function handleFileSelect(file) {
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  dropzone.innerHTML = `<div class="hero-logo" style="font-size: 1.5rem">⏳</div><div style="font-weight: 700">Ingesting ${file.name}...</div><div style="color: var(--muted); font-size: 0.85rem">Building decision tree and synthesizing summaries.</div>`;
+  
+  try {
+    const resp = await fetch('/documents/ingest/file', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (data.ok) {
+      location.reload();
+    } else {
+      alert('Ingestion failed: ' + data.error);
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function runGlobalQuery() {
+  const input = document.getElementById('globalQueryInput');
+  const btn = document.getElementById('globalQueryBtn');
+  const log = document.getElementById('globalTraceLog');
+  const q = input.value.trim();
+  
+  if (!q) return;
+  
+  input.disabled = true;
+  btn.disabled = true;
+  log.innerHTML = '';
+  
+  function addLine(text, type='info') {
+    const line = document.createElement('div');
+    line.className = 'trace-line ' + type;
+    line.innerHTML = text;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  addLine(`<b>Initializing global search...</b>`, 'global_start');
+
+  try {
+    const response = await fetch('/query/global/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q })
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.substring(6));
+        
+        switch(data.event) {
+          case 'global_start':
+            addLine(`Agent is identifying relevant documents...`, 'global_start');
+            break;
+          case 'global_chosen':
+            addLine(`Selected candidates: <b>${data.doc_ids.join(', ')}</b>`, 'global_chosen');
+            break;
+          case 'enter':
+            addLine(`Navigating [${data.doc_id || ''}] <b>${data.title}</b>`, 'enter');
+            break;
+          case 'cache_hit':
+            addLine(`⚡ <b>Cache Hit!</b> Fast-path retrieval successful.`, 'global_chosen');
+            break;
+          case 'synthesize_start':
+            addLine(`🖋️ <b>Synthesizing final answer...</b>`, 'global_start');
+            break;
+          case 'result':
+            if (data.found) {
+              addLine(`<b>Success!</b> Found in <i>${data.title || 'Multiple Documents'}</i>`, 'result');
+              const resDiv = document.createElement('div');
+              resDiv.style.marginTop = '8px';
+              resDiv.style.padding = '12px';
+              resDiv.style.background = '#111';
+              resDiv.style.borderRadius = '8px';
+              resDiv.style.color = 'var(--leaf)';
+              resDiv.textContent = data.content;
+              log.appendChild(resDiv);
+            } else {
+              addLine(`<b>No results found</b> across all documents.`, 'result');
+            }
+            break;
+        }
+      }
+    }
+  } catch (err) {
+    addLine(`Error: ${err.message}`, 'backtrack');
+  } finally {
+    input.disabled = false;
+    btn.disabled = false;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+</script>
+</body></html>

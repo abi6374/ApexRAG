@@ -1,0 +1,68 @@
+import re
+from collections import Counter
+
+from apex_rag.core.ast.models import ASTNode
+from apex_rag.core.protocols.interfaces import DeterministicRetriever
+
+
+class KeywordDeterministicRetriever(DeterministicRetriever):
+    """
+    A basic implementation of Deterministic pre-filtering using keyword frequency
+    and heading overlap.
+    """
+    def __init__(self) -> None:
+        # Basic stop words to ignore
+        self.stop_words = {"the", "is", "in", "and", "to", "a", "of", "for", "on", "with", "as", "by"}
+
+    def _tokenize(self, text: str) -> list[str]:
+        words = re.findall(r'\b\w+\b', text.lower())
+        return [w for w in words if w not in self.stop_words]
+
+    async def retrieve(self, query: str, root_node: ASTNode, top_k: int = 5) -> list[ASTNode]:
+        query_tokens = set(self._tokenize(query))
+        if not query_tokens:
+            return []
+
+        # Flatten the AST to score sections and paragraphs
+        all_nodes = self._flatten_ast(root_node)
+
+        scored_nodes = []
+        for node in all_nodes:
+            score = self._score_node(query_tokens, node)
+            if score > 0:
+                scored_nodes.append((score, node))
+
+        # Sort by score descending
+        scored_nodes.sort(key=lambda x: x[0], reverse=True)
+
+        # Return top_k nodes
+        return [n[1] for n in scored_nodes[:top_k]]
+
+    def _score_node(self, query_tokens: set[str], node: ASTNode) -> float:
+        node_tokens = self._tokenize(node.content)
+        if not node_tokens:
+            return 0.0
+
+        token_counts = Counter(node_tokens)
+        score = 0.0
+
+        for q_token in query_tokens:
+            if q_token in token_counts:
+                # Heading matches get a massive boost (structural scoring)
+                if node.node_type == "Section":
+                    score += token_counts[q_token] * 5.0
+                else:
+                    score += token_counts[q_token] * 1.0
+
+        # Normalize by node length to prevent long nodes from unfairly winning
+        return score / max(len(node_tokens), 1)
+
+    def _flatten_ast(self, node: ASTNode) -> list[ASTNode]:
+        nodes = []
+        # We only want to rank substantive nodes, not the root Document container usually
+        if node.node_type in ("Section", "Paragraph", "Table", "ListItem"):
+            nodes.append(node)
+
+        for child in node.children:
+            nodes.extend(self._flatten_ast(child))
+        return nodes

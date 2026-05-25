@@ -1,0 +1,90 @@
+graph TB
+    %% ── Layers ──
+    subgraph "CLI / Entry Points"
+        CLI["python -m apex_rag<br/>CLI (__main__.py)"]
+        API["FastAPI Server<br/>(api.py)"]
+        LIB["Library Users<br/>(from apex_rag import ApexIndex)"]
+    end
+
+    subgraph "Client Layer"
+        AI["ApexIndex<br/>(client.py)<br/>Thread-safe facade<br/>Factory + Context Manager"]
+    end
+
+    subgraph "Application Layer"
+        IG["IngestionEngine<br/>(ingestion.py)<br/>Convert → Parse → Persist → Summarize"]
+        NV["NavigationAgent<br/>(navigation.py)<br/>Explore → Recurse → Verify → Backtrack"]
+        AG["AggregatorAgent<br/>(navigation.py)<br/>Multi-doc synthesis"]
+        HS["HybridSearch<br/>(search.py)<br/>Vector + Keyword + Structural"]
+    end
+
+    subgraph "Provider Layer"
+        LLM_PROTO["AsyncLLM Protocol<br/>(providers.py)"]
+        OLLAMA["OllamaProvider"]
+        OPENAI["OpenAIProvider"]
+        GROQ["GroqProvider"]
+        ANTHR["AnthropicProvider"]
+    end
+
+    subgraph "Storage Layer"
+        SE["StorageEngine<br/>(storage.py)"]
+        DN["DocumentNode<br/>(ORM Model)"]
+        PIE["PageIndexEntry<br/>(Inverted Index)"]
+        QC["QueryCache<br/>(Semantic Cache)"]
+        FTS5["SQLite FTS5<br/>(keyword search)"]
+    end
+
+    subgraph "Observability"
+        RT["ReasoningTrace<br/>(utils.py)<br/>Color-coded console"]
+        QMC["QueryMetricsCollector<br/>(telemetry.py)<br/>In-memory metrics"]
+        OTELE["OpenTelemetry<br/>(telemetry.py)<br/>Optional tracing"]
+    end
+
+    subgraph "Configuration & Errors"
+        CFG["ApexSettings<br/>(config.py)<br/>21 env vars"]
+        EXC["13 Typed Exceptions<br/>(exceptions.py)"]
+    end
+
+    subgraph "HTML UI"
+        DASH["Dashboard<br/>(templates/dashboard.html)"]
+        DOCVIEW["Document View<br/>(templates/document_view.html)"]
+    end
+
+    %% ── Connections ──
+    CLI --> AI
+    API --> AI
+    LIB --> AI
+
+    AI --> IG
+    AI --> NV
+    AI --> AG
+    AI --> HS
+
+    IG --> SE
+    NV --> SE
+    HS --> SE
+
+    NV --> AG
+
+    NV --> LLM_PROTO
+    IG --> LLM_PROTO
+    AG --> LLM_PROTO
+
+    LLM_PROTO --> OLLAMA
+    LLM_PROTO --> OPENAI
+    LLM_PROTO --> GROQ
+    LLM_PROTO --> ANTHR
+
+    SE --> DN
+    SE --> PIE
+    SE --> QC
+    SE --> FTS5
+
+    API --> DASH
+    API --> DOCVIEW
+
+    AI --> QMC
+    AI --> OTELE
+    NV --> RT
+
+    AI --> CFG
+    AI --> EXC

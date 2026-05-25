@@ -66,6 +66,9 @@ venv.bak/
 *.swp
 *.swo
 
+# MkDocs build output
+site/
+
 # ApexRAG Specific
 *.db
 *.sqlite

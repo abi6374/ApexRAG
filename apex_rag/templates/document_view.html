@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApexRAG Index — {{ doc_id }}</title>
+{{ common_styles }}
+<style>
+.page-header { display:flex; align-items:center; gap:16px; padding: 28px 40px 0; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
+.back-btn { color: var(--accent); text-decoration:none; font-size:.9rem; }
+.back-btn:hover { text-decoration:underline; }
+.page-title { flex:1; }
+.page-title h1 { font-size:1.5rem; font-weight:800; margin:0; }
+.page-title .doc-id-badge { display:inline-block; background:rgba(99,102,241,.12); color:var(--accent); border-radius:6px; padding:2px 10px; font-size:.8rem; margin-top:4px; font-family:monospace; }
+.stats-bar { display:flex; gap:24px; padding:16px 40px; background: var(--card); border-bottom: 1px solid var(--border); }
+.stat { display:flex; flex-direction:column; }
+.stat-val { font-size:1.4rem; font-weight:800; color:var(--accent); }
+.stat-label { font-size:.75rem; color:var(--muted); margin-top:2px; }
+.layout { display:grid; grid-template-columns:1fr 320px; gap:0; height: calc(100vh - 180px); overflow:hidden; }
+.tree-panel { overflow-y:auto; padding:24px 32px; border-right:1px solid var(--border); position: relative; }
+.index-panel { overflow-y:auto; padding:24px 24px; }
+.panel-title { font-size:1rem; font-weight:700; color:var(--text); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.panel-title span { background:var(--accent); color:#fff; border-radius:4px; padding:1px 8px; font-size:.75rem; }
+
+/* Tabs */
+.tabs { display: flex; gap: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.tab { padding: 8px 4px; color: var(--muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Tree */
+.tree-node { display:flex; align-items:flex-start; gap:0; margin:2px 0; cursor:pointer; }
+.tree-node .indent { flex-shrink:0; }
+.node-toggle { color:var(--muted); font-size:.75rem; width:18px; text-align:center; flex-shrink:0; user-select:none; }
+.node-body { flex:1; display:flex; align-items:baseline; gap:8px; padding:4px 8px; border-radius:6px; transition:background .15s; }
+.tree-node:hover .node-body { background: rgba(99,102,241,.08); }
+.node-icon { font-size:.85rem; flex-shrink:0; }
+.node-title { font-size:.875rem; color:var(--text); font-weight:500; flex:1; }
+.node-title.leaf { color: var(--leaf); }
+.node-badge { font-size:.7rem; color:var(--muted); background:rgba(255,255,255,.05); border:1px solid var(--border); border-radius:4px; padding:1px 6px; white-space:nowrap; }
+.node-path { font-size:.7rem; color:var(--muted); font-family:monospace; }
+.children-wrap.collapsed { display:none; }
+
+/* Query Panel */
+.query-box { margin-bottom: 24px; }
+.query-input-wrap { position: relative; display: flex; gap: 8px; }
+.query-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; color: var(--text); font-size: 0.95rem; outline: none; }
+.query-input:focus { border-color: var(--accent); }
+.query-btn { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0 24px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+.query-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.trace-container { background: #000; border-radius: 12px; padding: 20px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5; height: 400px; overflow-y: auto; border: 1px solid var(--border); }
+.trace-line { margin-bottom: 4px; border-left: 2px solid #222; padding-left: 12px; }
+.trace-line.enter { border-left-color: var(--accent); }
+.trace-line.explore { border-left-color: #f59e0b; }
+.trace-line.choice { border-left-color: #10b981; }
+.trace-line.leaf { border-left-color: var(--leaf); font-weight: bold; }
+.trace-line.verify { border-left-color: #6366f1; }
+.trace-line.backtrack { border-left-color: #ef4444; color: #ef4444; }
+.trace-line.result { border-left-color: var(--grad); margin-top: 12px; padding: 12px; background: rgba(99,102,241,0.1); border-radius: 4px; }
+.trace-timestamp { color: var(--muted); font-size: 0.7rem; margin-right: 8px; }
+
+/* Alpha index */
+.alpha-letter { font-size:1.1rem; font-weight:800; color:var(--accent); margin:16px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }
+.alpha-entry { display:flex; align-items:baseline; gap:8px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.alpha-entry:last-child { border-bottom:none; }
+.alpha-term { flex:1; font-size:.83rem; color:var(--text); }
+.alpha-page { font-size:.75rem; color:var(--accent); font-weight:600; white-space:nowrap; }
+.alpha-path { font-size:.68rem; color:var(--muted); font-family:monospace; }
+/* Search */
+.search-wrap { margin-bottom:16px; }
+.search-input { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:var(--text); font-size:.85rem; outline:none; box-sizing:border-box; }
+.search-input:focus { border-color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <a class="back-btn" href="/">← All Documents</a>
+  <div class="page-title">
+    <h1>Document Index</h1>
+    <div class="doc-id-badge">{{ doc_id }}</div>
+  </div>
+</div>
+<div class="stats-bar">
+  <div class="stat"><div class="stat-val">{{ total_nodes }}</div><div class="stat-label">Total Nodes</div></div>
+  <div class="stat"><div class="stat-val">{{ leaf_count }}</div><div class="stat-label">Content Leaves</div></div>
+  <div class="stat"><div class="stat-val">{{ max_depth }}</div><div class="stat-label">Max Depth</div></div>
+  <div class="stat"><div class="stat-val">{{ entry_count }}</div><div class="stat-label">Index Entries</div></div>
+</div>
+<div class="layout">
+  <div class="tree-panel">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('tree')">Decision Tree</div>
+      <div class="tab" onclick="switchTab('query')">Agentic Query</div>
+    </div>
+    
+    <div id="tree-content" class="tab-content active">
+      <div class="panel-title">🌲 Structural Tree <span>{{ node_count }} nodes</span></div>
+      {{ tree_html }}
+    </div>
+
+    <div id="query-content" class="tab-content">
+      <div class="panel-title">🤖 Navigation Agent</div>
+      <div class="query-box">
+        <div class="query-input-wrap">
+          <input type="text" id="queryInput" class="query-input" placeholder="Ask a question about this document..." onkeypress="if(event.key==='Enter') runQuery()">
+          <button id="queryBtn" class="query-btn" onclick="runQuery()">Ask</button>
+        </div>
+      </div>
+      <div id="traceLog" class="trace-container">
+        <div class="trace-line" style="color:var(--muted)">The agent's reasoning trace will appear here in real-time.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="index-panel">
+    <div class="panel-title">📖 Page Index <span>{{ entry_count }}</span></div>
+    <div class="search-wrap">
+      <input class="search-input" id="indexSearch" placeholder="Filter index…" oninput="filterIndex(this.value)">
+    </div>
+    <div id="alphaIndex">{{ alpha_html }}</div>
+  </div>
+</div>
+<script>
+const DOC_ID = "{{ doc_id }}";
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  
+  if (tab === 'tree') {
+    document.querySelector('.tab:nth-child(1)').classList.add('active');
+    document.getElementById('tree-content').classList.add('active');
+  } else {
+    document.querySelector('.tab:nth-child(2)').classList.add('active');
+    document.getElementById('query-content').classList.add('active');
+  }
+}
+
+// Tree toggle
+document.querySelectorAll('.tree-node[data-has-children="true"]').forEach(n => {
+  n.addEventListener('click', e => {
+    e.stopPropagation();
+    const wrap = document.getElementById('children-' + n.dataset.id);
+    const tog = n.querySelector('.node-toggle');
+    if (wrap) {
+      const collapsed = wrap.classList.toggle('collapsed');
+      tog.textContent = collapsed ? '▶' : '▼';
+    }
+  });
+});
+
+// Index filter
+function filterIndex(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.alpha-entry').forEach(el => {
+    const term = el.querySelector('.alpha-term').textContent.toLowerCase();
+    el.style.display = term.includes(q) ? '' : 'none';
+  });
+  document.querySelectorAll('.alpha-letter').forEach(letter => {
+    const entries = letter.nextElementSibling ? letter.nextElementSibling.querySelectorAll('.alpha-entry') : [];
+    const visible = [...entries].some(e => e.style.display !== 'none');
+    letter.style.display = visible ? '' : 'none';
+  });
+}
+
+async function runQuery() {
+  const input = document.getElementById('queryInput');
+  const btn = document.getElementById('queryBtn');
+  const log = document.getElementById('traceLog');
+  const q = input.value.trim();
+  
+  if (!q) return;
+  
+  input.disabled = true;
+  btn.disabled = true;
+  log.innerHTML = '';
+  
+  function addLine(text, type='info', data=null) {
+    const line = document.createElement('div');
+    line.className = 'trace-line ' + type;
+    const ts = new Date().toLocaleTimeString([], {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    line.innerHTML = `<span class="trace-timestamp">${ts}</span> ${text}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  addLine(`Starting query: "${q}"`, 'start');
+
+  try {
+    const response = await fetch('/query/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_id: DOC_ID, question: q })
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.substring(6));
+        
+        switch(data.event) {
+          case 'enter':
+            addLine(`Entering <b>${data.title}</b> (path=${data.path})`, 'enter');
+            break;
+          case 'explore':
+            addLine(`Evaluating ${data.child_count} sub-sections...`, 'explore');
+            break;
+          case 'choice':
+            addLine(`Agent chose <b>node ${data.chosen_id}</b>. Reason: <i>${data.reason}</i>`, 'choice');
+            break;
+          case 'leaf':
+            addLine(`Leaf reached. Preview: "${data.content_preview}..."`, 'leaf');
+            break;
+          case 'verify':
+            addLine(`Verification: <b>${data.verified ? 'SUCCESS' : 'FAILED'}</b> (confidence=${data.confidence.toFixed(2)})`, 'verify');
+            break;
+          case 'backtrack':
+            addLine(`Backtracking to parent...`, 'backtrack');
+            break;
+          case 'result':
+            if (data.found) {
+              addLine(`<b>Success!</b> Answer found in section: ${data.title}`, 'result');
+              const resDiv = document.createElement('div');
+              resDiv.style.marginTop = '10px';
+              resDiv.style.padding = '12px';
+              resDiv.style.background = '#111';
+              resDiv.style.borderRadius = '8px';
+              resDiv.style.whiteSpace = 'pre-wrap';
+              resDiv.style.color = 'var(--leaf)';
+              resDiv.textContent = data.content;
+              log.appendChild(resDiv);
+            } else {
+              addLine(`<b>Failed.</b> No relevant section found for this query.`, 'result');
+            }
+            break;
+        }
+      }
+    }
+  } catch (err) {
+    addLine(`Error: ${err.message}`, 'backtrack');
+  } finally {
+    input.disabled = false;
+    btn.disabled = false;
+    log.scrollTop = log.scrollHeight;
+  }
+}
+</script>
+</body></html>

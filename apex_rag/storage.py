@@ -39,9 +39,10 @@ Schema:
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Sequence
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy import (
     DateTime,
@@ -50,9 +51,14 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    event,
-    select,
     asc,
+    case,
+    event,
+    func,
+    select,
+)
+from sqlalchemy import (
+    text as sa_text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -95,6 +101,7 @@ class DocumentNode(Base):
     meta_: Mapped[str] = mapped_column(
         "metadata", Text, nullable=False, default="{}"
     )
+    image_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     page_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -106,7 +113,7 @@ class DocumentNode(Base):
     )
 
     # Self-referential relationships
-    children: Mapped[list["DocumentNode"]] = relationship(
+    children: Mapped[list[DocumentNode]] = relationship(
         "DocumentNode",
         back_populates="parent",
         cascade="all, delete-orphan",
@@ -114,7 +121,7 @@ class DocumentNode(Base):
         order_by="DocumentNode.position",
         lazy="select",
     )
-    parent: Mapped["DocumentNode | None"] = relationship(
+    parent: Mapped[DocumentNode | None] = relationship(
         "DocumentNode",
         back_populates="children",
         remote_side=[id],
@@ -133,7 +140,7 @@ class DocumentNode(Base):
     def meta(self) -> dict[str, Any]:
         """Deserialised metadata dict (avoids clash with SQLAlchemy's .metadata)."""
         try:
-            return json.loads(self.meta_)
+            return json.loads(self.meta_)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, TypeError):
             return {}
 
@@ -148,7 +155,7 @@ class DocumentNode(Base):
 
     @property
     def page_range(self) -> str:
-        """Human-readable page range string, e.g. 'p.12–15'."""
+        """Human-readable page range string, e.g. 'p.12-15'."""
         if self.page_start == 0 and self.page_end == 0:
             return ""
         if self.page_start == self.page_end:
@@ -171,6 +178,7 @@ class DocumentNode(Base):
             "page_range": self.page_range,
             "is_leaf": self.is_leaf,
             "has_content": self.content is not None,
+            "image_data": self.image_data,
             "meta": self.meta,
         }
 
@@ -226,8 +234,6 @@ class PageIndexEntry(Base):
 class QueryCache(Base):
     """
     Semantic cache for high-precision leaf node results.
-    
-    Stores successful (verified) query -> node_id mappings.
     """
     __tablename__ = "query_cache"
 
@@ -238,6 +244,121 @@ class QueryCache(Base):
         Integer, ForeignKey("document_nodes.id", ondelete="CASCADE"), nullable=False
     )
     hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+# ---------------------------------------------------------------------------
+# Universal AST Models (Phase 1)
+# ---------------------------------------------------------------------------
+
+class NodeData(Base):
+    """
+    Universal AST Node storage. Replaces DocumentNode in the new architecture.
+    """
+    __tablename__ = "node_data"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    parent_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("node_data.id", ondelete="CASCADE"), nullable=True
+    )
+    node_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    page_num: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bounding_box: Mapped[str | None] = mapped_column(Text, nullable=True)
+    custom_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
+    path: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    children: Mapped[list[NodeData]] = relationship(
+        "NodeData",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        foreign_keys=[parent_id],
+        lazy="select",
+    )
+    parent: Mapped[NodeData | None] = relationship(
+        "NodeData",
+        back_populates="children",
+        remote_side=[id],
+        foreign_keys=[parent_id],
+    )
+    semantic_model: Mapped[SemanticModelData] = relationship(
+        "SemanticModelData",
+        back_populates="node",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+    __table_args__ = (
+        Index("ix_nodedata_doc_path", "doc_id", "path"),
+        Index("ix_nodedata_parent", "parent_id"),
+    )
+
+
+class SemanticModelData(Base):
+    """
+    Semantic Map for AST Nodes. Provides the LLM with structured navigation signposts.
+    """
+    __tablename__ = "semantic_data"
+
+    node_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("node_data.id", ondelete="CASCADE"), primary_key=True
+    )
+    concise_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    detailed_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    keywords: Mapped[str] = mapped_column(Text, default="[]")
+    intent_tags: Mapped[str] = mapped_column(Text, default="[]")
+    entities: Mapped[str] = mapped_column(Text, default="[]")
+    domain_tags: Mapped[str] = mapped_column(Text, default="[]")
+    confidence_score: Mapped[float] = mapped_column(default=1.0)
+
+    node: Mapped[NodeData] = relationship("NodeData", back_populates="semantic_model")
+
+
+# ---------------------------------------------------------------------------
+# Structural Reasoning Graph Models (Phase 2)
+# ---------------------------------------------------------------------------
+
+class GraphEdgeData(Base):
+    """
+    Edges in the Structural Retrieval Graph (SRG).
+    """
+    __tablename__ = "graph_edges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
+    source_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("node_data.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("node_data.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    relation_type: Mapped[str] = mapped_column(String(50), nullable=False) # e.g. REFERENCES_TABLE
+    metadata_: Mapped[str] = mapped_column("metadata", Text, nullable=True)
+
+
+class ReasoningCacheData(Base):
+    """
+    Stores reasoning paths (graph traversals) for complex queries.
+    """
+    __tablename__ = "reasoning_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
+    query_text: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    traversal_path: Mapped[str] = mapped_column(Text, nullable=False) # JSON list of node IDs
+    final_answer: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -265,6 +386,13 @@ class StorageEngine:
         self._engine = engine
         self._session_factory = session_factory
 
+    # -- Public helpers -----------------------------------------------------
+
+    @property
+    def is_sqlite(self) -> bool:
+        """True when the backing database is SQLite (vs PostgreSQL)."""
+        return "sqlite" in str(self._engine.url)
+
     # -- Factory ------------------------------------------------------------
 
     @classmethod
@@ -275,7 +403,7 @@ class StorageEngine:
         echo: bool = False,
         pool_size: int = 10,
         max_overflow: int = 20,
-    ) -> "StorageEngine":
+    ) -> StorageEngine:
         """
         Async factory — creates the engine and ensures schema exists.
 
@@ -312,7 +440,11 @@ class StorageEngine:
 
         instance = cls(engine, session_factory)
         await instance._create_schema()
-        logger.info("StorageEngine ready: %s", db_url.split("?")[0])
+        logger.info(
+            "StorageEngine ready (%s): %s",
+            "SQLite" if db_url.startswith("sqlite") else "PostgreSQL",
+            db_url.split("?")[0],
+        )
         return instance
 
     # -- Schema management --------------------------------------------------
@@ -321,10 +453,10 @@ class StorageEngine:
         """Create all tables if they don't already exist."""
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            
+
             # Enable FTS5 for SQLite if applicable
-            if "sqlite" in str(self._engine.url):
-                await conn.execute(__import__("sqlalchemy").text(
+            if self.is_sqlite:
+                await conn.execute(sa_text(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS document_nodes_fts "
                     "USING fts5(node_id UNINDEXED, title, summary)"
                 ))
@@ -360,8 +492,8 @@ class StorageEngine:
         await session.refresh(node)
 
         # Sync with FTS table if SQLite
-        if "sqlite" in str(self._engine.url):
-            await session.execute(__import__("sqlalchemy").text(
+        if self.is_sqlite:
+            await session.execute(sa_text(
                 "INSERT INTO document_nodes_fts (node_id, title, summary) "
                 "VALUES (:nid, :title, :summary)"
             ), {"nid": node.id, "title": node.title, "summary": node.summary})
@@ -419,27 +551,27 @@ class StorageEngine:
         stmt = select(DocumentNode).where(DocumentNode.parent_id == parent_id)
         if doc_id:
             stmt = stmt.where(DocumentNode.doc_id == doc_id)
-        
+
         result = await session.execute(stmt)
         nodes = result.scalars().all()
-        
+
         scored_nodes = []
         query_terms = query.lower().split()
-        
+
         for node in nodes:
             score = 0.0
             title_lower = node.title.lower()
             summary_lower = node.summary.lower()
-            
+
             for term in query_terms:
                 if term in title_lower:
                     score += 2.0
                 if term in summary_lower:
                     score += 1.0
-            
+
             if score > 0:
                 scored_nodes.append((node, score))
-        
+
         return sorted(scored_nodes, key=lambda x: x[1], reverse=True)
 
     async def update_summary(
@@ -473,26 +605,66 @@ class StorageEngine:
 
     async def get_document_stats(self, session: AsyncSession, doc_id: str) -> dict[str, Any]:
         """Return aggregate stats for a document: node count, leaf count, max depth."""
-        from sqlalchemy import func
         stmt = select(
             func.count(DocumentNode.id).label("total_nodes"),
             func.max(DocumentNode.depth).label("max_depth"),
             func.sum(
-                # count leaf nodes: content IS NOT NULL
-                # SQLAlchemy-agnostic way via case
-                __import__("sqlalchemy").case(
-                    (DocumentNode.content.isnot(None), 1), else_=0
-                )
+                case((DocumentNode.content.isnot(None), 1), else_=0)
             ).label("leaf_count"),
         ).where(DocumentNode.doc_id == doc_id)
         result = await session.execute(stmt)
         row = result.one()
+        total_nodes = int(row.total_nodes or 0)
+        max_depth = int(row.max_depth or 0)
+        leaf_count = int(row.leaf_count or 0)
         return {
             "doc_id": doc_id,
-            "total_nodes": row.total_nodes or 0,
-            "max_depth": row.max_depth or 0,
-            "leaf_count": row.leaf_count or 0,
+            "total_nodes": total_nodes,
+            "max_depth": max_depth,
+            "leaf_count": leaf_count,
         }
+
+    # -- AST Node CRUD (Phase 1 & 3) --------------------------------------------
+
+    async def insert_ast_node(self, session: AsyncSession, node_data: NodeData) -> NodeData:
+        """Persist a Universal AST NodeData."""
+        session.add(node_data)
+        await session.flush()
+        return node_data
+
+    async def get_ast_node(self, session: AsyncSession, node_id: str, tenant_id: str = "default") -> NodeData | None:
+        """Fetch a single AST NodeData by ID, enforcing tenant isolation."""
+        stmt = select(NodeData).where(NodeData.id == node_id, NodeData.tenant_id == tenant_id)
+        result = await session.execute(stmt)
+        return result.scalars().first()
+
+    async def get_ast_children(
+        self, session: AsyncSession, parent_id: str | None, doc_id: str | None = None, tenant_id: str = "default"
+    ) -> Sequence[NodeData]:
+        """Return all direct children of an AST node, enforcing tenant isolation."""
+        stmt = select(NodeData).where(NodeData.parent_id == parent_id, NodeData.tenant_id == tenant_id)
+        if doc_id:
+            stmt = stmt.where(NodeData.doc_id == doc_id)
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+    async def get_semantic_model(self, session: AsyncSession, node_id: str) -> SemanticModelData | None:
+        """Fetch the semantic model for a node."""
+        return await session.get(SemanticModelData, node_id)
+
+    # -- Graph Edge CRUD (Phase 2 & 3) ------------------------------------------
+
+    async def insert_graph_edge(self, session: AsyncSession, edge_data: GraphEdgeData) -> GraphEdgeData:
+        """Persist a GraphEdgeData."""
+        session.add(edge_data)
+        await session.flush()
+        return edge_data
+
+    async def get_outgoing_edges(self, session: AsyncSession, source_id: str, tenant_id: str = "default") -> Sequence[GraphEdgeData]:
+        """Return all outgoing edges from a node, enforcing tenant isolation."""
+        stmt = select(GraphEdgeData).where(GraphEdgeData.source_id == source_id, GraphEdgeData.tenant_id == tenant_id)
+        result = await session.execute(stmt)
+        return result.scalars().all()
 
     # -- Page Index CRUD ----------------------------------------------------
 
@@ -535,36 +707,94 @@ class StorageEngine:
         Delete all nodes and page index entries for a document.
         Returns the number of nodes deleted.
         """
-        # Delete page index entries first (FK)
+        # Fetch all nodes first (used for count and FTS guard)
+        stmt = select(DocumentNode).where(DocumentNode.doc_id == doc_id)
+        result = await session.execute(stmt)
+        nodes = result.scalars().all()
+        count = len(nodes)
+
+        # Clean up FTS5 entries before deleting any rows (nodes still exist
+        # in DB at this point). Uses a subquery bound to doc_id to avoid
+        # SQLite's 999-bind-variable limit on documents with 1000+ sections.
+        if self.is_sqlite and nodes:
+            await session.execute(sa_text(
+                "DELETE FROM document_nodes_fts WHERE node_id IN "
+                "(SELECT id FROM document_nodes WHERE doc_id = :doc_id)"
+            ), {"doc_id": doc_id})
+
+        # Delete page index entries (FK to document_nodes)
         pie_stmt = select(PageIndexEntry).where(PageIndexEntry.doc_id == doc_id)
         pie_result = await session.execute(pie_stmt)
         for entry in pie_result.scalars().all():
             await session.delete(entry)
 
-        stmt = select(DocumentNode).where(DocumentNode.doc_id == doc_id)
-        result = await session.execute(stmt)
-        nodes = result.scalars().all()
-        count = len(nodes)
+        # Delete document nodes (cascade handles children)
         for node in nodes:
             await session.delete(node)
+
         logger.info("Deleted %d nodes for doc_id=%r", count, doc_id)
         return count
 
     # -- Cache CRUD ---------------------------------------------------------
 
+    async def prune_cache(self, session: AsyncSession, *, max_age_days: int = 7) -> int:
+        """
+        Delete cache entries older than `max_age_days`.
+
+        Returns the number of entries pruned.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        stmt = select(QueryCache).where(QueryCache.created_at < cutoff)
+        result = await session.execute(stmt)
+        stale = result.scalars().all()
+        for entry in stale:
+            await session.delete(entry)
+        if stale:
+            logger.info("Pruned %d stale query cache entries", len(stale))
+        return len(stale)
+
     async def get_cached_query(
         self, session: AsyncSession, query: str, doc_id: str
     ) -> QueryCache | None:
-        """Fetch a cached query mapping if it exists."""
+        """
+        Fetch a cached query mapping using substring matching.
+
+        First prunes stale entries (TTL = 7 days), then tries exact match.
+        If no match, falls back to checking if the cached query is a substring
+        of the new query or vice versa.
+        This provides a broader "semantic-ish" cache without embeddings.
+        """
+        # Prune stale entries before lookup
+        await self.prune_cache(session, max_age_days=7)
+
+        normalized = query.lower().strip()
+
+        # Try exact match first (fast path)
         stmt = select(QueryCache).where(
-            QueryCache.query_text == query.lower().strip(),
+            QueryCache.query_text == normalized,
             QueryCache.doc_id == doc_id,
         )
         result = await session.execute(stmt)
         cache_entry = result.scalar_one_or_none()
         if cache_entry:
             cache_entry.hit_count += 1
-        return cache_entry
+            return cache_entry
+
+        # Fall back to substring matching with LIMIT for performance
+        # Load a limited number of recent entries rather than all
+        all_entries = await session.execute(
+            select(QueryCache)
+            .where(QueryCache.doc_id == doc_id)
+            .order_by(QueryCache.created_at.desc())
+            .limit(100)
+        )
+        for entry in all_entries.scalars().all():
+            cached = entry.query_text.lower().strip()
+            if normalized in cached or cached in normalized:
+                entry.hit_count += 1
+                return entry
+
+        return None
 
     async def insert_cache_entry(
         self, session: AsyncSession, query: str, doc_id: str, node_id: int
