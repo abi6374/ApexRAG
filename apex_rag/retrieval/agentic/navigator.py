@@ -13,6 +13,7 @@ from apex_rag.utils import ReasoningTrace
 @dataclass
 class ASTNavigationResult:
     """Result of traversing the Universal Document AST."""
+
     content: str
     node_id: str
     path: str
@@ -20,6 +21,7 @@ class ASTNavigationResult:
     trace: list[tuple[str, str]]
     verified: bool
     confidence: float
+
 
 _NAVIGATE_PROMPT = """\
 You are a precise document navigator for a search engine.
@@ -42,11 +44,13 @@ Respond ONLY with valid JSON.
 {{"chosen_id": "<string or null>", "fallback_id": "<string or null>", "reason": "<why>"}}
 """
 
+
 class ASTNavigationAgent:
     """
     Phase 1 Universal AST Navigation Agent.
     Uses Deterministic pre-filtering before invoking LLM logic.
     """
+
     def __init__(
         self,
         storage: StorageEngine,
@@ -62,14 +66,13 @@ class ASTNavigationAgent:
         self._trace = trace or ReasoningTrace(enabled=True)
 
     async def find(
-        self,
-        query: str,
-        doc_id: str,
-        root_node_id: str | None = None
+        self, query: str, doc_id: str, root_node_id: str | None = None
     ) -> ASTNavigationResult | None:
         async with self._storage.session() as session:
             # 1. Fetch root nodes from DB
-            db_nodes = await self._storage.get_ast_children(session, parent_id=root_node_id, doc_id=doc_id)
+            db_nodes = await self._storage.get_ast_children(
+                session, parent_id=root_node_id, doc_id=doc_id
+            )
             if not db_nodes:
                 return None
 
@@ -91,7 +94,7 @@ class ASTNavigationAgent:
                     session=session,
                     current_node=root,
                     traversal_trace=traversal_trace,
-                    visited=visited
+                    visited=visited,
                 )
                 if result:
                     return result
@@ -104,13 +107,17 @@ class ASTNavigationAgent:
         session: Any,
         current_node: ASTNode,
         traversal_trace: list[tuple[str, str]],
-        visited: set[str]
+        visited: set[str],
     ) -> ASTNavigationResult | None:
         if current_node.id in visited:
             return None
         visited.add(current_node.id)
 
-        title = current_node.content[:50] if current_node.node_type != "Section" else current_node.content
+        title = (
+            current_node.content[:50]
+            if current_node.node_type != "Section"
+            else current_node.content
+        )
         traversal_trace.append((current_node.id, title))
 
         # Determine if Leaf (no children)
@@ -123,11 +130,11 @@ class ASTNavigationAgent:
             return ASTNavigationResult(
                 content=current_node.content,
                 node_id=current_node.id,
-                path="", # To be expanded later
+                path="",  # To be expanded later
                 title=title,
                 trace=list(traversal_trace),
                 verified=True,
-                confidence=1.0
+                confidence=1.0,
             )
 
         # It's an internal node. Pre-filter candidates deterministically.
@@ -184,5 +191,5 @@ class ASTNavigationAgent:
             node_type=db_node.node_type,
             content=db_node.content,
             parent_id=db_node.parent_id,
-            children=children_ast
+            children=children_ast,
         )

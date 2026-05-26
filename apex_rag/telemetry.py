@@ -190,16 +190,20 @@ def setup_telemetry(
             except ImportError:
                 logger.warning("OTLP exporter not installed - install opentelemetry-exporter-otlp")
             else:
-                endpoint = otlp_endpoint or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-                span_processor = BatchSpanProcessor(
-                    OTLPSpanExporter(endpoint=endpoint)
+                endpoint = otlp_endpoint or os.getenv(
+                    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
                 )
+                span_processor = BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
                 tracer_provider.add_span_processor(span_processor)
                 logger.info("OTLP trace exporter configured: %s", endpoint)
 
         trace.set_tracer_provider(tracer_provider)
-        logger.info("OpenTelemetry initialised: service=%s tracing=%s metrics=%s",
-                     service_name, enable_tracing, enable_metrics)
+        logger.info(
+            "OpenTelemetry initialised: service=%s tracing=%s metrics=%s",
+            service_name,
+            enable_tracing,
+            enable_metrics,
+        )
         return True
 
     except ImportError:
@@ -228,6 +232,7 @@ def get_tracer(name: str = "apex_rag") -> Any:
     """
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(name)
     except ImportError:
         # No-op tracer
@@ -239,7 +244,9 @@ def get_tracer(name: str = "apex_rag") -> Any:
 
         class _NoopTracer:
             @contextlib.contextmanager
-            def start_as_current_span(self, _name: str, **_kwargs: Any) -> Generator[_NoopSpan, None, None]:
+            def start_as_current_span(
+                self, _name: str, **_kwargs: Any
+            ) -> Generator[_NoopSpan, None, None]:
                 yield _NoopSpan()
 
         return _NoopTracer()

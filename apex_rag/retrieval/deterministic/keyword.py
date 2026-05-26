@@ -10,12 +10,26 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
     A basic implementation of Deterministic pre-filtering using keyword frequency
     and heading overlap.
     """
+
     def __init__(self) -> None:
         # Basic stop words to ignore
-        self.stop_words = {"the", "is", "in", "and", "to", "a", "of", "for", "on", "with", "as", "by"}
+        self.stop_words = {
+            "the",
+            "is",
+            "in",
+            "and",
+            "to",
+            "a",
+            "of",
+            "for",
+            "on",
+            "with",
+            "as",
+            "by",
+        }
 
     def _tokenize(self, text: str) -> list[str]:
-        words = re.findall(r'\b\w+\b', text.lower())
+        words = re.findall(r"\b\w+\b", text.lower())
         return [w for w in words if w not in self.stop_words]
 
     async def retrieve(self, query: str, root_node: ASTNode, top_k: int = 5) -> list[ASTNode]:

@@ -24,10 +24,12 @@ Respond ONLY with valid JSON in the following format:
 }}
 """
 
+
 class QueryPlannerAgent(QueryPlanner):
     """
     LLM-backed agent that decomposes complex questions into a list of simpler sub-queries.
     """
+
     def __init__(self, llm: AsyncLLM):
         self.llm = llm
 
@@ -41,7 +43,7 @@ class QueryPlannerAgent(QueryPlanner):
             data = json.loads(match.group(0)) if match else json.loads(raw.strip())
             sub_queries = data.get("sub_queries", [])
             if not isinstance(sub_queries, list) or not sub_queries:
-                return [query] # Fallback to original query
+                return [query]  # Fallback to original query
             return sub_queries
         except Exception:
-            return [query] # Fallback on error
+            return [query]  # Fallback on error

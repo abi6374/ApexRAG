@@ -12,10 +12,11 @@ class PythonCodeParser(DocumentParser):
     Parses Python source code into the Universal Document AST and extracts GraphEdges
     for function calls and class definitions.
     """
+
     async def parse(self, file_path: str, **kwargs: typing.Any) -> ASTNode:
-        raw_text = kwargs.get('raw_text')
+        raw_text = kwargs.get("raw_text")
         if not raw_text:
-            with open(file_path, encoding='utf-8') as f:
+            with open(file_path, encoding="utf-8") as f:
                 raw_text = f.read()
 
         return self._parse_code(raw_text, source=file_path)
@@ -25,7 +26,7 @@ class PythonCodeParser(DocumentParser):
             id=str(uuid.uuid4()),
             node_type="Module",
             content=source or "anonymous_module",
-            metadata=ASTNodeMetadata(source_file=source)
+            metadata=ASTNodeMetadata(source_file=source),
         )
 
         try:
@@ -41,7 +42,7 @@ class PythonCodeParser(DocumentParser):
                     id=str(uuid.uuid4()),
                     node_type="FunctionDef",
                     content=node.name,
-                    metadata=ASTNodeMetadata(source_file=source, custom={"lineno": node.lineno})
+                    metadata=ASTNodeMetadata(source_file=source, custom={"lineno": node.lineno}),
                 )
 
                 # Extract docstring
@@ -51,7 +52,7 @@ class PythonCodeParser(DocumentParser):
                         id=str(uuid.uuid4()),
                         node_type="DocString",
                         content=docstring,
-                        parent_id=func_node.id
+                        parent_id=func_node.id,
                     )
                     func_node.children.append(doc_node)
 
@@ -62,7 +63,7 @@ class PythonCodeParser(DocumentParser):
                     id=str(uuid.uuid4()),
                     node_type="ClassDef",
                     content=node.name,
-                    metadata=ASTNodeMetadata(source_file=source, custom={"lineno": node.lineno})
+                    metadata=ASTNodeMetadata(source_file=source, custom={"lineno": node.lineno}),
                 )
                 root.add_child(class_node)
 

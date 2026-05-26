@@ -133,6 +133,7 @@ _rate_limiter = InMemoryRateLimiter()
 
 class AppState:
     """Holds the ApexIndex singleton and startup status."""
+
     index: ApexIndex | None = None
     started: bool = False
     ollama_reachable: bool = False
@@ -166,10 +167,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
             state.ollama_reachable = False
             logger.warning("Ollama connectivity check: FAILED — %s", exc)
 
-        logger.info("ApexRAG API started | db=%s | model=%s | auth=%s",
-                     settings.db_url.split("?")[0],
-                     settings.model,
-                     "enabled" if settings.api_key else "disabled")
+        logger.info(
+            "ApexRAG API started | db=%s | model=%s | auth=%s",
+            settings.db_url.split("?")[0],
+            settings.model,
+            "enabled" if settings.api_key else "disabled",
+        )
 
     except Exception as exc:
         logger.error("ApexRAG API startup FAILED: %s", exc)
@@ -193,6 +196,7 @@ def get_index() -> ApexIndex:
 # ---------------------------------------------------------------------------
 # Middleware: API Key Authentication
 # ---------------------------------------------------------------------------
+
 
 async def api_key_middleware(request: Request, call_next: Any) -> Response:
     """If APEX_API_KEY is set, require it in X-API-Key header."""
@@ -743,9 +747,9 @@ def _render_root_page(doc_stats: list[dict[str, Any]]) -> str:
                 <div class="doc-info">
                     <div class="doc-id">{doc_id}</div>
                     <div class="doc-meta">
-                        <span>{s.get('total_nodes', 0)} nodes</span>
-                        <span>{s.get('leaf_count', 0)} leaves</span>
-                        <span>depth {s.get('max_depth', 0)}</span>
+                        <span>{s.get("total_nodes", 0)} nodes</span>
+                        <span>{s.get("leaf_count", 0)} leaves</span>
+                        <span>depth {s.get("max_depth", 0)}</span>
                     </div>
                 </div>
                 <div class="doc-arrow">&rarr;</div>
@@ -801,17 +805,23 @@ def _build_tree_html(nodes: list[dict[str, Any]]) -> str:
             nid = node["id"]
             has_children = nid in by_parent
             indent_px = depth * 20
-            icon = "&#x1F4C4;" if node["is_leaf"] else ("&#x1F4C2;" if has_children else "&#x1F4C1;")
+            icon = (
+                "&#x1F4C4;" if node["is_leaf"] else ("&#x1F4C2;" if has_children else "&#x1F4C1;")
+            )
             title_cls = "leaf" if node["is_leaf"] else ""
             toggle = "&#x25BC;" if has_children else " "
-            page = f'<span class="node-badge">{node["page_range"]}</span>' if node.get("page_range") else ""
+            page = (
+                f'<span class="node-badge">{node["page_range"]}</span>'
+                if node.get("page_range")
+                else ""
+            )
             path_badge = f'<span class="node-path">{node["path"]}</span>'
             html += f"""
 <div class="tree-node" data-id="{nid}" data-has-children="{str(has_children).lower()}" style="padding-left:{indent_px}px">
   <span class="node-toggle">{toggle}</span>
   <div class="node-body">
     <span class="node-icon">{icon}</span>
-    <span class="node-title {title_cls}">{node['title']}</span>
+    <span class="node-title {title_cls}">{node["title"]}</span>
     {page}{path_badge}
   </div>
 </div>"""
@@ -850,8 +860,8 @@ def _build_alpha_index_html(entries: list[dict[str, Any]]) -> str:
                 page_str = ""
             path = e.get("path", "")
             html += f"""<div class="alpha-entry">
-  <span class="alpha-term">{e['term']}</span>
-  {f'<span class="alpha-page">{page_str}</span>' if page_str else ''}
+  <span class="alpha-term">{e["term"]}</span>
+  {f'<span class="alpha-page">{page_str}</span>' if page_str else ""}
   <span class="alpha-path">{path}</span>
 </div>"""
     return html

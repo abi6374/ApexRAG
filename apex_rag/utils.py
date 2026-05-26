@@ -166,13 +166,9 @@ class ReasoningTrace:
     def agent_choice(self, chosen_id: int | None, reason: str) -> None:
         prefix = self._indent()
         if chosen_id is None:
-            self._print(
-                f"{prefix}[apex.none]✗ AGENT → NONE[/]  reason: {reason[:80]}"
-            )
+            self._print(f"{prefix}[apex.none]✗ AGENT → NONE[/]  reason: {reason[:80]}")
         else:
-            self._print(
-                f"{prefix}[apex.found]✔ AGENT → node={chosen_id}[/]  reason: {reason[:80]}"
-            )
+            self._print(f"{prefix}[apex.found]✔ AGENT → node={chosen_id}[/]  reason: {reason[:80]}")
 
     def leaf_reached(self, node_id: int, content_preview: str) -> None:
         prefix = self._indent()
@@ -186,9 +182,7 @@ class ReasoningTrace:
         prefix = self._indent()
         target = f"node={to_id}" if to_id is not None else "root (exhausted)"
         reason_str = f"  [{reason}]" if reason else ""
-        self._print(
-            f"{prefix}[apex.backtrack]↑ BACKTRACK[/] from={from_id} → {target}{reason_str}"
-        )
+        self._print(f"{prefix}[apex.backtrack]↑ BACKTRACK[/] from={from_id} → {target}{reason_str}")
 
     def finish(self, found: bool) -> None:
         elapsed = self._elapsed()
@@ -244,9 +238,7 @@ def async_retry(
                     )
                     if attempt < max_attempts:
                         await asyncio.sleep(wait)
-            raise RuntimeError(
-                f"{fn.__name__} failed after {max_attempts} attempts"
-            ) from last_exc
+            raise RuntimeError(f"{fn.__name__} failed after {max_attempts} attempts") from last_exc
 
         return wrapper  # type: ignore[return-value]
 

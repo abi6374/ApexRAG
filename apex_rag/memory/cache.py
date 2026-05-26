@@ -1,7 +1,6 @@
-
-
 class ReasoningMemoryCache:
     """An in-memory cache for storing and retrieving structural reasoning paths."""
+
     def __init__(self) -> None:
         self._cache: dict[str, list[str]] = {}
 

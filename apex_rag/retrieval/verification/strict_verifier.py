@@ -8,6 +8,7 @@ class StrictLeafVerifier(VerificationEngine):
     A verification engine that uses an LLM to strictly determine if a node's content
     answers the given query.
     """
+
     def __init__(self, llm: AsyncLLM):
         self.llm = llm
         self.system_prompt = (
@@ -27,7 +28,7 @@ class StrictLeafVerifier(VerificationEngine):
 
         response = await self.llm.generate(
             prompt=prompt,
-            temperature=0.0 # Deterministic evaluation
+            temperature=0.0,  # Deterministic evaluation
         )
         # Clean the response to ensure robustness
         clean_resp = response.strip().upper()

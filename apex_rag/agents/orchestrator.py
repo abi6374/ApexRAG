@@ -8,12 +8,13 @@ class Orchestrator:
     """
     Coordinates the Planner, Navigator, and Critic for multi-hop graph reasoning.
     """
+
     def __init__(
         self,
         planner: QueryPlanner,
         navigator: ASTNavigationAgent,
         critic: CriticAgent,
-        trace: ReasoningTrace | None = None
+        trace: ReasoningTrace | None = None,
     ):
         self.planner = planner
         self.navigator = navigator
@@ -41,9 +42,7 @@ class Orchestrator:
                 logger.info(f"[RETRIEVED] Node {nav_result.node_id} answers '{sq}'")
                 # Reconstruct an ASTNode for the Critic
                 node = ASTNode(
-                    id=nav_result.node_id,
-                    node_type="RetrievedContent",
-                    content=nav_result.content
+                    id=nav_result.node_id, node_type="RetrievedContent", content=nav_result.content
                 )
                 retrieved_nodes.append(node)
             else:

@@ -94,6 +94,7 @@ class OpenAIProvider:
     ) -> None:
         # Lazy import — openai is an optional dependency
         import openai as openai_mod
+
         self.model = model
         self._client = openai_mod.AsyncOpenAI(api_key=api_key, base_url=base_url)
 
@@ -109,7 +110,10 @@ class OpenAIProvider:
         if images:
             content = [
                 {"type": "text", "text": prompt},
-                *[{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}} for img in images],
+                *[
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}}
+                    for img in images
+                ],
             ]
         messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
         response = await self._client.chat.completions.create(
@@ -137,6 +141,7 @@ class GroqProvider:
     ) -> None:
         # Lazy import — groq is an optional dependency
         import groq as groq_mod
+
         self.model = model
         self._client = groq_mod.AsyncGroq(api_key=api_key)
 
@@ -152,7 +157,10 @@ class GroqProvider:
         if images:
             content = [
                 {"type": "text", "text": prompt},
-                *[{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}} for img in images],
+                *[
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}}
+                    for img in images
+                ],
             ]
         messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
         response = await self._client.chat.completions.create(
@@ -180,6 +188,7 @@ class AnthropicProvider:
     ) -> None:
         # Lazy import — anthropic is an optional dependency
         import anthropic as anthropic_mod
+
         self.model = model
         self._client = anthropic_mod.AsyncAnthropic(api_key=api_key)
 
@@ -194,7 +203,10 @@ class AnthropicProvider:
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         if images:
             content.extend(
-                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img}}
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": img},
+                }
                 for img in images
             )
         msg_payload: list[dict[str, Any]] = [{"role": "user", "content": content}]

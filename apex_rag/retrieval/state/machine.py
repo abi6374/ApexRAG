@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class RetrievalState(str, Enum):
     """Formal retrieval lifecycle states."""
+
     QUERY_RECEIVED = "QUERY_RECEIVED"
     QUERY_CLASSIFIED = "QUERY_CLASSIFIED"
     RETRIEVAL_PLAN_CREATED = "RETRIEVAL_PLAN_CREATED"
@@ -22,18 +23,22 @@ class RetrievalState(str, Enum):
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
+
 class StateTransition(BaseModel):
     """Records a single transition in the lifecycle."""
+
     from_state: RetrievalState | None
     to_state: RetrievalState
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: float = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+
 class RetrievalStateMachine:
     """
     Manages the formal lifecycle of a query, handling metrics, tracing, and recovery.
     """
+
     def __init__(self, query_id: str):
         self.query_id = query_id
         self.current_state: RetrievalState = RetrievalState.QUERY_RECEIVED
@@ -41,7 +46,9 @@ class RetrievalStateMachine:
             StateTransition(from_state=None, to_state=self.current_state)
         ]
 
-    def transition_to(self, new_state: RetrievalState, metadata: dict[str, Any] | None = None) -> None:
+    def transition_to(
+        self, new_state: RetrievalState, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Transitions the machine to a new state and records the duration."""
         last_transition = self.transitions[-1]
         now = datetime.now(timezone.utc)
@@ -52,7 +59,7 @@ class RetrievalStateMachine:
             to_state=new_state,
             timestamp=now,
             duration_ms=duration,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
         self.transitions.append(transition)
         self.current_state = new_state

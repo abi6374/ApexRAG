@@ -98,9 +98,7 @@ class DocumentNode(Base):
     title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    meta_: Mapped[str] = mapped_column(
-        "metadata", Text, nullable=False, default="{}"
-    )
+    meta_: Mapped[str] = mapped_column("metadata", Text, nullable=False, default="{}")
     image_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -184,8 +182,7 @@ class DocumentNode(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return (
-            f"<DocumentNode id={self.id} path={self.path!r} "
-            f"depth={self.depth} leaf={self.is_leaf}>"
+            f"<DocumentNode id={self.id} path={self.path!r} depth={self.depth} leaf={self.is_leaf}>"
         )
 
 
@@ -215,9 +212,7 @@ class PageIndexEntry(Base):
     page_end: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     path: Mapped[str] = mapped_column(String(512), nullable=False)
 
-    __table_args__ = (
-        Index("ix_pie_doc_term", "doc_id", "term"),
-    )
+    __table_args__ = (Index("ix_pie_doc_term", "doc_id", "term"),)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -235,6 +230,7 @@ class QueryCache(Base):
     """
     Semantic cache for high-precision leaf node results.
     """
+
     __tablename__ = "query_cache"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -250,18 +246,23 @@ class QueryCache(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+
 # ---------------------------------------------------------------------------
 # Universal AST Models (Phase 1)
 # ---------------------------------------------------------------------------
+
 
 class NodeData(Base):
     """
     Universal AST Node storage. Replaces DocumentNode in the new architecture.
     """
+
     __tablename__ = "node_data"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
+    tenant_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True, default="default"
+    )
     doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     parent_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("node_data.id", ondelete="CASCADE"), nullable=True
@@ -309,6 +310,7 @@ class SemanticModelData(Base):
     """
     Semantic Map for AST Nodes. Provides the LLM with structured navigation signposts.
     """
+
     __tablename__ = "semantic_data"
 
     node_id: Mapped[str] = mapped_column(
@@ -329,21 +331,25 @@ class SemanticModelData(Base):
 # Structural Reasoning Graph Models (Phase 2)
 # ---------------------------------------------------------------------------
 
+
 class GraphEdgeData(Base):
     """
     Edges in the Structural Retrieval Graph (SRG).
     """
+
     __tablename__ = "graph_edges"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
+    tenant_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True, default="default"
+    )
     source_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("node_data.id", ondelete="CASCADE"), nullable=False, index=True
     )
     target_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("node_data.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    relation_type: Mapped[str] = mapped_column(String(50), nullable=False) # e.g. REFERENCES_TABLE
+    relation_type: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. REFERENCES_TABLE
     metadata_: Mapped[str] = mapped_column("metadata", Text, nullable=True)
 
 
@@ -351,13 +357,16 @@ class ReasoningCacheData(Base):
     """
     Stores reasoning paths (graph traversals) for complex queries.
     """
+
     __tablename__ = "reasoning_cache"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
+    tenant_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True, default="default"
+    )
     query_text: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    traversal_path: Mapped[str] = mapped_column(Text, nullable=False) # JSON list of node IDs
+    traversal_path: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list of node IDs
     final_answer: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -382,7 +391,9 @@ class StorageEngine:
             nodes = await engine.get_children(session, parent_id=1)
     """
 
-    def __init__(self, engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self, engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self._engine = engine
         self._session_factory = session_factory
 
@@ -434,9 +445,7 @@ class StorageEngine:
                 dbapi_conn.execute("PRAGMA synchronous=NORMAL")
                 dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
-        session_factory = async_sessionmaker(
-            engine, class_=AsyncSession, expire_on_commit=False
-        )
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
         instance = cls(engine, session_factory)
         await instance._create_schema()
@@ -456,10 +465,12 @@ class StorageEngine:
 
             # Enable FTS5 for SQLite if applicable
             if self.is_sqlite:
-                await conn.execute(sa_text(
-                    "CREATE VIRTUAL TABLE IF NOT EXISTS document_nodes_fts "
-                    "USING fts5(node_id UNINDEXED, title, summary)"
-                ))
+                await conn.execute(
+                    sa_text(
+                        "CREATE VIRTUAL TABLE IF NOT EXISTS document_nodes_fts "
+                        "USING fts5(node_id UNINDEXED, title, summary)"
+                    )
+                )
 
     async def drop_schema(self) -> None:
         """Drop all ApexRAG tables — use with caution in tests only."""
@@ -493,10 +504,13 @@ class StorageEngine:
 
         # Sync with FTS table if SQLite
         if self.is_sqlite:
-            await session.execute(sa_text(
-                "INSERT INTO document_nodes_fts (node_id, title, summary) "
-                "VALUES (:nid, :title, :summary)"
-            ), {"nid": node.id, "title": node.title, "summary": node.summary})
+            await session.execute(
+                sa_text(
+                    "INSERT INTO document_nodes_fts (node_id, title, summary) "
+                    "VALUES (:nid, :title, :summary)"
+                ),
+                {"nid": node.id, "title": node.title, "summary": node.summary},
+            )
 
         return node
 
@@ -574,9 +588,7 @@ class StorageEngine:
 
         return sorted(scored_nodes, key=lambda x: x[1], reverse=True)
 
-    async def update_summary(
-        self, session: AsyncSession, node_id: int, summary: str
-    ) -> None:
+    async def update_summary(self, session: AsyncSession, node_id: int, summary: str) -> None:
         """Update the Semantic Map summary of a specific node."""
         node = await self.get_node(session, node_id)
         if node:
@@ -588,9 +600,7 @@ class StorageEngine:
         result = await session.execute(stmt)
         return result.scalars().all()
 
-    async def get_full_tree(
-        self, session: AsyncSession, doc_id: str
-    ) -> Sequence[DocumentNode]:
+    async def get_full_tree(self, session: AsyncSession, doc_id: str) -> Sequence[DocumentNode]:
         """
         Return ALL nodes for a document ordered by path.
         Used by the FastAPI index page to render the complete tree.
@@ -608,9 +618,7 @@ class StorageEngine:
         stmt = select(
             func.count(DocumentNode.id).label("total_nodes"),
             func.max(DocumentNode.depth).label("max_depth"),
-            func.sum(
-                case((DocumentNode.content.isnot(None), 1), else_=0)
-            ).label("leaf_count"),
+            func.sum(case((DocumentNode.content.isnot(None), 1), else_=0)).label("leaf_count"),
         ).where(DocumentNode.doc_id == doc_id)
         result = await session.execute(stmt)
         row = result.one()
@@ -632,37 +640,53 @@ class StorageEngine:
         await session.flush()
         return node_data
 
-    async def get_ast_node(self, session: AsyncSession, node_id: str, tenant_id: str = "default") -> NodeData | None:
+    async def get_ast_node(
+        self, session: AsyncSession, node_id: str, tenant_id: str = "default"
+    ) -> NodeData | None:
         """Fetch a single AST NodeData by ID, enforcing tenant isolation."""
         stmt = select(NodeData).where(NodeData.id == node_id, NodeData.tenant_id == tenant_id)
         result = await session.execute(stmt)
         return result.scalars().first()
 
     async def get_ast_children(
-        self, session: AsyncSession, parent_id: str | None, doc_id: str | None = None, tenant_id: str = "default"
+        self,
+        session: AsyncSession,
+        parent_id: str | None,
+        doc_id: str | None = None,
+        tenant_id: str = "default",
     ) -> Sequence[NodeData]:
         """Return all direct children of an AST node, enforcing tenant isolation."""
-        stmt = select(NodeData).where(NodeData.parent_id == parent_id, NodeData.tenant_id == tenant_id)
+        stmt = select(NodeData).where(
+            NodeData.parent_id == parent_id, NodeData.tenant_id == tenant_id
+        )
         if doc_id:
             stmt = stmt.where(NodeData.doc_id == doc_id)
         result = await session.execute(stmt)
         return result.scalars().all()
 
-    async def get_semantic_model(self, session: AsyncSession, node_id: str) -> SemanticModelData | None:
+    async def get_semantic_model(
+        self, session: AsyncSession, node_id: str
+    ) -> SemanticModelData | None:
         """Fetch the semantic model for a node."""
         return await session.get(SemanticModelData, node_id)
 
     # -- Graph Edge CRUD (Phase 2 & 3) ------------------------------------------
 
-    async def insert_graph_edge(self, session: AsyncSession, edge_data: GraphEdgeData) -> GraphEdgeData:
+    async def insert_graph_edge(
+        self, session: AsyncSession, edge_data: GraphEdgeData
+    ) -> GraphEdgeData:
         """Persist a GraphEdgeData."""
         session.add(edge_data)
         await session.flush()
         return edge_data
 
-    async def get_outgoing_edges(self, session: AsyncSession, source_id: str, tenant_id: str = "default") -> Sequence[GraphEdgeData]:
+    async def get_outgoing_edges(
+        self, session: AsyncSession, source_id: str, tenant_id: str = "default"
+    ) -> Sequence[GraphEdgeData]:
         """Return all outgoing edges from a node, enforcing tenant isolation."""
-        stmt = select(GraphEdgeData).where(GraphEdgeData.source_id == source_id, GraphEdgeData.tenant_id == tenant_id)
+        stmt = select(GraphEdgeData).where(
+            GraphEdgeData.source_id == source_id, GraphEdgeData.tenant_id == tenant_id
+        )
         result = await session.execute(stmt)
         return result.scalars().all()
 
@@ -675,9 +699,7 @@ class StorageEngine:
         await session.flush()
         return entry
 
-    async def get_page_index(
-        self, session: AsyncSession, doc_id: str
-    ) -> Sequence[PageIndexEntry]:
+    async def get_page_index(self, session: AsyncSession, doc_id: str) -> Sequence[PageIndexEntry]:
         """Return all page index entries for a doc, sorted alphabetically by term."""
         stmt = (
             select(PageIndexEntry)
@@ -717,10 +739,13 @@ class StorageEngine:
         # in DB at this point). Uses a subquery bound to doc_id to avoid
         # SQLite's 999-bind-variable limit on documents with 1000+ sections.
         if self.is_sqlite and nodes:
-            await session.execute(sa_text(
-                "DELETE FROM document_nodes_fts WHERE node_id IN "
-                "(SELECT id FROM document_nodes WHERE doc_id = :doc_id)"
-            ), {"doc_id": doc_id})
+            await session.execute(
+                sa_text(
+                    "DELETE FROM document_nodes_fts WHERE node_id IN "
+                    "(SELECT id FROM document_nodes WHERE doc_id = :doc_id)"
+                ),
+                {"doc_id": doc_id},
+            )
 
         # Delete page index entries (FK to document_nodes)
         pie_stmt = select(PageIndexEntry).where(PageIndexEntry.doc_id == doc_id)

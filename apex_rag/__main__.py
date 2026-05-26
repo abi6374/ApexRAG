@@ -26,23 +26,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # serve
     serve = sub.add_parser("serve", help="Start the ApexRAG API server")
-    serve.add_argument(
-        "--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0)"
-    )
-    serve.add_argument(
-        "--port", type=int, default=8000, help="Port to bind (default: 8000)"
-    )
-    serve.add_argument(
-        "--reload", action="store_true", help="Enable auto-reload (dev only)"
-    )
+    serve.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0)")
+    serve.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
+    serve.add_argument("--reload", action="store_true", help="Enable auto-reload (dev only)")
 
     # ingest
     ingest = sub.add_parser("ingest", help="Ingest a document file")
     ingest.add_argument("file", type=str, help="Path to the document file")
     ingest.add_argument("--doc-id", type=str, default=None, help="Override doc ID")
-    ingest.add_argument(
-        "--no-summaries", action="store_true", help="Skip LLM summaries"
-    )
+    ingest.add_argument("--no-summaries", action="store_true", help="Skip LLM summaries")
 
     # query
     query = sub.add_parser("query", help="Query an indexed document")
@@ -67,10 +59,7 @@ async def _cmd_serve(args: argparse.Namespace) -> None:
     try:
         import uvicorn
     except ImportError:
-        print(
-            "Error: 'serve' requires extra dependencies.\n"
-            "Install:  pip install apex-rag[web]"
-        )
+        print("Error: 'serve' requires extra dependencies.\nInstall:  pip install apex-rag[web]")
         sys.exit(1)
 
     from apex_rag.api import app
@@ -111,7 +100,9 @@ async def _cmd_ingest(args: argparse.Namespace) -> None:
         )
         stats = await index.get_stats(doc_id)
         print(f"✅ Done! doc_id={doc_id}")
-        print(f"   Nodes: {stats['total_nodes']}, Leaves: {stats['leaf_count']}, Depth: {stats['max_depth']}")
+        print(
+            f"   Nodes: {stats['total_nodes']}, Leaves: {stats['leaf_count']}, Depth: {stats['max_depth']}"
+        )
 
 
 async def _cmd_query(args: argparse.Namespace) -> None:
@@ -123,7 +114,7 @@ async def _cmd_query(args: argparse.Namespace) -> None:
         if result:
             print(f"✅ Found in section: {result.title} (path={result.path})")
             print(f"   Verified: {result.verified}, Confidence: {result.confidence:.2f}")
-            print(f"\n{'─'*60}")
+            print(f"\n{'─' * 60}")
             print(result.content)
         else:
             print("❌ No answer found.")
@@ -137,7 +128,7 @@ async def _cmd_global_query(args: argparse.Namespace) -> None:
         result = await index.query_global(args.question, synthesize=True)
         if result:
             content = result.content if hasattr(result, "content") else str(result)
-            print(f"✅ Answer:\n{'─'*60}")
+            print(f"✅ Answer:\n{'─' * 60}")
             print(content)
         else:
             print("❌ No answer found across documents.")
@@ -158,7 +149,9 @@ async def _cmd_list() -> None:
             try:
                 stats = await index.get_stats(doc_id)
                 print(f"  {i}. {doc_id}")
-                print(f"     Nodes: {stats['total_nodes']}, Leaves: {stats['leaf_count']}, Depth: {stats['max_depth']}")
+                print(
+                    f"     Nodes: {stats['total_nodes']}, Leaves: {stats['leaf_count']}, Depth: {stats['max_depth']}"
+                )
             except Exception:
                 print(f"  {i}. {doc_id}")
 

@@ -19,6 +19,7 @@ from typing import Literal
 # Lightweight settings — no pydantic dependency required for core library
 # ---------------------------------------------------------------------------
 
+
 class ApexSettings:
     """
     Application settings loaded from environment variables.
@@ -42,16 +43,15 @@ class ApexSettings:
     aggregator_model: str | None = os.getenv("APEX_AGGREGATOR_MODEL") or None
 
     # ── Ingestion ─────────────────────────────────────────────────────────
-    parser_backend: Literal["markitdown", "docling", "plaintext"] = (
-        os.getenv("APEX_PARSER_BACKEND", "markitdown")  # type: ignore[assignment]
-    )
+    parser_backend: Literal["markitdown", "docling", "plaintext"] = os.getenv(
+        "APEX_PARSER_BACKEND", "markitdown"
+    )  # type: ignore[assignment]
     max_concurrent_summaries: int = int(os.getenv("APEX_MAX_CONCURRENT_SUMMARIES", "10"))
     verify_leaves: bool = os.getenv("APEX_VERIFY", "true").lower() == "true"
 
     # ── API Server ────────────────────────────────────────────────────────
     cors_origins: list[str] = [
-        o.strip() for o in os.getenv("APEX_CORS_ORIGINS", "*").split(",")
-        if o.strip()
+        o.strip() for o in os.getenv("APEX_CORS_ORIGINS", "*").split(",") if o.strip()
     ]
     api_key: str | None = os.getenv("APEX_API_KEY") or None
     rate_limit: str = os.getenv("APEX_RATE_LIMIT", "60/minute")
@@ -59,9 +59,7 @@ class ApexSettings:
 
     # ── Logging ───────────────────────────────────────────────────────────
     log_level: str = os.getenv("APEX_LOG_LEVEL", "INFO").upper()
-    log_format: Literal["rich", "json"] = (
-        os.getenv("APEX_LOG_FORMAT", "rich")  # type: ignore[assignment]
-    )
+    log_format: Literal["rich", "json"] = os.getenv("APEX_LOG_FORMAT", "rich")  # type: ignore[assignment]
     trace_enabled: bool = os.getenv("APEX_TRACE_ENABLED", "true").lower() == "true"
 
     # ── File paths ────────────────────────────────────────────────────────

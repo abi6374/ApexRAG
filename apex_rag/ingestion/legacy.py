@@ -172,7 +172,7 @@ def _propagate_pages(sections: list[ParsedSection]) -> None:
         if section.children:
             _propagate_pages(section.children)
             child_starts = [c.page_start for c in section.children if c.page_start > 0]
-            child_ends   = [c.page_end   for c in section.children if c.page_end   > 0]
+            child_ends = [c.page_end for c in section.children if c.page_end > 0]
             if child_starts and section.page_start == 0:
                 section.page_start = min(child_starts)
             if child_ends:
@@ -196,7 +196,7 @@ def _chunk_large_sections(sections: list[ParsedSection], max_chars: int = 3000) 
                 for chunk_idx, chunk_text in enumerate(chunks):
                     sub = ParsedSection(
                         level=section.level + 1,
-                        title=f"{section.title} (Part {chunk_idx+1})",
+                        title=f"{section.title} (Part {chunk_idx + 1})",
                         content=chunk_text,
                         position=chunk_idx + 1,
                         path=build_ltree_path(section.path, chunk_idx + 1),
@@ -309,7 +309,9 @@ class Summariser:
             raise
 
         if not summary or not summary.strip():
-            logger.warning("LLM returned empty summary for section %r. Content length: %d", title, len(content))
+            logger.warning(
+                "LLM returned empty summary for section %r. Content length: %d", title, len(content)
+            )
             return title[:120]
 
         summary = summary.strip()
@@ -355,7 +357,9 @@ class IngestionEngine:
         self._storage = storage
         self._summariser = summariser
         self._backend = parser_backend
-        self._executor = executor or ThreadPoolExecutor(max_workers=2, thread_name_prefix="apex_parse")
+        self._executor = executor or ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="apex_parse"
+        )
         self._owns_executor = executor is None
 
     # -- Public API ---------------------------------------------------------
@@ -445,9 +449,7 @@ class IngestionEngine:
                 synthesize=synthesize_summaries,
             )
 
-        logger.info(
-            "Raw text ingestion complete in %.2fs", time.monotonic() - t0
-        )
+        logger.info("Raw text ingestion complete in %.2fs", time.monotonic() - t0)
         return doc_id
 
     # -- Lifecycle ----------------------------------------------------------
@@ -469,8 +471,8 @@ class IngestionEngine:
 
     def __del__(self) -> None:
         """Ensure executor is shut down on garbage collection."""
-        if hasattr(self, '_owns_executor') and self._owns_executor:
-            executor = getattr(self, '_executor', None)
+        if hasattr(self, "_owns_executor") and self._owns_executor:
+            executor = getattr(self, "_executor", None)
             if executor is not None:
                 executor.shutdown(wait=False)
 
@@ -481,13 +483,9 @@ class IngestionEngine:
         loop = asyncio.get_event_loop()
 
         if self._backend == "markitdown":
-            return await loop.run_in_executor(
-                self._executor, self._markitdown_convert, path
-            )
+            return await loop.run_in_executor(self._executor, self._markitdown_convert, path)
         elif self._backend == "docling":
-            return await loop.run_in_executor(
-                self._executor, self._docling_convert, path
-            )
+            return await loop.run_in_executor(self._executor, self._docling_convert, path)
         else:
             # Fallback: read as plain text (for .md / .txt files)
             return path.read_text(encoding="utf-8", errors="replace")
@@ -497,6 +495,7 @@ class IngestionEngine:
         """Synchronous markitdown conversion (runs in thread pool)."""
         try:
             from markitdown import MarkItDown
+
             md = MarkItDown()
             result = md.convert(str(path))
             return result.text_content
@@ -523,11 +522,7 @@ class IngestionEngine:
             pipeline_options.generate_page_images = True
             pipeline_options.table_structure_options.do_rectification = True
 
-            converter = DocumentConverter(
-                format_options={
-                    InputFormat.PDF: pipeline_options
-                }
-            )
+            converter = DocumentConverter(format_options={InputFormat.PDF: pipeline_options})
             result = converter.convert(str(path))
 
             # Export to markdown with image references
@@ -560,9 +555,7 @@ class IngestionEngine:
             items = [(s.title, s.content, s.image_data) for s in sections]
             summaries = await self._summariser.summarise_many(items)
         else:
-            summaries = [
-                f"{s.title}: {truncate(s.content, 80)}" for s in sections
-            ]
+            summaries = [f"{s.title}: {truncate(s.content, 80)}" for s in sections]
 
         # Persist nodes and recurse into children
         child_tasks = []
@@ -590,8 +583,10 @@ class IngestionEngine:
             persisted = await self._storage.insert_node(session, node)
             logger.debug(
                 "Persisted node: path=%s title=%r pages=%d-%d",
-                section.path, section.title,
-                section.page_start, section.page_end,
+                section.path,
+                section.title,
+                section.page_start,
+                section.page_end,
             )
 
             # Build a PageIndexEntry for every node (powers the /index page)

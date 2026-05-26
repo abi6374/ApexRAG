@@ -9,7 +9,10 @@ class DistributedIndexer(Protocol):
     Implementations (like Celery or Redis) must accept document payloads and TenantContext
     to ensure isolated processing across worker nodes.
     """
-    async def queue_ingestion(self, file_bytes: bytes, filename: str, context: TenantContext) -> str:
+
+    async def queue_ingestion(
+        self, file_bytes: bytes, filename: str, context: TenantContext
+    ) -> str:
         """
         Submits a document to the distributed queue for parsing, AST generation, and summarization.
         Returns a tracking Job ID.

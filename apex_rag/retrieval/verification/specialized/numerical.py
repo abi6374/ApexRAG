@@ -8,6 +8,7 @@ class NumericalVerifier(VerificationEngine):
     A specialized verification engine that ensures the node contains
     the specific numerical quantities or metrics requested in the query.
     """
+
     def __init__(self, llm: AsyncLLM):
         self.llm = llm
         self.system_prompt = (

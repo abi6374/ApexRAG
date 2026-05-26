@@ -27,10 +27,12 @@ Respond ONLY with valid JSON in the following format:
 }}
 """
 
+
 class EvaluationCriticAgent(CriticAgent):
     """
     LLM-backed agent that evaluates retrieved nodes against planned sub-queries.
     """
+
     def __init__(self, llm: AsyncLLM):
         self.llm = llm
 
@@ -45,10 +47,7 @@ class EvaluationCriticAgent(CriticAgent):
         for node in nodes:
             context_text += f"--- [{node.id}] ---\n{node.content}\n"
 
-        prompt = _CRITIC_PROMPT.format(
-            sub_queries_text=sub_queries_text,
-            context_text=context_text
-        )
+        prompt = _CRITIC_PROMPT.format(sub_queries_text=sub_queries_text, context_text=context_text)
 
         raw = await self.llm.generate(prompt=prompt, temperature=0.0)
 

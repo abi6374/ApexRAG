@@ -107,9 +107,7 @@ Respond ONLY with valid JSON:
 {{"answers_query": <true or false>, "confidence": <0.0 to 1.0>, "reason": "<brief>"}}
 """
 
-_ID_EXTRACTION_RE = re.compile(
-    r'\{.*?"chosen_id"\s*:\s*(?P<id>\d+|null).*?\}', re.DOTALL
-)
+_ID_EXTRACTION_RE = re.compile(r'\{.*?"chosen_id"\s*:\s*(?P<id>\d+|null).*?\}', re.DOTALL)
 _VERIFY_RE = re.compile(
     r'\{.*?"answers_query"\s*:\s*(?P<val>true|false).*?\}', re.DOTALL | re.IGNORECASE
 )
@@ -199,7 +197,9 @@ class NavigationAgent:
                 if node and node.content:
                     logger.info("Semantic Cache HIT: %r -> %s", query, node.path)
                     if event_queue:
-                        await event_queue.put({"event": "cache_hit", "node_id": node.id, "path": node.path})
+                        await event_queue.put(
+                            {"event": "cache_hit", "node_id": node.id, "path": node.path}
+                        )
                     return NavigationResult(
                         content=node.content,
                         node_id=node.id,
@@ -217,9 +217,7 @@ class NavigationAgent:
                     root_nodes = [root_node]
             else:
                 root_nodes = list(
-                    await self._storage.get_children(
-                        session, parent_id=None, doc_id=doc_id
-                    )
+                    await self._storage.get_children(session, parent_id=None, doc_id=doc_id)
                 )
 
             if not root_nodes:
@@ -245,7 +243,9 @@ class NavigationAgent:
                 )
                 if nav_result is not None:
                     # 2. Populate Cache on success
-                    await self._storage.insert_cache_entry(session, query, doc_id, nav_result.node_id)
+                    await self._storage.insert_cache_entry(
+                        session, query, doc_id, nav_result.node_id
+                    )
                     self._trace.finish(found=True)
                     if event_queue:
                         await event_queue.put({"event": "finish", "found": True})
@@ -294,8 +294,7 @@ class NavigationAgent:
                         root_nodes.append(roots[0])
 
                 docs_text = "\n".join(
-                    f"[{n.doc_id}] {n.title}: {truncate(n.summary, 120)}"
-                    for n in root_nodes
+                    f"[{n.doc_id}] {n.title}: {truncate(n.summary, 120)}" for n in root_nodes
                 )
                 prompt = _SELECT_DOC_PROMPT.format(query=query, docs_text=docs_text)
 
@@ -358,27 +357,36 @@ class NavigationAgent:
         traversal_trace.append((current_node.id, current_node.title))
         self._trace.enter_node(current_node.id, current_node.summary, current_node.path)
         if event_queue:
-            await event_queue.put({
-                "event": "enter",
-                "node_id": current_node.id,
-                "title": current_node.title,
-                "path": current_node.path,
-                "summary": current_node.summary
-            })
+            await event_queue.put(
+                {
+                    "event": "enter",
+                    "node_id": current_node.id,
+                    "title": current_node.title,
+                    "path": current_node.path,
+                    "summary": current_node.summary,
+                }
+            )
 
         # -- Leaf node ----------------------------------------------------
         if current_node.is_leaf:
             content = current_node.content or ""
             self._trace.leaf_reached(current_node.id, content)
             if event_queue:
-                await event_queue.put({"event": "leaf", "node_id": current_node.id, "content_preview": content[:100]})
+                await event_queue.put(
+                    {"event": "leaf", "node_id": current_node.id, "content_preview": content[:100]}
+                )
 
             if self._verify_leaves:
-                verified, confidence = await self._verify_leaf(
-                    query, current_node.title, content
-                )
+                verified, confidence = await self._verify_leaf(query, current_node.title, content)
                 if event_queue:
-                    await event_queue.put({"event": "verify", "node_id": current_node.id, "verified": verified, "confidence": confidence})
+                    await event_queue.put(
+                        {
+                            "event": "verify",
+                            "node_id": current_node.id,
+                            "verified": verified,
+                            "confidence": confidence,
+                        }
+                    )
 
                 if not verified:
                     self._trace.backtrack(
@@ -409,7 +417,8 @@ class NavigationAgent:
 
         # -- Internal node: fetch children and ask LLM --------------------
         children = [
-            c for c in await self._storage.get_children(session, parent_id=current_node.id)
+            c
+            for c in await self._storage.get_children(session, parent_id=current_node.id)
             if c.id not in visited
         ]
 
@@ -429,12 +438,22 @@ class NavigationAgent:
 
         self._trace.exploring_children(current_node.id, len(children))
         if event_queue:
-            await event_queue.put({"event": "explore", "node_id": current_node.id, "child_count": len(children)})
+            await event_queue.put(
+                {"event": "explore", "node_id": current_node.id, "child_count": len(children)}
+            )
 
         chosen_id, fallback_id, reason = await self._ask_llm(query, children, session=session)
         self._trace.agent_choice(chosen_id, reason)
         if event_queue:
-            await event_queue.put({"event": "choice", "node_id": current_node.id, "chosen_id": chosen_id, "fallback_id": fallback_id, "reason": reason})
+            await event_queue.put(
+                {
+                    "event": "choice",
+                    "node_id": current_node.id,
+                    "chosen_id": chosen_id,
+                    "fallback_id": fallback_id,
+                    "reason": reason,
+                }
+            )
 
         # Build ordered candidate list: [chosen, fallback, remaining...]
         candidate_ids: list[int] = []
@@ -504,7 +523,7 @@ class NavigationAgent:
         for c in children:
             hint_str = f" [Keyword Match Score: {hints[c.id]:.1f}]" if c.id in hints else ""
             children_text += (
-                f"[{c.id}] {c.title}{' ('+c.page_range+')' if c.page_range else ''}{hint_str}\n"
+                f"[{c.id}] {c.title}{' (' + c.page_range + ')' if c.page_range else ''}{hint_str}\n"
                 f"       Summary: {truncate(c.summary, 140)}\n"
             )
 
@@ -673,7 +692,7 @@ class AggregatorAgent:
 
         context = ""
         for i, res in enumerate(results):
-            context += f"Source {i+1} [{res.title}]:\n{res.content}\n\n"
+            context += f"Source {i + 1} [{res.title}]:\n{res.content}\n\n"
 
         prompt = _SYNTHESIZE_PROMPT.format(query=query, context=context)
 

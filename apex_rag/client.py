@@ -172,7 +172,10 @@ class ApexIndex:
         aggregator = AggregatorAgent(model=aggr_model)
 
         instance = cls(
-            storage, ingestor, agent, aggregator,
+            storage,
+            ingestor,
+            agent,
+            aggregator,
             trace_enabled=trace_enabled,
             embeddings=embeddings,
         )
@@ -359,8 +362,7 @@ class ApexIndex:
                 top_titles = [n.title for n, _ in rankings[:5]]
                 hint_text = "; ".join(top_titles)
                 enriched_question = (
-                    f"{question}\n\n"
-                    f"[Hybrid search suggests these sections: {hint_text}]"
+                    f"{question}\n\n[Hybrid search suggests these sections: {hint_text}]"
                 )
                 logger.info(
                     "Hybrid: %d candidates ranked, enriching query with top sections",
@@ -409,9 +411,7 @@ class ApexIndex:
         q: asyncio.Queue[Any] = event_queue or asyncio.Queue()
 
         # Launch the query in a background task
-        task = asyncio.create_task(
-            self.query(question, doc_id, event_queue=q)
-        )
+        task = asyncio.create_task(self.query(question, doc_id, event_queue=q))
 
         # Yield events as they arrive
         while True:
@@ -468,7 +468,9 @@ class ApexIndex:
                                 await event_queue.put({"event": "synthesize_start"})
                             answer = await self._aggregator.synthesize(question, [result])
                             if event_queue:
-                                await event_queue.put({"event": "synthesize_done", "answer": answer})
+                                await event_queue.put(
+                                    {"event": "synthesize_done", "answer": answer}
+                                )
                             return answer
                         return result
 
@@ -531,7 +533,7 @@ class ApexIndex:
                 "content": n.content if n.content else "",
                 "image_data": n.image_data,
                 "nodes": [],
-                "_parent_id": n.parent_id  # Temporary for building tree
+                "_parent_id": n.parent_id,  # Temporary for building tree
             }
 
         # Build the nested structure
@@ -617,9 +619,7 @@ class ApexIndex:
             results = await self._storage.list_documents(session)
             return list(results)
 
-    async def get_document(
-        self, doc_id: str, node_id: int
-    ) -> dict[str, Any] | None:
+    async def get_document(self, doc_id: str, node_id: int) -> dict[str, Any] | None:
         """
         Fetch a specific node by its primary key.
 

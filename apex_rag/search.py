@@ -81,15 +81,13 @@ class EmbeddingsEngine:
         except ImportError:
             self._available = False
             self._logger.warning(
-                "sentence-transformers not installed. "
-                "Install: pip install apex-rag[vectors]"
+                "sentence-transformers not installed. Install: pip install apex-rag[vectors]"
             )
             return False
         except Exception as exc:
             self._available = False
             self._logger.warning(
-                "Failed to load embeddings model: %s. "
-                "Falling back to FTS5 + agentic search.",
+                "Failed to load embeddings model: %s. Falling back to FTS5 + agentic search.",
                 exc,
             )
             return False
@@ -106,6 +104,7 @@ class EmbeddingsEngine:
             return []
 
         import asyncio
+
         loop = asyncio.get_event_loop()
         embeddings: list[list[float]] = await loop.run_in_executor(
             None,
@@ -365,9 +364,7 @@ class HybridSearch:
             # Get root node summaries
             docs_summaries = []
             for did in doc_ids:
-                roots = await self._storage.get_children(
-                    session, parent_id=None, doc_id=did
-                )
+                roots = await self._storage.get_children(session, parent_id=None, doc_id=did)
                 if roots:
                     summary = roots[0].summary or roots[0].title
                     docs_summaries.append((did, summary))
@@ -384,9 +381,6 @@ class HybridSearch:
 
         scores = await self._embeddings.similarity(query_vec, doc_embeddings)
 
-        results = [
-            (did, score)
-            for (did, _), score in zip(docs_summaries, scores, strict=True)
-        ]
+        results = [(did, score) for (did, _), score in zip(docs_summaries, scores, strict=True)]
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k_docs]

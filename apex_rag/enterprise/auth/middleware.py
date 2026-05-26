@@ -11,6 +11,7 @@ MOCK_API_KEYS = {
     "sk-test-readonly-456": APIKey(key_hash="hash2", tenant_id="tenant_b", is_active=True),
 }
 
+
 async def get_tenant_context(api_key: str = Security(api_key_header)) -> TenantContext:
     """
     FastAPI dependency that validates the API Key and extracts the TenantContext.
@@ -26,6 +27,6 @@ async def get_tenant_context(api_key: str = Security(api_key_header)) -> TenantC
 
     return TenantContext(
         tenant_id=key_record.tenant_id,
-        user_id="inferred-user-id", # Extracted from JWT or API key metadata
-        roles=roles
+        user_id="inferred-user-id",  # Extracted from JWT or API key metadata
+        roles=roles,
     )

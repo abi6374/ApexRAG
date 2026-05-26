@@ -8,6 +8,7 @@ class TableVerifier(VerificationEngine):
     A specialized verification engine that ensures the node is a Table
     and answers the query based on column/row intersection.
     """
+
     def __init__(self, llm: AsyncLLM):
         self.llm = llm
         self.system_prompt = (
