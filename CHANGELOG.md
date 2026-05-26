@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-05-26
+
+### Added
+- **Structural Retrieval Operating System Redesign**: Complete overhaul of the retrieval engine.
+- **Universal Document AST**: Canonical internal representation for PDF, MD, and Code, preserving structural lineage.
+- **Multi-Agent Orchestrator**: New reasoning loop featuring `QueryPlannerAgent`, `ASTNavigationAgent`, `EvaluationCriticAgent`, and `EvidenceSynthesizerAgent`.
+- **Structural Retrieval Graph (SRG)**: Beyond hierarchies, mapping semantic relationships like `REFERENCES_TABLE` and `DEPENDS_ON`.
+- **Evidence Packet System**: Strongly typed provenance packets for zero-hallucination synthesis.
+- **Deterministic Candidate Reduction**: Pre-filtering using BM25 and structural heading overlap.
+- **Multi-Tenant RBAC**: Data isolation and role-based access control at the database and API levels.
+- **Code Intelligence**: Specialized `PythonCodeParser` for structural retrieval over source code repositories.
+- **Enterprise Observability**: Native OpenTelemetry integration for distributed tracing of agent reasoning.
+- **Retrieval Modes**: Adaptive policies for `LEGAL`, `FINANCIAL`, `CODE`, and `FACTUAL` domains.
+
+### Changed
+- Promoted project to version 1.0 stability.
+- Migrated `StorageEngine` to support multi-tenant `NodeData` and `SemanticModelData`.
+- Enhanced `NavigationResult` to `ASTNavigationResult` with full reasoning traces.
+
 ## [0.1.8] — 2026-04-10
 
 ### Added

@@ -26,7 +26,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("apex-rag")
 except PackageNotFoundError:
-    __version__ = "0.1.0-dev"
+    __version__ = "1.0.2"
 
 # ── Public API ────────────────────────────────────────────────────────────
 # These are the classes and functions users interact with directly.
