@@ -153,7 +153,8 @@ class ASTNavigationAgent:
 
         # Execute navigation
         for cid in [chosen_id, fallback_id]:
-            if not cid: continue
+            if not cid:
+                continue
 
             # Find the actual candidate node
             child_node = next((c for c in candidates if c.id == cid), None)
@@ -169,7 +170,7 @@ class ASTNavigationAgent:
             match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
             data = json.loads(match.group(0)) if match else json.loads(raw.strip())
             return data.get("chosen_id"), data.get("fallback_id")
-        except:
+        except Exception:
             return None, None
 
     async def _db_to_ast(self, session: Any, db_node: NodeData) -> ASTNode:

@@ -31,6 +31,4 @@ class StrictLeafVerifier(VerificationEngine):
         )
         # Clean the response to ensure robustness
         clean_resp = response.strip().upper()
-        if "TRUE" in clean_resp:
-            return True
-        return False
+        return "TRUE" in clean_resp

@@ -16,7 +16,7 @@ class DeterministicRetriever(Protocol):
     """
     Protocol for Deterministic Pre-Filtering.
     Takes a query and a starting ASTNode (usually the root) and returns
-    a list of high-scoring candidate ASTNodes based on non-LLM methods 
+    a list of high-scoring candidate ASTNodes based on non-LLM methods
     (like FTS5, BM25, heading overlap).
     """
     async def retrieve(self, query: str, root_node: ASTNode, top_k: int = 5) -> list[ASTNode]:

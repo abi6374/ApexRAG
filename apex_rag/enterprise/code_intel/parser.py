@@ -68,7 +68,7 @@ class PythonCodeParser(DocumentParser):
 
         return root
 
-    def extract_edges(self, root: ASTNode) -> list[GraphEdge]:
+    def extract_edges(self, _root: ASTNode) -> list[GraphEdge]:
         """
         Walks the AST (if we had fully mapped the AST.walk) to find function calls.
         For demonstration, we mock extraction of a DEPENDS_ON edge.

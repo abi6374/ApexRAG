@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 class SemanticModel(BaseModel):
     """
-    Replaces simple string summaries. 
+    Replaces simple string summaries.
     This model provides the LLM with structured 'signposts' to decide navigation.
     """
     node_id: str
