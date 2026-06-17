@@ -40,6 +40,7 @@ dependencies = [
     "pydantic>=2.7.0",
     "rich>=13.7.0",
     "typing-extensions>=4.10.0",
+    "networkx>=3.0",
 ]
 
 # ── Optional Extras ───────────────────────────────────────────────────────

@@ -156,6 +156,17 @@ class TemporalMetadata(BaseModel):
     decay_rate: float = 0.001
     superseded_by: Optional[str] = None
 
+    # Temporal Intelligence extensions
+    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+    effective_from: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+    effective_to: Optional[datetime] = None
+    version_number: int = 1
+    revision_number: int = 0
+    source_timestamp: Optional[datetime] = None
+    is_current: bool = True
+    previous_version: Optional[str] = None
+
     @field_validator("node_id")
     @classmethod
     def _validate_node_id(cls, v: str) -> str:
