@@ -119,3 +119,84 @@ class TestRoleBasedAccessControl:
         await agent.assign_field_permission("CustomRole", "SecretNode", "classified_info", is_allowed=True)
         assert await agent.check_field_access(ctx, "SecretNode", "classified_info") is True
 
+    async def test_dynamic_custom_rules_and_script_evaluators(self, storage: ApexStorage) -> None:
+        agent = AccessControlAgent(storage)
+        
+        # 1. Test Custom Rule with expression: allow access if tenant is tenant_a
+        await agent.define_custom_rule(
+            name="TenantACheck",
+            rule_type="expression",
+            expression="context.tenant_id == 'tenant_a'",
+            description="Allow only tenant_a"
+        )
+        
+        # Assign rule to the Analyst role
+        await agent.assign_custom_rule(rule_name="TenantACheck", role="Analyst", is_allowed=True)
+        
+        ctx_a = TenantContext(tenant_id="tenant_a", user_id="user-1", roles=["Analyst"])
+        ctx_b = TenantContext(tenant_id="tenant_b", user_id="user-2", roles=["Analyst"])
+        
+        # Analyst on tenant_a is allowed, on tenant_b is not allowed
+        assert await agent.check_access(ctx_a, "query", "ASTNode") is True
+        assert await agent.check_access(ctx_b, "query", "ASTNode") is False
+        
+        # 2. Test Custom Rule with Python Script defining evaluate() function
+        script_code = (
+            "def evaluate(context, resource_type, action, env):\n"
+            "    time_val = env.get('time')\n"
+            "    if time_val:\n"
+            "        return 9 <= time_val.hour < 17\n"
+            "    return True\n"
+        )
+        await agent.define_custom_rule(
+            name="BusinessHoursCheck",
+            rule_type="script",
+            expression=script_code,
+            description="Allow only during business hours"
+        )
+        await agent.assign_custom_rule(rule_name="BusinessHoursCheck", role="Auditor", is_allowed=True)
+        
+        # Check during business hours (14:00) vs after hours (20:00)
+        from datetime import datetime, timezone
+        ctx_auditor = TenantContext(tenant_id="tenant_a", user_id="user-auditor", roles=["Auditor"])
+        
+        rule_def = await storage.get_custom_rule("BusinessHoursCheck")
+        assert rule_def is not None
+        
+        # Business hours (14:00)
+        env_day = {"time": datetime(2026, 6, 17, 14, 0, 0, tzinfo=timezone.utc)}
+        assert agent.evaluate_custom_rule(rule_def, ctx_auditor, "ASTNode", "audit", env_day) is True
+        
+        # After hours (20:00)
+        env_night = {"time": datetime(2026, 6, 17, 20, 0, 0, tzinfo=timezone.utc)}
+        assert agent.evaluate_custom_rule(rule_def, ctx_auditor, "ASTNode", "audit", env_night) is False
+
+        # 3. Test Custom Rule with Script setting 'result' variable
+        script_result = "result = (context.user_id != 'user-1')"
+        await agent.define_custom_rule(
+            name="User1Only",
+            rule_type="script",
+            expression=script_result
+        )
+        await agent.assign_custom_rule(rule_name="User1Only", role="Guest", is_allowed=False)
+        
+        ctx_guest1 = TenantContext(tenant_id="tenant_a", user_id="user-1", roles=["Guest"])
+        ctx_guest2 = TenantContext(tenant_id="tenant_a", user_id="user-2", roles=["Guest"])
+        assert await agent.check_access(ctx_guest1, "read", "ASTNode") is True
+        assert await agent.check_access(ctx_guest2, "read", "ASTNode") is False
+
+        # 4. Test Precedence logic & Deny-Override
+        # We have a rule that allows Analyst role (TenantACheck).
+        # Now let's create a rule that denies specifically user-1.
+        await agent.define_custom_rule(
+            name="BlockUser1",
+            rule_type="expression",
+            expression="context.user_id == 'user-1'"
+        )
+        # Assign directly to user_id="user-1" with is_allowed=False
+        await agent.assign_custom_rule(rule_name="BlockUser1", user_id="user-1", is_allowed=False)
+        
+        # user-1 has role Analyst. Even though TenantACheck allows Analyst, direct BlockUser1 is_allowed=False overrides!
+        assert await agent.check_access(ctx_a, "query", "ASTNode") is False
+
+

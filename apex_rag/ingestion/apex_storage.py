@@ -29,6 +29,7 @@ from sqlalchemy import (
     event,
     select,
     text as sa_text,
+    or_,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -307,6 +308,29 @@ class FieldPermissionRow(ApexBase):
     role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
     field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class CustomRuleRow(ApexBase):
+    """SQL row defining a custom policy rule with dynamic execution logic."""
+
+    __tablename__ = "custom_rules"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    rule_type: Mapped[str] = mapped_column(String(50), nullable=False, default="expression")
+    expression: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RuleAssignmentRow(ApexBase):
+    """SQL row assigning custom rules to roles or users."""
+
+    __tablename__ = "rule_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    rule_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     is_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
@@ -1165,6 +1189,81 @@ class ApexStorage:
             return await _get(session)
         async with self.session() as sess:
             return await _get(sess)
+
+    # ── Custom Rules CRUD ──────────────────────────────────────────────────
+
+    async def save_custom_rule(self, rule: CustomRuleRow, session: AsyncSession | None = None) -> None:
+        """Persist a custom security rule."""
+        async def _save(sess: AsyncSession):
+            sess.add(rule)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_custom_rule(self, name: str, session: AsyncSession | None = None) -> CustomRuleRow | None:
+        """Fetch a custom security rule by its name."""
+        async def _get(sess: AsyncSession):
+            stmt = select(CustomRuleRow).where(CustomRuleRow.name == name)
+            res = await sess.execute(stmt)
+            return res.scalars().first()
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    async def delete_custom_rule(self, name: str, session: AsyncSession | None = None) -> None:
+        """Delete a custom security rule by its name."""
+        async def _delete(sess: AsyncSession):
+            stmt = delete(CustomRuleRow).where(CustomRuleRow.name == name)
+            await sess.execute(stmt)
+        if session is not None:
+            await _delete(session)
+        else:
+            async with self.session() as sess:
+                await _delete(sess)
+
+    async def save_rule_assignment(self, assignment: RuleAssignmentRow, session: AsyncSession | None = None) -> None:
+        """Persist a custom rule assignment."""
+        async def _save(sess: AsyncSession):
+            sess.add(assignment)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_rule_assignments(
+        self, role: str | None = None, user_id: str | None = None, session: AsyncSession | None = None
+    ) -> Sequence[RuleAssignmentRow]:
+        """Fetch custom rule assignments matching role and/or user_id."""
+        async def _get(sess: AsyncSession):
+            stmt = select(RuleAssignmentRow)
+            filters = []
+            if role is not None:
+                filters.append(RuleAssignmentRow.role == role)
+            if user_id is not None:
+                filters.append(RuleAssignmentRow.user_id == user_id)
+            if filters:
+                stmt = stmt.where(or_(*filters))
+            res = await sess.execute(stmt)
+            return res.scalars().all()
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    async def delete_rule_assignment(self, assignment_id: int, session: AsyncSession | None = None) -> None:
+        """Delete a custom rule assignment by id."""
+        async def _delete(sess: AsyncSession):
+            stmt = delete(RuleAssignmentRow).where(RuleAssignmentRow.id == assignment_id)
+            await sess.execute(stmt)
+        if session is not None:
+            await _delete(session)
+        else:
+            async with self.session() as sess:
+                await _delete(sess)
 
     # ── State Snapshots CRUD ───────────────────────────────────────────────
 

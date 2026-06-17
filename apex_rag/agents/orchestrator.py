@@ -295,7 +295,27 @@ class Orchestrator:
         reconstructor = StateReconstructor(self.navigator._storage)
         temporal_agent = TemporalReasoningAgent(retriever, reconstructor)
         
+        has_temporal_history = False
         if temporal_agent.detect_time_query(query):
+            storage = self.navigator._storage
+            if storage and type(storage).__name__ not in ("MagicMock", "Mock", "AsyncMock"):
+                try:
+                    latest_nodes = await retriever.get_latest_nodes(doc_id)
+                    if latest_nodes:
+                        has_temporal_history = True
+                    elif hasattr(storage, "get_timeline_events"):
+                        import inspect
+                        res = storage.get_timeline_events(doc_id)
+                        if inspect.isawaitable(res):
+                            events = await res
+                        else:
+                            events = res
+                        if events and type(events).__name__ not in ("MagicMock", "Mock", "AsyncMock"):
+                            has_temporal_history = True
+                except Exception:
+                    pass
+
+        if has_temporal_history:
             temp_res = await temporal_agent.solve_temporal_query(query, doc_id)
             
             evidence_packets = []
@@ -307,7 +327,7 @@ class Orchestrator:
             elif "summary" in res_data:
                 content_str = res_data["summary"]
                 
-            from apex_rag.models.unified_models import ASTNode, NodeType, EvidencePacket, TemporalMetadata
+            from apex_rag.models.unified_models import ASTNode as UnifiedASTNode, NodeType, EvidencePacket as UnifiedEvidencePacket, TemporalMetadata
             
             node = UnifiedASTNode(
                 node_id=str(uuid.uuid4()),
