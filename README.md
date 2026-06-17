@@ -39,25 +39,27 @@ ApexRAG solves this by converting documents into a **Universal Document AST (Abs
 
 ```bash
 pip install apex-rag
+export OPENAI_API_KEY="sk-..."
 ```
+
+**Zero to citation-grounded answers in 3 lines:**
 
 ```python
 import asyncio
-from apex_rag import ApexIndex, Orchestrator
-from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag import ApexIndex, OpenAIProvider
 
 async def main():
-    # Setup Tenant Context
-    ctx = TenantContext(tenant_id="corp-abc", user_id="user-1", roles=["admin"])
-    
-    async with await ApexIndex.create() as index:
-        # Ingest preserving structure
-        doc_id = await index.ingest("financial_report.md", tenant_id=ctx.tenant_id)
+    # 1. Initialize with your preferred provider (OpenAI, Anthropic, Groq, Ollama)
+    async with await ApexIndex.create(model=OpenAIProvider("gpt-4o")) as index:
         
-        # Multi-Agent Reasoning Query
-        # Uses the Planner -> Navigator -> Critic loop internally
-        result = await index.orchestrate_query("Compare the revenue between Q2 and Q3", doc_id)
-        print(result)
+        # 2. Ingest a document (preserves exact structural layout)
+        doc_id = await index.ingest("financial_report.pdf")
+        
+        # 3. Query (triggers Planner -> Navigator -> Critic loop)
+        answer = await index.orchestrate_query("Compare Q2 and Q3 revenue", doc_id)
+        
+        print(answer)
+        # > "Q2 revenue was $40M, while Q3 grew to $52M. [Node ID: f3a1...]"
 
 asyncio.run(main())
 ```

@@ -16,9 +16,21 @@ import asyncio
 
 import pytest
 
-from apex_rag.ingestion.legacy import _parse_markdown_to_tree
+from apex_rag.ingestion.apex_parser import ApexParser
+from apex_rag.ingestion.legacy import _ast_nodes_to_parsed_sections
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import build_ltree_path, path_depth, truncate
+
+
+_parser = ApexParser()
+
+
+def _parse(text: str) -> list:
+    """Parse markdown text into ParsedSections (test helper)."""
+    if not text or not text.strip():
+        return []
+    nodes = _parser.parse_markdown(text)
+    return _ast_nodes_to_parsed_sections(nodes)
 
 # ---------------------------------------------------------------------------
 # Empty & Minimal Input Tests
@@ -28,17 +40,17 @@ from apex_rag.utils import build_ltree_path, path_depth, truncate
 class TestEmptyInputs:
     def test_empty_markdown_parsing(self) -> None:
         """Empty string should produce empty sections list."""
-        sections = _parse_markdown_to_tree("")
+        sections = _parse("")
         assert sections == []
 
     def test_whitespace_only(self) -> None:
         """Whitespace-only text should return empty sections."""
-        sections = _parse_markdown_to_tree("   \n\n  ")
+        sections = _parse("   \n\n  ")
         assert sections == []
 
     def test_single_heading(self) -> None:
         """Single heading with no content should still create a node."""
-        sections = _parse_markdown_to_tree("# Just a heading")
+        sections = _parse("# Just a heading")
         assert len(sections) == 1
         assert sections[0].title == "Just a heading"
         assert sections[0].content == ""
@@ -53,7 +65,7 @@ class TestUnicodeContent:
     def test_unicode_headings(self) -> None:
         """Headings with Unicode characters should be handled."""
         text = "# 日本語タイトル\nContent in Japanese.\n## Français\nFrench content."
-        sections = _parse_markdown_to_tree(text)
+        sections = _parse(text)
         assert len(sections) == 1
         assert sections[0].title == "日本語タイトル"
         assert len(sections[0].children) == 1
@@ -62,7 +74,7 @@ class TestUnicodeContent:
     def test_emoji_in_content(self) -> None:
         """Emoji and special symbols in content should not break parsing."""
         text = "# Test 🎉\nContent with emojis 🚀 and symbols ©®™."
-        sections = _parse_markdown_to_tree(text)
+        sections = _parse(text)
         assert len(sections) == 1
         assert "🎉" in sections[0].title
 
@@ -73,22 +85,32 @@ class TestUnicodeContent:
 
 
 class TestLargeContent:
-    def test_large_section_chunking(self) -> None:
-        """Sections exceeding max_chars should be chunked into sub-sections."""
-        # Content with paragraph breaks so chunking actually triggers
+    def test_large_section_content_preserved(self) -> None:
+        """
+        Large sections should have their full content preserved.
+
+        ``ApexParser`` handles internal chunking at the ``ASTNode``
+        level, so the ``ParsedSection`` converter collects all descendant
+        text into the parent section's ``content`` field via
+        ``_collect_descendant_text``.
+        """
+        # Generate a large section to stress the chunking path
         large_text = "# Huge Section\n"
-        large_text += "\n\n".join(f"Paragraph {i} with enough content to make multiple chunks." for i in range(200))
-        sections = _parse_markdown_to_tree(large_text)
+        paragraphs = [f"Paragraph {i} with enough content to make multiple chunks." for i in range(200)]
+        large_text += "\n\n".join(paragraphs)
+        sections = _parse(large_text)
         assert len(sections) == 1
-        # Should have been chunked into sub-sections
-        assert len(sections[0].children) > 0, f"Expected >0 children, got {len(sections[0].children)}"
-        assert sections[0].children[0].title.startswith("Huge Section (Part")
+        assert sections[0].title == "Huge Section"
+        # The full content should be preserved (not truncated or lost)
+        assert len(sections[0].content) > len(paragraphs) * 10
+        assert "Paragraph 0" in sections[0].content
+        assert "Paragraph 199" in sections[0].content
 
     def test_many_children(self) -> None:
         """Document with many children should be handled efficiently."""
         text = "# Root\n\n"
         text += "\n\n".join(f"## Section {i}\nContent here." for i in range(50))
-        sections = _parse_markdown_to_tree(text)
+        sections = _parse(text)
         assert len(sections) == 1
         assert len(sections[0].children) == 50
 

@@ -28,7 +28,6 @@ async def populated_index() -> ApexIndex:
     index = await ApexIndex.create(
         db_url="sqlite+aiosqlite:///:memory:",
         trace_enabled=False,
-        verify_leaves=False,
     )
 
     # Build a large document with many sections
@@ -43,8 +42,8 @@ async def populated_index() -> ApexIndex:
     await index.ingest_text(
         "\n".join(md_lines),
         doc_id="benchmark-doc",
-        synthesize_summaries=False,
     )
+
     return index
 
 
@@ -65,13 +64,12 @@ async def test_ingestion_throughput(populated_index: ApexIndex) -> None:
     doc_id = await index.ingest_text(
         "\n".join(md),
         doc_id="perf-test",
-        synthesize_summaries=False,
     )
     elapsed = time.monotonic() - t0
 
     assert doc_id == "perf-test"
-    # Ingestion of 20 sections should complete in under 2 seconds
-    assert elapsed < 2.0, f"Ingestion took {elapsed:.2f}s (threshold: 2.0s)"
+    # Ingestion of 20 sections should complete in under 15 seconds (due to causal LLM)
+    assert elapsed < 15.0, f"Ingestion took {elapsed:.2f}s (threshold: 15.0s)"
     print(f"\n⏱ Ingestion throughput: {elapsed:.3f}s for 20 sections")
 
 
@@ -144,7 +142,6 @@ async def test_delete_performance(populated_index: ApexIndex) -> None:
     await index.ingest_text(
         "# Delete Me\nContent here. " * 100,
         doc_id="delete-me",
-        synthesize_summaries=False,
     )
 
     t0 = time.monotonic()
@@ -190,13 +187,11 @@ async def test_concurrent_query_safety() -> None:
     index = await ApexIndex.create(
         db_url="sqlite+aiosqlite:///:memory:",
         trace_enabled=False,
-        verify_leaves=False,
     )
 
     await index.ingest_text(
         "# Concurrent Test\n" + "\n".join(f"\n## Section {i}\nContent." for i in range(10)),
         doc_id="stress",
-        synthesize_summaries=False,
     )
 
     async def do_query(q: str) -> None:

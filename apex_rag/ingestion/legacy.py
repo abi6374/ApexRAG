@@ -3,29 +3,31 @@ ingestion.py — Document parsing and Decision Tree synthesis for ApexRAG.
 
 Pipeline:
     1. Convert the source file (PDF, DOCX, HTML, plain text) to Markdown
-       using `markitdown` (or `docling` as an optional backend).
-    2. Parse the Markdown into a hierarchy of `ParsedSection` objects
-       by walking Markdown headings (#, ##, ###, …).
-    3. Persist a `DocumentNode` tree into the StorageEngine.
-    4. Synthesize "Semantic Map" summaries for every node in parallel
-       using Ollama, with configurable concurrency to saturate local GPU/CPU.
+       using the ApexParser (which uses `markitdown` / `docling` internally).
+    2. Parse the Markdown into a flat list of :class:`ASTNode` objects,
+       then convert to a hierarchy of :class:`ParsedSection` objects.
+    3. Image files (PNG, JPG, WebP, etc.) are parsed via :class:`ImageParser`
+       and converted to :class:`ParsedSection` with ``image_data``.
+    4. Persist a `DocumentNode` tree into the StorageEngine.
+    5. Synthesize "Semantic Map" summaries for every node in parallel
+       using the configured LLM, with configurable concurrency.
 
-The ingestion is fully async-first. CPU-bound parsing runs in an executor to
-avoid blocking the event loop.
+The ingestion is fully async-first. The ApexParser handles CPU-bound parsing.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from apex_rag.ingestion.apex_parser import ApexParser
+from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.providers import AsyncLLM
+from apex_rag.retrieval.vision.parser import SUPPORTED_EXTENSIONS as _IMAGE_EXTENSIONS
 from apex_rag.storage import DocumentNode, PageIndexEntry, StorageEngine
 from apex_rag.utils import async_retry, build_ltree_path, logger, truncate
 
@@ -63,171 +65,112 @@ class ParsedSection:
 
 
 # ---------------------------------------------------------------------------
-# Markdown Parser
+# ASTNode → ParsedSection Converter
 # ---------------------------------------------------------------------------
 
-# Matches headings: "# Title", "## Title", etc. (ATX style only)
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)", re.MULTILINE)
 
-# Matches page markers inserted by markitdown/docling: <!-- Page 3 --> or [Page 3]
-_PAGE_MARKER_RE = re.compile(r"(?:<!--\s*Page\s+(\d+)\s*-->|\[Page\s+(\d+)\])", re.IGNORECASE)
-
-
-def _parse_markdown_to_tree(markdown: str) -> list[ParsedSection]:
+def _collect_descendant_text(node_id: str, node_map: dict[str, ASTNode]) -> str:
     """
-    Convert a Markdown string into a tree of ParsedSection objects.
+    Recursively collect text content from a node and all its descendants.
 
-    Algorithm:
-        - Walk through each heading match.
-        - Maintain a stack of open sections per depth level.
-        - Text between headings belongs to the immediately preceding section.
-        - Page numbers are extracted from <!-- Page N --> markers.
+    This handles the case where ``ApexParser``'s internal chunking has
+    split a leaf node's content into child chunk nodes.  By recursing
+    into all descendants we recover the full content, regardless of how
+    deeply it was chunked.
     """
-    markdown = markdown.strip()
-    if markdown and not markdown.startswith("#"):
-        # Prevent data loss if there's text before the first heading, or no headings at all
-        markdown = "# Document\n\n" + markdown
+    node = node_map.get(node_id)
+    if not node:
+        return ""
+    parts: list[str] = []
+    if node.content:
+        parts.append(node.content)
+    for child_id in node.children:
+        child_text = _collect_descendant_text(child_id, node_map)
+        if child_text:
+            parts.append(child_text)
+    return "\n\n".join(parts)
 
-    sections: list[ParsedSection] = []
-    # Stack entries: (level, ParsedSection)
-    stack: list[tuple[int, ParsedSection]] = []
-    last_pos = 0
-    current_page = 0
 
-    matches = list(_HEADING_RE.finditer(markdown))
+def _ast_nodes_to_parsed_sections(nodes: list[ASTNode]) -> list[ParsedSection]:
+    """
+    Convert a flat list of :class:`ASTNode` objects into a hierarchical
+    list of :class:`ParsedSection` objects.
 
-    for match in matches:
-        level = len(match.group(1))
-        title = match.group(2).strip()
+    Only ``HEADING``-type ASTNodes become ``ParsedSection`` objects.
+    Non-heading children (PARAGRAPH, TABLE, CODE) are collected into
+    the parent section's ``content`` field via recursive descent so
+    that content chunked by ``ApexParser`` is still fully recoverable.
+    """
+    node_map = {n.node_id: n for n in nodes}
 
-        # Text between previous heading end and current heading start
-        preceding_text = markdown[last_pos : match.start()]
+    def _build_section(
+        node: ASTNode,
+        position: int,
+        parent_path: str | None,
+    ) -> ParsedSection:
+        """Recursively build a ParsedSection tree from an ASTNode heading."""
+        # Recursively collect ALL descendant text (handles ApexParser chunking)
+        content_parts: list[str] = []
+        for child_id in node.children:
+            child = node_map.get(child_id)
+            if child and child.node_type != NodeType.HEADING:
+                child_text = _collect_descendant_text(child_id, node_map)
+                if child_text:
+                    content_parts.append(child_text)
+        content = "\n\n".join(content_parts).strip()
 
-        # Extract page numbers from preceding text
-        for pm in _PAGE_MARKER_RE.finditer(preceding_text):
-            page_num = int(pm.group(1) or pm.group(2))
-            current_page = max(current_page, page_num)
+        path = build_ltree_path(parent_path, position)
 
-        if stack and preceding_text.strip():
-            stack[-1][1].content = preceding_text.strip()
-            # Record end page for the previous section
-            if current_page > 0:
-                stack[-1][1].page_end = current_page
-
-        last_pos = match.end()
-
-        # Determine parent and position
-        while stack and stack[-1][0] >= level:
-            stack.pop()
-
-        parent = stack[-1][1] if stack else None
-        siblings = parent.children if parent else sections
-        position = len(siblings) + 1
-        parent_path = parent.path if parent else None
+        # Map ApexParser's implicit root title back to the legacy "Document" title
+        title = node.content
+        if title == "(implicit root)":
+            title = "Document"
 
         section = ParsedSection(
-            level=level,
+            level=node.depth + 1,
             title=title,
-            content="",
+            content=content,
+            path=path,
             position=position,
-            path=build_ltree_path(parent_path, position),
-            page_start=current_page if current_page > 0 else 0,
-            page_end=current_page if current_page > 0 else 0,
+            page_start=node.page_number or 0,
+            page_end=node.page_number or 0,
         )
 
-        siblings.append(section)
-        stack.append((level, section))
+        # Build child sections from sub-headings
+        child_pos = 0
+        for child_id in node.children:
+            child = node_map.get(child_id)
+            if child and child.node_type == NodeType.HEADING:
+                child_pos += 1
+                child_section = _build_section(child, child_pos, path)
+                section.children.append(child_section)
 
-    # Trailing text after the last heading
-    trailing = markdown[last_pos:].strip()
-    if stack and trailing:
-        # Capture any trailing page markers
-        for pm in _PAGE_MARKER_RE.finditer(trailing):
-            page_num = int(pm.group(1) or pm.group(2))
-            current_page = max(current_page, page_num)
-        stack[-1][1].content = trailing
-        if current_page > 0:
-            stack[-1][1].page_end = current_page
+        return section
 
-    # Propagate page ranges upward (parent's range = min(child starts)..max(child ends))
-    _propagate_pages(sections)
+    # Find root-level headings (parent_id is None)
+    root_headings = [n for n in nodes if n.parent_id is None and n.node_type == NodeType.HEADING]
 
-    # Robust chunking for industry readiness:
-    # If any section is a massive wall of text (>3000 chars), split it into sub-sections.
-    _chunk_large_sections(sections)
+    # If no headings exist, create a single section from all content
+    if not root_headings:
+        all_content = "\n\n".join(n.content for n in nodes if n.content).strip()
+        if all_content:
+            return [
+                ParsedSection(
+                    level=1,
+                    title="Document",
+                    content=all_content,
+                    path="1",
+                    position=1,
+                )
+            ]
+        return []
 
-    return sections
+    result: list[ParsedSection] = []
+    for i, root in enumerate(root_headings, 1):
+        section = _build_section(root, i, None)
+        result.append(section)
 
-
-def _propagate_pages(sections: list[ParsedSection]) -> None:
-    """
-    Recursively propagate page ranges upward through the tree.
-
-    A parent's page_start = min of all its children's page_starts.
-    A parent's page_end   = max of all its children's page_ends.
-    This ensures that chapter-level nodes reflect the full page range
-    of all their sub-sections.
-    """
-    for section in sections:
-        if section.children:
-            _propagate_pages(section.children)
-            child_starts = [c.page_start for c in section.children if c.page_start > 0]
-            child_ends = [c.page_end for c in section.children if c.page_end > 0]
-            if child_starts and section.page_start == 0:
-                section.page_start = min(child_starts)
-            if child_ends:
-                section.page_end = max(child_ends)
-
-
-def _chunk_large_sections(sections: list[ParsedSection], max_chars: int = 3000) -> None:
-    """
-    Recursively split sections with excessively large content into sub-sections.
-    This guarantees no single leaf node exceeds the LLM context window, making
-    the ingestion robust for industry documents (like long legal PDFs).
-    """
-    for section in sections:
-        if section.children:
-            _chunk_large_sections(section.children, max_chars)
-
-        # Chunk only if this is a leaf node and its content is too massive
-        if section.content and len(section.content) > max_chars and not section.children:
-            chunks = _split_text(section.content, max_chars)
-            if len(chunks) > 1:
-                for chunk_idx, chunk_text in enumerate(chunks):
-                    sub = ParsedSection(
-                        level=section.level + 1,
-                        title=f"{section.title} (Part {chunk_idx + 1})",
-                        content=chunk_text,
-                        position=chunk_idx + 1,
-                        path=build_ltree_path(section.path, chunk_idx + 1),
-                        page_start=section.page_start,
-                        page_end=section.page_end,
-                    )
-                    section.children.append(sub)
-                # Parent is no longer a leaf, content is pushed to its children
-                section.content = ""
-
-
-def _split_text(text: str, chunk_size: int) -> list[str]:
-    """Split text into chunks by double newline (paragraphs)."""
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current_chunk: list[str] = []
-    current_len = 0
-
-    for p in paragraphs:
-        if current_len + len(p) > chunk_size and current_chunk:
-            chunks.append("\n\n".join(current_chunk))
-            current_chunk = []
-            current_len = 0
-
-        current_chunk.append(p)
-        current_len += len(p)
-
-    if current_chunk:
-        chunks.append("\n\n".join(current_chunk))
-
-    return chunks
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +287,14 @@ class IngestionEngine:
 
         engine = IngestionEngine(storage, summariser)
         doc_id = await engine.ingest("/path/to/report.pdf")
+
+    Args:
+        storage:                  StorageEngine instance.
+        summariser:               Optional Summariser for generating LLM summaries.
+        parser_backend:           Parser backend (``markitdown``, ``docling``, or ``plaintext``).
+        parse_images_with_vision: If True, use LLM vision to generate summaries for image
+                                  nodes via :class:`VisionAdapter`.  Requires ``summariser``
+                                  to be set and the underlying LLM to support ``images``.
     """
 
     def __init__(
@@ -352,15 +303,14 @@ class IngestionEngine:
         summariser: Summariser | None = None,
         *,
         parser_backend: str = "markitdown",
-        executor: ThreadPoolExecutor | None = None,
+        parse_images_with_vision: bool = False,
+        apex_parser: ApexParser | None = None,
     ) -> None:
         self._storage = storage
         self._summariser = summariser
         self._backend = parser_backend
-        self._executor = executor or ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="apex_parse"
-        )
-        self._owns_executor = executor is None
+        self._parse_images_with_vision = parse_images_with_vision
+        self._apex_parser = apex_parser or ApexParser(default_doc_id="legacy")
 
     # -- Public API ---------------------------------------------------------
 
@@ -375,9 +325,13 @@ class IngestionEngine:
         Ingest a document file into the ApexRAG tree store.
 
         Args:
-            file_path:           Path to the document (PDF, DOCX, HTML, TXT, MD).
+            file_path:           Path to the document (PDF, DOCX, HTML, TXT, MD, or
+                                 supported image formats: PNG, JPG, WebP, BMP, etc.).
             doc_id:              Override the auto-generated doc ID (file hash).
-            synthesize_summaries: If True, call Ollama to generate summaries.
+            synthesize_summaries: If True, call the LLM to generate summaries.
+                                  For image files, the ``parse_images_with_vision``
+                                  constructor flag controls whether vision-capable
+                                  LLM summaries are generated.
 
         Returns:
             The doc_id assigned to the ingested document.
@@ -389,19 +343,26 @@ class IngestionEngine:
         # Compute stable doc_id from file content hash
         computed_id = doc_id or self._compute_doc_id(path)
 
+        # Short-circuit for image files
+        ext = path.suffix.lower()
+        if ext in _IMAGE_EXTENSIONS:
+            return await self._ingest_image(
+                path,
+                doc_id=computed_id,
+                synthesize_summaries=synthesize_summaries,
+            )
+
         t0 = time.monotonic()
         logger.info("Ingestion started: %s (doc_id=%s)", path.name, computed_id)
 
-        # 1. Convert to Markdown (CPU-bound, run in thread pool)
-        markdown = await self._convert_to_markdown(path)
-        logger.info("Converted to Markdown: %d chars", len(markdown))
+        # 1. Parse file via ApexParser (handles markitdown/docling/text conversion)
+        ast_nodes = await self._apex_parser.parse_file(path, doc_id=computed_id)
+        logger.info("Parsed file into %d AST nodes", len(ast_nodes))
 
-        # 2. Parse Markdown into section tree
-        root_sections = await asyncio.get_event_loop().run_in_executor(
-            self._executor, _parse_markdown_to_tree, markdown
-        )
+        # 2. Convert AST nodes into ParsedSection hierarchy for persistence
+        root_sections = _ast_nodes_to_parsed_sections(ast_nodes)
         total_nodes = _count_nodes(root_sections)
-        logger.info("Parsed %d sections from document", total_nodes)
+        logger.info("Converted to %d ParsedSections", total_nodes)
 
         # 3. Persist tree to DB and optionally synthesize summaries
         async with self._storage.session() as session:
@@ -436,9 +397,11 @@ class IngestionEngine:
         t0 = time.monotonic()
         logger.info("Ingesting raw text: doc_id=%s (%d chars)", doc_id, len(text))
 
-        root_sections = await asyncio.get_event_loop().run_in_executor(
-            self._executor, _parse_markdown_to_tree, text
-        )
+        # 1. Parse via ApexParser
+        ast_nodes = self._apex_parser.parse_markdown(text, doc_id=doc_id)
+
+        # 2. Convert to ParsedSections for persistence
+        root_sections = _ast_nodes_to_parsed_sections(ast_nodes)
 
         async with self._storage.session() as session:
             await self._persist_sections(
@@ -454,82 +417,122 @@ class IngestionEngine:
 
     # -- Lifecycle ----------------------------------------------------------
 
-    def shutdown(self, wait: bool = True) -> None:
-        """
-        Shut down the internal thread pool executor.
+    # -- Image ingestion ----------------------------------------------------
 
-        Call this when the engine is no longer needed to free up threads.
-        Safe to call multiple times; no-op if an external executor was
-        passed at construction time.
+    async def _ingest_image(
+        self,
+        path: Path,
+        *,
+        doc_id: str,
+        synthesize_summaries: bool,
+    ) -> str:
+        """Ingest a single image file into the tree store.
+
+        Uses :class:`ImageParser` to parse the image, then optionally
+        generates a vision-powered summary via :class:`Summariser` if
+        ``parse_images_with_vision`` is enabled.
 
         Args:
-            wait: If True (default), wait for all running tasks to finish.
-        """
-        if self._owns_executor:
-            self._executor.shutdown(wait=wait)
-            logger.debug("IngestionEngine executor shut down")
+            path:                  Path to the image file.
+            doc_id:                Document ID (computed from file hash).
+            synthesize_summaries:  Whether to generate summaries.
 
-    def __del__(self) -> None:
-        """Ensure executor is shut down on garbage collection."""
-        if hasattr(self, "_owns_executor") and self._owns_executor:
-            executor = getattr(self, "_executor", None)
-            if executor is not None:
-                executor.shutdown(wait=False)
+        Returns:
+            The ``doc_id`` assigned to the ingested image.
+        """
+        t0 = time.monotonic()
+        logger.info(
+            "Image ingestion started: %s (doc_id=%s, vision=%s)",
+            path.name,
+            doc_id,
+            self._parse_images_with_vision,
+        )
+
+        # Parse the image via ImageParser (produces a single ASTNode)
+        from apex_rag.retrieval.vision.parser import ImageParser
+
+        parser = ImageParser(default_doc_id=doc_id)
+        nodes = await parser.parse_file(path, doc_id=doc_id)
+
+        # Convert ASTNode to a ParsedSection for the persistence layer
+        ast_node = nodes[0]
+        section = ParsedSection(
+            level=1,
+            title=path.stem.replace("_", " ").replace("-", " ").title(),
+            content=ast_node.content or "",
+            path="1",
+            position=1,
+            image_data=ast_node.image_data,
+        )
+
+        # If vision summaries are requested and a summariser is available,
+        # generate a description using the LLM with image input
+        use_vision = synthesize_summaries and self._parse_images_with_vision
+
+        if use_vision and self._summariser:
+            # The Summariser.summarise() method already handles image_data
+            # by switching to _VISION_SUMMARY_PROMPT and passing images=.
+            summary = await self._summariser.summarise(
+                title=section.title,
+                content=section.content,
+                image_data=section.image_data,
+            )
+        elif synthesize_summaries and self._summariser:
+            # Standard (non-vision) summary from extracted OCR text
+            summary = await self._summariser.summarise(
+                title=section.title,
+                content=section.content or "(image file)",
+                image_data=None,
+            )
+        else:
+            summary = f"{section.title}: {path.name}"
+
+        # Persist the single image node
+        async with self._storage.session() as session:
+            node = DocumentNode(
+                doc_id=doc_id,
+                parent_id=None,
+                path=section.path,
+                title=section.title,
+                summary=summary,
+                content=section.content if section.content else None,
+                depth=0,
+                position=1,
+                page_start=0,
+                page_end=0,
+                image_data=section.image_data,
+            )
+            node.meta = {
+                "title": section.title,
+                "level": 1,
+                "char_count": len(section.content),
+                "type": "image",
+                "filename": path.name,
+                "vision_summary": self._parse_images_with_vision,
+            }
+            persisted = await self._storage.insert_node(session, node)
+
+            # Build a PageIndexEntry for the image node
+            pie = PageIndexEntry(
+                doc_id=doc_id,
+                node_id=persisted.id,
+                term=section.title,
+                page_start=0,
+                page_end=0,
+                path=section.path,
+            )
+            await self._storage.insert_page_index_entry(session, pie)
+
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "Image ingestion complete: doc_id=%s | vision=%s | elapsed=%.2fs",
+            doc_id,
+            use_vision,
+            elapsed,
+        )
+        return doc_id
 
     # -- Internal helpers ---------------------------------------------------
-
-    async def _convert_to_markdown(self, path: Path) -> str:
-        """Convert a file to Markdown using the configured backend."""
-        loop = asyncio.get_event_loop()
-
-        if self._backend == "markitdown":
-            return await loop.run_in_executor(self._executor, self._markitdown_convert, path)
-        elif self._backend == "docling":
-            return await loop.run_in_executor(self._executor, self._docling_convert, path)
-        else:
-            # Fallback: read as plain text (for .md / .txt files)
-            return path.read_text(encoding="utf-8", errors="replace")
-
-    @staticmethod
-    def _markitdown_convert(path: Path) -> str:
-        """Synchronous markitdown conversion (runs in thread pool)."""
-        try:
-            from markitdown import MarkItDown
-
-            md = MarkItDown()
-            result = md.convert(str(path))
-            return result.text_content
-        except ImportError:
-            logger.warning("markitdown not installed; reading file as plain text.")
-            return path.read_text(encoding="utf-8", errors="replace")
-
-    @staticmethod
-    def _docling_convert(path: Path) -> str:
-        """
-        Synchronous docling conversion (runs in thread pool).
-        Extracts images and embeds them as base64 in the markdown
-        (or placeholders that we can parse).
-        """
-        try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.document_converter import (  # type: ignore[attr-defined]
-                DocumentConverter,
-                PdfPipelineOptions,
-            )
-
-            pipeline_options = PdfPipelineOptions()
-            pipeline_options.images_scale = 2.0
-            pipeline_options.generate_page_images = True
-            pipeline_options.table_structure_options.do_rectification = True
-
-            converter = DocumentConverter(format_options={InputFormat.PDF: pipeline_options})
-            result = converter.convert(str(path))
-
-            # Export to markdown with image references
-            return result.document.export_to_markdown()
-        except ImportError:
-            logger.warning("docling not installed; reading file as plain text.")
-            return path.read_text(encoding="utf-8", errors="replace")
 
     async def _persist_sections(
         self,

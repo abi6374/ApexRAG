@@ -1,130 +1,86 @@
 """
-ApexRAG — Production-grade, local-first Agentic RAG Library.
+ApexRAG — High-accuracy Structural AI Retrieval Infrastructure.
 
-Install::
+ApexRAG preserves document hierarchy using Abstract Syntax Trees (AST) instead 
+of naive chunking, enabling zero-hallucination agentic navigation.
 
-    pip install apex-rag
-
-Quick start::
-
-    import asyncio
-    from apex_rag import ApexIndex
-
-    async def main():
-        async with await ApexIndex.create() as index:
-            doc_id = await index.ingest("report.pdf")
-            result = await index.query("What is the Q3 revenue?", doc_id)
-            if result:
-                print(result.content)
-                print(result.path, result.verified, result.confidence)
-
-    asyncio.run(main())
+Basic usage:
+    >>> from apex_rag import ApexIndex, OpenAIProvider
+    >>> async with await ApexIndex.create(model=OpenAIProvider()) as index:
+    >>>     doc_id = await index.ingest("report.pdf")
+    >>>     answer = await index.orchestrate_query("What is Q3 revenue?", doc_id)
 """
 
+import logging
 from importlib.metadata import PackageNotFoundError, version
+
+# Initialize Logging
+logger = logging.getLogger("apex_rag")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 try:
     __version__ = version("apex-rag")
 except PackageNotFoundError:
     __version__ = "1.0.2"
 
-# ── Public API ────────────────────────────────────────────────────────────
-# These are the classes and functions users interact with directly.
-# Internal implementation details (StorageEngine, DocumentNode, etc.) are
-# available from their respective submodules but not re-exported here.
+# ── Primary Library Exports ───────────────────────────────────────────────
 
 from apex_rag.client import ApexIndex
-from apex_rag.config import settings
-
-# ── Error hierarchy ───────────────────────────────────────────────────────
-from apex_rag.exceptions import (  # noqa: F401
-    ApexRAGError,
-    AuthenticationError,
-    ConfigurationError,
-    DatabaseConnectionError,
-    DocumentExistsError,
-    DocumentNotFoundError,
-    FileValidationError,
-    IngestionError,
-    InvalidProviderError,
-    ProviderError,
-    QueryError,
-    RateLimitError,
-    StorageError,
-)
-
-# ── Internal Re-exports (available but not in __all__) ────────────────────
-# These can be imported directly:  from apex_rag import NavigationAgent
-# But they won't appear in `from apex_rag import *` — keeping the
-# user-facing surface area small and discoverable.
-from apex_rag.ingestion.legacy import IngestionEngine, ParsedSection, Summariser  # noqa: F401
-from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult  # noqa: F401
 from apex_rag.providers import (
     AnthropicProvider,
-    AsyncLLM,
     GroqProvider,
+    LLMProvider,
     OllamaProvider,
     OpenAIProvider,
 )
+from apex_rag.core.ast.models import ASTNode, ASTNodeMetadata
+from apex_rag.core.evidence.models import EvidencePacket
+from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
 
-# ── Hybrid Search Engine ──────────────────────────────────────────────────
-from apex_rag.search import EmbeddingsEngine, HybridSearch  # noqa: F401
-from apex_rag.storage import DocumentNode, PageIndexEntry, QueryCache, StorageEngine  # noqa: F401
+# ── Integrations ──────────────────────────────────────────────────────────
+from apex_rag.integrations.langchain import ApexRAGRetriever
 
-# ── Telemetry ─────────────────────────────────────────────────────────────
-from apex_rag.telemetry import QueryMetricsCollector, query_metrics, setup_telemetry  # noqa: F401
-from apex_rag.utils import (
-    ReasoningTrace,  # noqa: F401
-    logger,
-    set_log_level,
+# ── Vision / Multi-modal (Part 8) ────────────────────────────────────────
+from apex_rag.retrieval.vision import ImageParser, VisionAdapter
+
+# ── Error Hierarchy ───────────────────────────────────────────────────────
+from apex_rag.exceptions import (
+    ApexRAGError,
+    AuthenticationError,
+    ConfigurationError,
+    DocumentNotFoundError,
+    FileValidationError,
+    StorageError,
 )
 
 __all__ = [
-    # Configuration
-    "settings",
-    # Primary API — the one class users need
     "ApexIndex",
-    # New Multi-Agent / AST Architecture
+    "LLMProvider",
+    "OpenAIProvider",
+    "AnthropicProvider",
+    "GroqProvider",
+    "OllamaProvider",
     "ASTNode",
     "ASTNodeMetadata",
-    "SemanticModel",
-    "ASTNavigationAgent",
-    "ASTNavigationResult",
-    "Orchestrator",
-    "QueryPlannerAgent",
-    "EvaluationCriticAgent",
+    "EvidencePacket",
+    "VisionAdapter",
+    "ImageParser",
     "TenantContext",
-    # Query result type
-    "NavigationResult",
-    # Provider protocol & implementations
-    "AsyncLLM",
-    "OllamaProvider",
-    "OpenAIProvider",
-    "GroqProvider",
-    "AnthropicProvider",
-    # Error hierarchy
+    "ASTNavigationResult",
+    "ApexRAGRetriever",
     "ApexRAGError",
-    "ConfigurationError",
-    "InvalidProviderError",
-    "DocumentNotFoundError",
-    "DocumentExistsError",
-    "IngestionError",
-    "QueryError",
-    "ProviderError",
-    "StorageError",
-    "DatabaseConnectionError",
     "AuthenticationError",
-    "RateLimitError",
+    "ConfigurationError",
+    "DocumentNotFoundError",
     "FileValidationError",
-    # Observability
-    "logger",
-    "set_log_level",
-    "query_metrics",
-    "QueryMetricsCollector",
-    "setup_telemetry",
-    # Hybrid Search
-    "HybridSearch",
-    "EmbeddingsEngine",
-    # Package version
+    "StorageError",
     "__version__",
 ]

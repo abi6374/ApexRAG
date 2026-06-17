@@ -55,6 +55,7 @@ from apex_rag.exceptions import (
     DocumentNotFoundError,
     FileValidationError,
 )
+from apex_rag.models.unified_models import ApexAnswer
 from apex_rag.navigation import NavigationResult
 from apex_rag.utils import logger
 
@@ -191,6 +192,20 @@ def get_index() -> ApexIndex:
     if state.index is None:
         raise HTTPException(503, "ApexIndex not initialised")
     return state.index
+
+
+def _get_llm(idx: ApexIndex) -> Any:
+    """Return the configured LLM provider without relying on one internal era."""
+    llm = vars(idx).get("_llm") if hasattr(idx, "__dict__") else None
+    if llm is not None:
+        return llm
+
+    legacy_agent = vars(idx).get("_agent") if hasattr(idx, "__dict__") else None
+    legacy_model = vars(legacy_agent).get("_model") if hasattr(legacy_agent, "__dict__") else None
+    if legacy_model is not None:
+        return legacy_model
+
+    raise HTTPException(503, "LLM provider not initialised")
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +401,30 @@ class QueryResponse(BaseModel):
     trace: list[list[Any]]  # [[node_id, title], ...]
 
 
+class OrchestrateStreamRequest(BaseModel):
+    """Request for the new multi-agent orchestrator streaming endpoint."""
+    doc_id: str
+    question: str
+    tenant_id: str = "default"
+    mode: str = "factual"
+
+
+class LLMStreamRequest(BaseModel):
+    """Request for direct LLM streaming (bypasses retrieval)."""
+    prompt: str
+    temperature: float = 0.0
+    max_tokens: int = 150
+    images: list[str] | None = None
+
+
+class LLMGenerateRequest(BaseModel):
+    """Request for non-streaming LLM generation."""
+    prompt: str
+    temperature: float = 0.0
+    max_tokens: int = 150
+    images: list[str] | None = None
+
+
 # ---------------------------------------------------------------------------
 # Routes — Documents
 # ---------------------------------------------------------------------------
@@ -433,7 +472,7 @@ async def ingest_file(
         tmp_path = Path(tmp.name)
 
     try:
-        ingested_id = await idx.ingest(
+        ingested_id = await idx.ingest_file(
             tmp_path,
             doc_id=doc_id,
             synthesize_summaries=synthesize_summaries,
@@ -561,11 +600,73 @@ async def _stream_query_to_sse(
 
 
 # ---------------------------------------------------------------------------
+# SSE Helpers — Token Streaming
+# ---------------------------------------------------------------------------
+
+
+async def _stream_orchestrated_sse(
+    question: str,
+    doc_id: str,
+    *,
+    tenant_id: str = "default",
+) -> AsyncGenerator[str, None]:
+    """
+    SSE generator for the multi-agent orchestrator streaming endpoint.
+
+    Iterates over ``ApexIndex.stream_query()`` and yields each content token
+    as an SSE ``data:`` event.  The generator is resilient: exceptions are
+    caught and forwarded as ``error`` events instead of crashing the stream.
+
+    Event types:
+      - ``token`` — single content token from the streaming LLM synthesis
+      - ``done``  — streaming complete
+      - ``error`` — an error occurred (message field contains details)
+    """
+    idx = get_index()
+    try:
+        async for chunk in idx.stream_query(question, doc_id, tenant_id=tenant_id):
+            # Yield every chunk as a token event
+            yield f"data: {json.dumps({'event': 'token', 'content': chunk})}\n\n"
+
+        yield f"data: {json.dumps({'event': 'done'})}\n\n"
+    except Exception as exc:
+        logger.error("Orchestrated stream error: %s", exc, exc_info=True)
+        yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+
+
+async def _stream_llm_sse(
+    prompt: str,
+    *,
+    temperature: float = 0.0,
+    max_tokens: int = 150,
+    images: list[str] | None = None,
+) -> AsyncGenerator[str, None]:
+    """
+    SSE generator for direct LLM streaming.
+
+    Yields ``data: {"event": "token", "content": "..."}`` for each token
+    produced by the configured LLM provider's ``stream_generate()``.
+    """
+    idx = get_index()
+    llm = _get_llm(idx)
+    try:
+        async for token in llm.stream_generate(
+            prompt, temperature=temperature, max_tokens=max_tokens, images=images
+        ):
+            yield f"data: {json.dumps({'event': 'token', 'content': token})}\n\n"
+
+        yield f"data: {json.dumps({'event': 'done'})}\n\n"
+    except Exception as exc:
+        logger.error("LLM stream error: %s", exc, exc_info=True)
+        yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+
+
+# ---------------------------------------------------------------------------
 # Routes — Query
 # ---------------------------------------------------------------------------
 
 
-def _to_query_response(result: NavigationResult | str | None) -> QueryResponse:
+def _to_query_response(result: NavigationResult | ApexAnswer | str | None) -> QueryResponse:
     """Convert a NavigationResult (or str/None) into a QueryResponse."""
     if result is None:
         return QueryResponse(
@@ -576,6 +677,23 @@ def _to_query_response(result: NavigationResult | str | None) -> QueryResponse:
             title=None,
             verified=False,
             confidence=0.0,
+            trace=[],
+        )
+    if isinstance(result, ApexAnswer):
+        node_id: int | None = None
+        title: str | None = "Synthesized Answer"
+        confidence = result.coverage_guarantee or 1.0
+        if result.evidence_packets:
+            first = result.evidence_packets[0]
+            title = first.node.content[:80] if first.node.content else "Evidence"
+        return QueryResponse(
+            found=bool(result.answer_text),
+            content=result.answer_text,
+            node_id=node_id,
+            path="apex",
+            title=title,
+            verified=bool(result.evidence_packets) or bool(result.answer_text),
+            confidence=confidence,
             trace=[],
         )
     if isinstance(result, str):
@@ -662,6 +780,95 @@ async def query_global_stream(req: GlobalQueryRequest) -> StreamingResponse:
         _stream_query_to_sse(query_task, event_queue),
         media_type="text/event-stream",
     )
+
+
+# ---------------------------------------------------------------------------
+# Routes — Orchestrated Query (Streaming)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/query/orchestrate/stream", tags=["Query"])
+async def query_orchestrate_stream(req: OrchestrateStreamRequest) -> StreamingResponse:
+    """
+    Stream the multi-agent orchestrator query via Server-Sent Events (SSE).
+
+    This endpoint uses the v1.0.2 architecture:
+      1. **Plan** — QueryPlannerAgent decomposes the question into sub-queries
+      2. **Navigate** — ASTNavigationAgent fetches context for each sub-query
+      3. **Critic** — EvaluationCriticAgent verifies the evidence
+      4. **Synthesize** — EvidenceSynthesizerAgent streams the answer token-by-token
+
+    Returns SSE events:
+      ``token``      — individual content token from the stream
+      ``done``       — streaming complete
+      ``error``      — an error occurred
+
+    Requires a document to already be indexed via ``POST /documents/ingest/file``.
+    """
+    return StreamingResponse(
+        _stream_orchestrated_sse(req.question, req.doc_id, tenant_id=req.tenant_id),
+        media_type="text/event-stream",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes — LLM (Direct Generation)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/llm/stream", tags=["LLM"])
+async def llm_stream(req: LLMStreamRequest) -> StreamingResponse:
+    """
+    Stream a prompt directly to the configured LLM provider, token by token.
+
+    Bypasses all retrieval — raw generation only. Useful for:
+      - Chat-style interactions
+      - Testing provider behaviour
+      - Offline synthesis
+
+    Returns SSE events:
+      ``token``  — individual content token
+      ``done``   — streaming complete
+      ``error``  — an error occurred
+
+    Images can be passed as base64-encoded strings for vision-capable models.
+    """
+    return StreamingResponse(
+        _stream_llm_sse(req.prompt, temperature=req.temperature, max_tokens=req.max_tokens, images=req.images),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/llm/generate", tags=["LLM"])
+async def llm_generate(req: LLMGenerateRequest) -> dict[str, Any]:
+    """
+    Generate a response from the configured LLM provider (non-streaming).
+
+    Bypasses all retrieval — raw generation only. Returns the full text in
+    a single response.
+
+    Args:
+        prompt:      The full text prompt.
+        temperature: Sampling temperature (default 0.0).
+        max_tokens:  Maximum tokens to generate (default 150).
+        images:      Optional list of base64-encoded image strings.
+
+    Returns:
+        A dict with ``content`` containing the generated text.
+    """
+    idx = get_index()
+    llm = _get_llm(idx)
+    try:
+        content = await llm.generate(
+            req.prompt,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            images=req.images,
+        )
+        return {"content": content}
+    except Exception as exc:
+        logger.error("LLM generation error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

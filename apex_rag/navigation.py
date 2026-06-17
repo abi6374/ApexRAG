@@ -27,6 +27,7 @@ from typing import Any
 
 from sqlalchemy import text as sa_text
 
+from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.providers import AsyncLLM
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import ReasoningTrace, async_retry, logger, truncate
@@ -160,12 +161,20 @@ class NavigationAgent:
         verifier_model: AsyncLLM | None = None,
         verify_leaves: bool = True,
         trace: ReasoningTrace | None = None,
+        apex_storage: ApexStorage | None = None,
     ) -> None:
         self._storage = storage
         self._model = model
         self._verifier_model = verifier_model or model
         self._verify_leaves = verify_leaves
         self._trace = trace or ReasoningTrace(enabled=True)
+        self._apex_storage = apex_storage
+
+        if apex_storage is not None:
+            logger.info(
+                "NavigationAgent initialised with ApexStorage backend — "
+                "will prefer AST nodes over legacy DocumentNodes"
+            )
 
     # -- Public API ---------------------------------------------------------
 

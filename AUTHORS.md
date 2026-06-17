@@ -2,7 +2,7 @@
 
 ## Creator & Maintainer
 
-- **G S Abinivas** ([@abinivas-17](https://github.com/abinivas-17)) — Project creator and lead maintainer.
+- **G S Abinivas** ([@abi6374](https://github.com/abi6374)) — Project creator and lead maintainer.
 
 ## Contributors
 

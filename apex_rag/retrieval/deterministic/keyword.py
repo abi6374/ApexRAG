@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 
-from apex_rag.core.ast.models import ASTNode
+from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.core.protocols.interfaces import DeterministicRetriever
 
 
@@ -38,7 +38,9 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
             return []
 
         # Flatten the AST to score sections and paragraphs
+        # Exclude the root node itself from candidates to prevent navigation loops
         all_nodes = self._flatten_ast(root_node)
+        all_nodes = [n for n in all_nodes if n.node_id != root_node.node_id]
 
         scored_nodes = []
         for node in all_nodes:
@@ -63,7 +65,7 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
         for q_token in query_tokens:
             if q_token in token_counts:
                 # Heading matches get a massive boost (structural scoring)
-                if node.node_type == "Section":
+                if node.node_type == NodeType.HEADING:
                     score += token_counts[q_token] * 5.0
                 else:
                     score += token_counts[q_token] * 1.0
@@ -74,9 +76,10 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
     def _flatten_ast(self, node: ASTNode) -> list[ASTNode]:
         nodes = []
         # We only want to rank substantive nodes, not the root Document container usually
-        if node.node_type in ("Section", "Paragraph", "Table", "ListItem"):
+        if node.node_type in (NodeType.HEADING, NodeType.PARAGRAPH, NodeType.TABLE, NodeType.LIST):
             nodes.append(node)
 
         for child in node.children:
-            nodes.extend(self._flatten_ast(child))
+            if isinstance(child, ASTNode):
+                nodes.extend(self._flatten_ast(child))
         return nodes

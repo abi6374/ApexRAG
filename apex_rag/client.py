@@ -1,5 +1,5 @@
 """
-client.py — Primary user-facing API for ApexRAG.
+client.py -- Primary user-facing API for ApexRAG.
 
 `ApexIndex` is the single entry point for all ApexRAG operations.
 It is designed to be:
@@ -24,65 +24,102 @@ Typical library usage::
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import logging
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Optional
 
+import networkx as nx
 from typing_extensions import Self
 
-from apex_rag.exceptions import (
-    DocumentNotFoundError,
+# Unified Models
+from apex_rag.models.unified_models import ASTNode, ApexAnswer, EvidencePacket, NodeType
+
+# Agents
+from apex_rag.agents.apex_orchestrator import ApexOrchestrator
+from apex_rag.agents.audit.conformal_wrapper import ConformalWrapperAgent
+from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
+from apex_rag.agents.critic.agent import EvaluationCriticAgent
+from apex_rag.agents.planner.agent import QueryPlannerAgent
+from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
+from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
+
+# Ingestion
+from apex_rag.ingestion.apex_parser import ApexParser
+from apex_rag.ingestion.apex_storage import ApexStorage
+from apex_rag.ingestion.embedding_engine import EmbeddingEngine
+from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
+from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
+
+# Exceptions & Utilities
+from apex_rag.exceptions import DocumentNotFoundError
+from apex_rag.providers import (
+    AnthropicProvider,
+    AsyncLLM,
+    GeminiProvider,
+    GroqProvider,
+    OllamaProvider,
+    OpenAIProvider,
+    OpenRouterProvier,
 )
-from apex_rag.ingestion.legacy import IngestionEngine, Summariser
+from apex_rag.utils import logger
+
+# Legacy / To be deprecated
+from apex_rag.ingestion.legacy import IngestionEngine
 from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult
-from apex_rag.providers import AsyncLLM, OllamaProvider
 from apex_rag.search import EmbeddingsEngine, HybridSearch
 from apex_rag.storage import StorageEngine
-from apex_rag.utils import ReasoningTrace, logger
-
 
 class ApexIndex:
     """
-    Production-ready, thread-safe facade for the ApexRAG library.
+    World-class, thread-safe facade for the ApexRAG research-grade library.
 
-    All mutating operations are protected by an asyncio.Lock, ensuring safe
-    concurrent usage from multiple FastAPI request handlers.
+    Provides a unified entry point for temporally-aware, causally-linked,
+    and uncertainty-quantified RAG.  ApexIndex orchestrates AST-based
+    ingestion, knowledge graph construction, and conformal retrieval.
 
-    Quick start::
+    Typical library usage::
 
         from apex_rag import ApexIndex
 
-        async with await ApexIndex.create() as index:
-            doc_id = await index.ingest("annual_report.pdf")
-            result = await index.query("What was Q3 revenue?", doc_id)
-            tree   = await index.get_tree(doc_id)
-            idx    = await index.get_page_index(doc_id)
+        async with await ApexIndex.create(provider="openai") as index:
+            await index.ingest_file("annual_report.pdf")
+            answer = await index.query("What was Q3 revenue?", coverage=0.90)
+            print(answer.answer_text)
 
     Args:
-        storage:        StorageEngine instance.
-        ingestor:       IngestionEngine instance.
-        agent:          NavigationAgent instance.
-        trace_enabled:  Whether to print the colored reasoning trace.
+        storage:          Unified :class:`ApexStorage` instance.
+        parser:           :class:`ApexParser` for AST conversion.
+        embedder:         :class:`EmbeddingEngine` for vector search.
+        summariser:       :class:`SemanticModelBuilder` for AST signposts.
+        graph_builder:    :class:`CausalGraphBuilder` for KGs.
+        orchestrator:     :class:`ApexOrchestrator` for multi-agent loops.
     """
 
     def __init__(
         self,
-        storage: StorageEngine,
-        ingestor: IngestionEngine,
-        agent: NavigationAgent,
-        aggregator: AggregatorAgent,
+        storage: ApexStorage,
+        parser: ApexParser,
+        embedder: EmbeddingEngine,
+        summariser: SemanticModelBuilder,
+        graph_builder: CausalGraphBuilder,
+        orchestrator: ApexOrchestrator,
         *,
+        llm: AsyncLLM | None = None,
         trace_enabled: bool = True,
-        embeddings: EmbeddingsEngine | None = None,
     ) -> None:
         self._storage = storage
-        self._ingestor = ingestor
-        self._agent = agent
-        self._aggregator = aggregator
-        self._search = HybridSearch(storage, embeddings=embeddings)
-        self._embeddings = embeddings
+        self._parser = parser
+        self._embedder = embedder
+        self._summariser = summariser
+        self._graph_builder = graph_builder
+        self._orchestrator = orchestrator
+        self._llm = llm
+
         self._trace_enabled = trace_enabled
         self._lock = asyncio.Lock()
 
@@ -92,100 +129,96 @@ class ApexIndex:
     async def create(
         cls,
         *,
-        db_url: str = "sqlite+aiosqlite:///apex.db",
-        model: str | AsyncLLM = "llama3.1",
-        summariser_model: str | AsyncLLM | None = None,
-        verifier_model: str | AsyncLLM | None = None,
-        aggregator_model: str | AsyncLLM | None = None,
-        ollama_host: str = "http://localhost:11434",
-        max_concurrent_summaries: int = 4,
-        parser_backend: str = "markitdown",
+        provider: str = "ollama",
+        model: str | AsyncLLM | None = None,
+        db_url: str = "sqlite+aiosqlite:///apex_rag.db",
         trace_enabled: bool = True,
-        verify_leaves: bool = True,
         db_echo: bool = False,
+        **kwargs: Any,
     ) -> ApexIndex:
         """
-        Async factory — initialises all sub-components and ensures DB schema.
+        Async factory - initialises all unified components and ensures DB schema.
 
         Args:
-            db_url:                    SQLAlchemy async URL.
-                                       SQLite:   ``sqlite+aiosqlite:///./apex.db``
-                                       Postgres: ``postgresql+asyncpg://user:pass@host/db``
-            ollama_host:               Local Ollama server URL.
-            model:                     Ollama model for navigation decisions.
-            summariser_model:          Model for ingestion summaries (defaults to `model`).
-            verifier_model:            Model for leaf verification (defaults to `model`).
-                                       Use a smaller/faster model here (e.g. phi3).
-            aggregator_model:          Model for multi-document synthesis.
-            max_concurrent_summaries:  Ingestion parallelism (tune to GPU VRAM).
-            parser_backend:            "markitdown" | "docling" | "plaintext".
-            trace_enabled:             Print live color-coded navigation trace.
-            verify_leaves:             Verify every candidate leaf with an LLM call.
-                                       Disable to trade accuracy for speed.
-            db_echo:                   Log SQL queries (dev only).
+            provider:      LLM provider name ("openai", "anthropic", "groq", "ollama").
+            model:         Specific model ID (e.g. "gpt-4o", "claude-3-5-sonnet").
+            db_url:        SQLAlchemy async connection URL for ApexStorage.
+            trace_enabled: Print colored reasoning traces.
+            db_echo:       Log SQL queries (dev only).
+            **kwargs:      Passed to the provider and orchestrator constructors.
         """
-        storage = await StorageEngine.create(db_url, echo=db_echo)
+        # 1. Resolve Provider
+        llm: AsyncLLM
+        
+        if hasattr(model, "generate") and hasattr(model, "embed"):
+            llm = model  # type: ignore[assignment]
+        elif hasattr(provider, "generate") and hasattr(provider, "embed"):
+            llm = provider # type: ignore
+        else:
+            p_name = str(provider).lower()
+            if p_name == "openai":
+                llm = OpenAIProvider(model=model or "gpt-4o-mini", **kwargs)
+            elif p_name == "anthropic":
+                llm = AnthropicProvider(model=model or "claude-3-5-sonnet-20240620", **kwargs)
+            elif p_name == "groq":
+                llm = GroqProvider(model=model or "llama3-70b-8192", **kwargs)
+            elif p_name == "gemini":
+                llm = GeminiProvider(model=model or "gemini-1.5-flash", **kwargs)
+            elif p_name == "openrouter":
+                llm = OpenRouterProvier(model=model or "meta-llama/llama-3-70b-instruct", **kwargs)
+            else:
+                llm = OllamaProvider(model=model or "llama3.1", **kwargs)
 
-        def _resolve_llm(m: str | AsyncLLM | None, fallback: AsyncLLM | None = None) -> AsyncLLM:
-            if isinstance(m, AsyncLLM):
-                return m
-            if isinstance(m, str):
-                return OllamaProvider(model=m, host=ollama_host)
-            if fallback is not None:
-                return fallback
-            return OllamaProvider(model="llama3.1", host=ollama_host)
+        # 2. Initialise Unified Storage
+        storage = await ApexStorage.create(db_url, echo=db_echo)
 
-        nav_model = _resolve_llm(model)
-        summ_model = _resolve_llm(summariser_model, fallback=nav_model)
-        verif_model = _resolve_llm(verifier_model, fallback=nav_model)
-        aggr_model = _resolve_llm(aggregator_model, fallback=nav_model)
+        # 3. Initialise Ingestion Engines
+        parser = ApexParser()
+        embedder = EmbeddingEngine(embedder=llm)
+        summariser = SemanticModelBuilder(llm=llm)
+        graph_builder = CausalGraphBuilder(embedder=embedder, llm=llm)
 
-        summariser = Summariser(
-            llm=summ_model,
-            max_concurrent=max_concurrent_summaries,
+        # 4. Initialise Agents
+        planner = QueryPlannerAgent(llm=llm)
+        
+        # ASTNavigationAgent requires a retriever and verifier
+        from apex_rag.retrieval.deterministic.keyword import KeywordDeterministicRetriever
+        from apex_rag.retrieval.verification.strict_verifier import StrictLeafVerifier
+        
+        retriever = KeywordDeterministicRetriever()
+        verifier = StrictLeafVerifier(llm=llm)
+        
+        navigator = ASTNavigationAgent(
+            storage=storage, 
+            model=llm,
+            retriever=retriever,
+            verifier=verifier
+        )
+        
+        critic = EvaluationCriticAgent(llm=llm)
+        synthesizer = EvidenceSynthesizerAgent(llm=llm)
+        temporal_auditor = TemporalAuditAgent()
+        conformal_wrapper = ConformalWrapperAgent(coverage_level=0.90)
+
+        orchestrator = ApexOrchestrator(
+            planner=planner,
+            navigator=navigator,
+            critic=critic,
+            synthesizer=synthesizer,
+            temporal_auditor=temporal_auditor,
+            conformal_wrapper=conformal_wrapper,
         )
 
-        ingestor = IngestionEngine(
+        return cls(
             storage=storage,
+            parser=parser,
+            embedder=embedder,
             summariser=summariser,
-            parser_backend=parser_backend,
-        )
-
-        trace = ReasoningTrace(enabled=trace_enabled)
-        agent = NavigationAgent(
-            storage=storage,
-            model=nav_model,
-            verifier_model=verif_model,
-            verify_leaves=verify_leaves,
-            trace=trace,
-        )
-
-        # Optional: EmbeddingsEngine
-        embeddings = None
-        try:
-            embeddings = EmbeddingsEngine()
-            # Non-blocking attempt to load
-            await embeddings.ensure_loaded()
-        except Exception:
-            embeddings = None
-
-        aggregator = AggregatorAgent(model=aggr_model)
-
-        instance = cls(
-            storage,
-            ingestor,
-            agent,
-            aggregator,
+            graph_builder=graph_builder,
+            orchestrator=orchestrator,
+            llm=llm,
             trace_enabled=trace_enabled,
-            embeddings=embeddings,
         )
-        logger.info(
-            "ApexIndex ready | db=%s | verify=%s | vectors=%s",
-            db_url.split("?")[0],
-            verify_leaves,
-            "enabled" if embeddings and embeddings.is_available else "disabled",
-        )
-        return instance
 
     # -- Context manager support -------------------------------------------
 
@@ -207,117 +240,170 @@ class ApexIndex:
 
     # -- Ingestion API ------------------------------------------------------
 
+    async def ingest_file(
+        self,
+        file_path: str | Path,
+        *,
+        doc_id: str | None = None,
+        source_date: datetime | None = None,
+        synthesize_summaries: bool = True,
+    ) -> str:
+        """
+        Ingest a file into the ApexRAG AST-based four-layer architecture.
+
+        Pipeline:
+            1. Parse -> Universal AST Nodes
+            2. Signpost -> 2-sentence summaries for navigation
+            3. Embed -> Async batched vector embeddings
+            4. Causal -> Automatic edge discovery (Supports/Overrides/etc.)
+            5. Store -> Persist to ApexStorage
+
+        Args:
+            file_path:   Path to PDF, DOCX, MD, or PY file.
+            doc_id:      Override auto-generated document ID.
+            source_date: Optional authorship date (extracted from meta if None).
+
+        Returns:
+            The document ID.
+        """
+        async with self._lock:
+            # 1. Parse
+            nodes = await self._parser.parse_file(file_path, doc_id=doc_id)
+            resolved_doc_id = nodes[0].doc_id
+
+            # 2. Signpost (Summarise)
+            if synthesize_summaries:
+                signposts = await self._summariser.build_signposts(nodes)
+                for node in nodes:
+                    if node.node_id in signposts:
+                        node.content = f"{signposts[node.node_id]}\n\n{node.content}"
+
+            # 3. Embed
+            await self._embedder.embed_nodes(nodes)
+
+            # 4. Causal Edge Discovery
+            edges = await self._graph_builder.build_all(nodes)
+
+            # 5. Persistence (Save nodes first to satisfy foreign keys)
+            await self._storage.save_nodes(nodes)
+            for edge in edges:
+                await self._storage.save_causal_edge(edge.to_causal_edge())
+
+            # 6. Page Index Generation (Book-style index for headings)
+            page_entries = []
+            for node in nodes:
+                if node.node_type == NodeType.HEADING:
+                    page_entries.append({
+                        "node_id": node.node_id,
+                        "doc_id": resolved_doc_id,
+                        "term": node.content,
+                        "page_number": node.page_number
+                    })
+            if page_entries:
+                result = self._storage.save_page_index_entries(page_entries)
+                if inspect.isawaitable(result):
+                    await result
+
+            logger.info("Ingested document %s: %d nodes", resolved_doc_id, len(nodes))
+            return resolved_doc_id
+
     async def ingest(
         self,
         file_path: str | Path,
         *,
         doc_id: str | None = None,
+        source_date: datetime | None = None,
         synthesize_summaries: bool = True,
     ) -> str:
-        """
-        Ingest a document file into the ApexRAG decision tree.
-
-        Converts -> parses -> persists -> generates Semantic Map summaries
-        -> builds page index. All steps are async and cancellation-safe.
-
-        Args:
-            file_path:            Path to the document (PDF, DOCX, MD, HTML, TXT).
-            doc_id:               Override auto-generated ID (SHA-256 hash).
-            synthesize_summaries: Call Ollama for summaries. Set False for tests.
-
-        Returns:
-            doc_id — use this for all subsequent query/tree/index calls.
-        """
-        async with self._lock:
-            return await self._ingestor.ingest(
-                file_path,
-                doc_id=doc_id,
-                synthesize_summaries=synthesize_summaries,
-            )
+        """Backward-compatible alias for :meth:`ingest_file`."""
+        return await self.ingest_file(
+            file_path,
+            doc_id=doc_id,
+            source_date=source_date,
+            synthesize_summaries=synthesize_summaries,
+        )
 
     async def ingest_text(
         self,
         text: str,
         *,
         doc_id: str,
+        source_date: datetime | None = None,
         synthesize_summaries: bool = True,
     ) -> str:
         """
-        Ingest raw Markdown/plain text — no file required.
-
-        Useful for:
-        - Programmatic document creation
-        - Unit testing without physical files
-        - Streaming ingestion from pipelines
+        Ingest raw Markdown/plain text into the AST architecture.
 
         Args:
-            text:                 Raw Markdown or plain text.
-            doc_id:               Required unique identifier.
-            synthesize_summaries: Generate LLM summaries for tree nodes.
+            text:        Raw Markdown or plain text.
+            doc_id:      Required unique identifier.
+            source_date: Optional authorship date.
 
         Returns:
-            The doc_id passed in.
+            The document ID.
         """
         async with self._lock:
-            return await self._ingestor.ingest_text(
-                text,
-                doc_id=doc_id,
-                synthesize_summaries=synthesize_summaries,
+            # 1. Parse
+            nodes = self._parser.parse_markdown(
+                text, doc_id=doc_id, source_date=source_date
             )
+
+            # 2. Signpost
+            if synthesize_summaries:
+                signposts = await self._summariser.build_signposts(nodes)
+                for node in nodes:
+                    if node.node_id in signposts:
+                        node.content = f"{signposts[node.node_id]}\n\n{node.content}"
+
+            # 3. Embed
+            await self._embedder.embed_nodes(nodes)
+
+            # 4. Causal Edge Discovery
+            edges = await self._graph_builder.build_all(nodes)
+
+            # 5. Persistence (Save nodes first to satisfy foreign keys)
+            await self._storage.save_nodes(nodes)
+            for edge in edges:
+                await self._storage.save_causal_edge(edge.to_causal_edge())
+
+            # 6. Page Index Generation (Book-style index for headings)
+            page_entries = []
+            for node in nodes:
+                if node.node_type == NodeType.HEADING:
+                    page_entries.append({
+                        "node_id": node.node_id,
+                        "doc_id": doc_id,
+                        "term": node.content,
+                        "page_number": node.page_number
+                    })
+            if page_entries:
+                result = self._storage.save_page_index_entries(page_entries)
+                if inspect.isawaitable(result):
+                    await result
+
+            logger.info("Ingested text %s: %d nodes", doc_id, len(nodes))
+            return doc_id
 
     async def ingest_many(
         self,
         items: list[tuple[str, str | Path]],
-        *,
-        synthesize_summaries: bool = True,
     ) -> list[str]:
         """
-        Batch-ingest multiple files/texts in parallel.
-
-        Each item is either:
-          - ``(doc_id, file_path)`` for file ingestion
-          - ``(doc_id, text_content)`` for raw text ingestion
-
-        All items are ingested concurrently using asyncio.gather, which
-        significantly speeds up bulk-loading workflows.
+        Batch-ingest multiple files/texts concurrently.
 
         Args:
-            items:                 List of ``(doc_id, path_or_text)`` tuples.
-            synthesize_summaries: Generate LLM summaries for all items.
+            items: List of (doc_id, path_or_text) tuples.
 
         Returns:
-            List of ``doc_id`` strings in the same order as ``items``.
-
-        Example::
-
-            doc_ids = await index.ingest_many([
-                ("doc1", "report.pdf"),
-                ("doc2", Path("memo.md")),
-                ("doc3", "# Manual Inline\nContent here"),
-            ])
+            List of document IDs.
         """
-        async with self._lock:
-            tasks = []
-            for doc_id, source in items:
-                if isinstance(source, str) and not Path(source).exists():
-                    # Treat as raw text
-                    tasks.append(
-                        self._ingestor.ingest_text(
-                            source,
-                            doc_id=doc_id,
-                            synthesize_summaries=synthesize_summaries,
-                        )
-                    )
-                else:
-                    path = Path(source) if isinstance(source, str) else source
-                    tasks.append(
-                        self._ingestor.ingest(
-                            path,
-                            doc_id=doc_id,
-                            synthesize_summaries=synthesize_summaries,
-                        )
-                    )
-            return await asyncio.gather(*tasks)
+        tasks = []
+        for doc_id, source in items:
+            if isinstance(source, str) and not Path(source).exists():
+                tasks.append(self.ingest_text(source, doc_id=doc_id))
+            else:
+                tasks.append(self.ingest_file(source, doc_id=doc_id))
+        return list(await asyncio.gather(*tasks))
 
     # -- Query API ----------------------------------------------------------
 
@@ -326,227 +412,225 @@ class ApexIndex:
         question: str,
         doc_id: str,
         *,
-        root_node_id: int | None = None,
+        coverage: float = 0.90,
+        domain: str = "general",
+        ablation_mode: bool = False,
+        root_node_id: str | int | None = None,
         event_queue: asyncio.Queue[Any] | None = None,
-        hybrid: bool = False,
-    ) -> NavigationResult | None:
+    ) -> ApexAnswer:
         """
-        Navigate the document tree to answer `question`.
-
-        The agent recursively walks the structural tree, makes LLM-guided
-        decisions at each level, verifies the answer at the leaf, and
-        returns the exact section content — no hallucinated blending.
-
-        When ``hybrid=True``, the search combines:
-          1. Vector similarity (semantic embeddings — requires sentence-transformers)
-          2. Keyword / BM25 matches (SQLite FTS5)
-          3. Agentic navigation (LLM-guided structural tree walking)
+        Query the index with a mathematically rigorous confidence guarantee.
 
         Args:
-            question:     Natural-language query.
-            doc_id:       Target document (returned by ingest()).
-            root_node_id: Restrict to a subtree (optional).
-            event_queue:  Optional asyncio.Queue for real-time status updates.
-            hybrid:       Enable hybrid search (vector + keyword + agentic).
+            question: Natural-language query.
+            doc_id:   The document to search.
+            coverage: Target conformal coverage level (e.g. 0.90).
+            domain:   Strategic domain for freshness decay ("legal", "financial", etc.).
+            ablation_mode: Run in Baseline C mode (AST only).
 
         Returns:
-            NavigationResult with .content, .path, .trace, .verified,
-            or None if the answer could not be found.
+            An :class:`ApexAnswer` containing the text, evidence, and coverage info.
         """
-        if hybrid and self._embeddings and self._embeddings.is_available:
-            # Hybrid ranking: combine vector + keyword + structural scores
-            # to pre-filter candidates, then enrich the query with top section titles
-            rankings = await self._search.hybrid_rank(question, doc_id)
-            if rankings:
-                # Add top section titles as context to guide the agent's navigation
-                top_titles = [n.title for n, _ in rankings[:5]]
-                hint_text = "; ".join(top_titles)
-                enriched_question = (
-                    f"{question}\n\n[Hybrid search suggests these sections: {hint_text}]"
-                )
-                logger.info(
-                    "Hybrid: %d candidates ranked, enriching query with top sections",
-                    len(rankings),
-                )
-                return await self._agent.find(
-                    query=enriched_question,
-                    doc_id=doc_id,
-                    root_node_id=root_node_id,
-                    event_queue=event_queue,
-                )
+        # Set target coverage on the orchestrator's conformal wrapper
+        self._orchestrator.conformal_wrapper.coverage_level = coverage
 
-        return await self._agent.find(
+        if event_queue is not None:
+            await event_queue.put({"event": "start", "doc_id": doc_id, "question": question})
+
+        answer = await self._orchestrator.run(
             query=question,
             doc_id=doc_id,
-            root_node_id=root_node_id,
-            event_queue=event_queue,
+            domain=domain,
+            ablation_mode=ablation_mode,
         )
 
-    async def query_stream(
+        if answer is None:
+            # Return an empty answer object rather than None for API consistency
+            return ApexAnswer(
+                answer_text="I could not find enough verified evidence to answer your query.",
+                query=question,
+            )
+
+        if event_queue is not None:
+            await event_queue.put({"event": "done", "doc_id": doc_id})
+
+        return answer
+
+    async def stream_query(
         self,
         question: str,
         doc_id: str,
         *,
-        event_queue: asyncio.Queue[Any] | None = None,
+        domain: str = "general",
+        tenant_id: str = "default",
     ) -> AsyncGenerator[str, None]:
         """
-        Stream the navigation process token by token.
-
-        Yields SSE-style JSON events as the agent:
-        - Enters nodes
-        - Evaluates children
-        - Makes choices
-        - Verifies leaves
-        - Produces the final answer
+        Stream answer tokens as they are generated.
 
         Args:
-            question:    Natural-language query.
-            doc_id:      Target document.
-            event_queue: Optional external queue to feed events into.
+            question: Natural-language query.
+            doc_id:   The document to search.
+            domain:   Strategic domain for freshness decay.
 
         Yields:
-            JSON strings with keys: event, node_id, title, path, etc.
+            Token chunks from the LLM.
         """
-        # Create or use the provided event queue
-        q: asyncio.Queue[Any] = event_queue or asyncio.Queue()
-
-        # Launch the query in a background task
-        task = asyncio.create_task(self.query(question, doc_id, event_queue=q))
-
-        # Yield events as they arrive
-        while True:
-            done, _ = await asyncio.wait(
-                [asyncio.create_task(q.get()), task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            while not q.empty():
-                event = await q.get()
-                yield f"data: {json.dumps(event)}\n\n"
-            if task.done():
-                break
+        async for chunk in self._orchestrator.stream(
+            query=question,
+            doc_id=doc_id,
+            domain=domain,
+        ):
+            yield chunk
 
     async def query_global(
         self,
         question: str,
         *,
-        event_queue: asyncio.Queue[Any] | None = None,
         synthesize: bool = True,
-        hybrid: bool = False,
-    ) -> NavigationResult | str | None:
+        coverage: float = 0.90,
+        domain: str = "general",
+        event_queue: asyncio.Queue[Any] | None = None,
+    ) -> ApexAnswer | None:
+        """Query all indexed documents and return the first answer with evidence."""
+        docs = await self.list_documents()
+        best_answer: ApexAnswer | None = None
+
+        for doc_id in docs:
+            if event_queue is not None:
+                await event_queue.put({"event": "searching", "doc_id": doc_id})
+            answer = await self.query(
+                question,
+                doc_id,
+                coverage=coverage,
+                domain=domain,
+                event_queue=None,
+            )
+            if answer.evidence_packets:
+                return answer
+            if best_answer is None:
+                best_answer = answer
+
+        return best_answer
+
+    # -- Research & Explainability API --------------------------------------
+
+    async def get_causal_graph(self) -> nx.DiGraph:
         """
-        Query across ALL indexed documents.
-
-        First, the agent identifies the most relevant documents based on their
-        top-level summaries, then performs a structural search within each
-        candidate until an answer is found.
-
-        When ``hybrid=True``, vector similarity is used to rank documents
-        before agentic navigation (requires sentence-transformers).
-
-        Args:
-            question:    Natural-language query.
-            event_queue: Optional asyncio.Queue for real-time status updates.
-            synthesize:  If True, use AggregatorAgent to synthesize a final answer.
-            hybrid:      Enable vector-based document ranking.
+        Construct and return the full Causal Knowledge Graph.
 
         Returns:
-            NavigationResult, synthesized string, or None.
+            A NetworkX Directed Graph where nodes are ASTNode IDs and edges
+            are typed causal relationships.
         """
-        if hybrid and self._embeddings and self._embeddings.is_available:
-            # Use vector search to find relevant docs first
-            candidates = await self._search.vector_search_global(question, top_k_docs=3)
-            if candidates:
-                for doc_id, _ in candidates:
-                    result = await self._agent.find(
-                        query=question,
-                        doc_id=doc_id,
-                        event_queue=event_queue,
-                    )
-                    if result:
-                        if synthesize:
-                            if event_queue:
-                                await event_queue.put({"event": "synthesize_start"})
-                            answer = await self._aggregator.synthesize(question, [result])
-                            if event_queue:
-                                await event_queue.put(
-                                    {"event": "synthesize_done", "answer": answer}
-                                )
-                            return answer
-                        return result
+        edges = await self._storage.get_all_edges()
+        graph = nx.DiGraph()
 
-        result = await self._agent.find_global(
-            query=question,
-            event_queue=event_queue,
-        )
+        for edge in edges:
+            graph.add_edge(
+                edge.source_node_id,
+                edge.target_node_id,
+                edge_id=edge.edge_id,
+                type=edge.edge_type,
+                strength=edge.strength,
+                evidence=edge.evidence,
+            )
 
-        if result and synthesize:
-            if event_queue:
-                await event_queue.put({"event": "synthesize_start"})
-            answer = await self._aggregator.synthesize(question, [result])
-            if event_queue:
-                await event_queue.put({"event": "synthesize_done", "answer": answer})
-            return answer
+        logger.info("Generated Causal Graph: %d edges", len(edges))
+        return graph
 
-        return result
+    async def calibrate(self, calibration_file: str | Path) -> float:
+        """
+        Update the conformal prediction layer with a new calibration set.
 
-    # -- Tree & Index API ---------------------------------------------------
+        Args:
+            calibration_file: Path to a JSON file containing
+                             (query, correct_node_id) pairs.
+
+        Returns:
+            The new q_hat threshold value.
+        """
+        path = Path(calibration_file)
+        if not path.exists():
+            raise FileNotFoundError(f"Calibration file not found: {path}")
+
+        data = json.loads(path.read_text())
+        # The ConformalWrapperAgent needs alpha scores (nonconformity)
+        # to compute the quantile. This usually requires running the retriever.
+        # For simplicity, we delegate to the wrapper's calibrate method if it exists,
+        # otherwise we log a warning.
+        if hasattr(self._orchestrator.conformal_wrapper, "calibrate_from_data"):
+             return await self._orchestrator.conformal_wrapper.calibrate_from_data(data)
+        
+        logger.warning("Calibration not supported by current wrapper implementation.")
+        return 0.0
+
+    async def explain(self, node_id: str) -> dict[str, Any]:
+        """
+        Return the full temporal and causal context for a specific ASTNode.
+
+        Args:
+            node_id: The UUID4 identifier of the node.
+
+        Returns:
+            A dictionary containing node content, freshness, and all
+            incoming/outgoing causal edges.
+        """
+        node = await self._storage.get_node(node_id)
+        if not node:
+            raise DocumentNotFoundError(f"Node {node_id} not found.")
+
+        temporal = await self._storage.get_temporal_metadata(node_id)
+        edges = await self._storage.get_edges_for_node(node_id)
+
+        return {
+            "node": node.model_dump(),
+            "temporal": temporal.model_dump() if temporal else None,
+            "edges": [e.model_dump() for e in edges],
+        }
+
+    # -- Tree & Index API (To be refactored) --------------------------------
 
     async def get_tree(self, doc_id: str) -> list[dict[str, Any]]:
         """
         Return the complete document tree as a list of node dicts.
 
-        Ordered by LTree path (depth-first). Used by the FastAPI index page
-        to render the expandable tree UI.
+        Ordered depth-first. Used by UIs to render expandable trees.
 
         Returns:
-            List of node dicts (see DocumentNode.to_dict()).
+            List of node dicts.
         """
-        async with self._storage.session() as session:
-            nodes = await self._storage.get_full_tree(session, doc_id)
-            return [n.to_dict() for n in nodes]
+        nodes = await self._storage.get_nodes_by_doc(doc_id)
+        # Sort by depth and then by some order if possible, 
+        # but for now we just return them.
+        return [n.model_dump() for n in nodes]
 
     async def export_tree(self, doc_id: str) -> list[dict[str, Any]]:
         """
-        Export the document tree as a nested JSON structure (PageIndex format).
+        Export the document tree as a nested JSON structure.
 
-        This perfectly matches the original PageIndex output format, where
-        each node contains a 'nodes' list of its children.
+        Each node contains a 'children_nodes' list of its children.
 
         Returns:
-            List of root node dicts, each with nested 'nodes'.
+            List of root node dicts, each with nested 'children_nodes'.
         """
-        async with self._storage.session() as session:
-            flat_nodes = await self._storage.get_full_tree(session, doc_id)
-
+        flat_nodes = await self._storage.get_nodes_by_doc(doc_id)
         if not flat_nodes:
             return []
 
-        # Convert to PageIndex dict format
-        node_dicts: dict[int, dict[str, Any]] = {}
-        for n in flat_nodes:
-            node_dicts[n.id] = {
-                "node_id": str(n.id),
-                "title": n.title,
-                "summary": n.summary,
-                "start_index": n.page_start,
-                "end_index": n.page_end,
-                "content": n.content if n.content else "",
-                "image_data": n.image_data,
-                "nodes": [],
-                "_parent_id": n.parent_id,  # Temporary for building tree
-            }
+        node_map = {n.node_id: n.model_dump() for n in flat_nodes}
+        for n in node_map.values():
+            n["children_nodes"] = []
 
-        # Build the nested structure
-        roots: list[dict[str, Any]] = []
-        for n in flat_nodes:
-            current = node_dicts[n.id]
-            pid = current.pop("_parent_id", None)
-
-            if pid is None:
-                roots.append(current)
+        roots = []
+        for n in node_map.values():
+            parent_id = n.get("parent_id")
+            if parent_id is None:
+                roots.append(n)
+            elif parent_id in node_map:
+                node_map[parent_id]["children_nodes"].append(n)
             else:
-                if pid in node_dicts:
-                    node_dicts[pid]["nodes"].append(current)
+                # Parent not in this doc (shouldn't happen) or root
+                roots.append(n)
 
         return roots
 
@@ -560,9 +644,7 @@ class ApexIndex:
         Returns:
             List of PageIndexEntry dicts sorted alphabetically by term.
         """
-        async with self._storage.session() as session:
-            entries = await self._storage.get_page_index(session, doc_id)
-            return [e.to_dict() for e in entries]
+        return await self._storage.get_page_index_entries(doc_id)
 
     async def search_index(self, doc_id: str, query: str) -> list[dict[str, Any]]:
         """
@@ -575,9 +657,9 @@ class ApexIndex:
         Returns:
             Matching PageIndexEntry dicts.
         """
-        async with self._storage.session() as session:
-            entries = await self._storage.search_page_index(session, doc_id, query)
-            return [e.to_dict() for e in entries]
+        return await self._storage.search_page_index(doc_id, query)
+
+    # -- Management API -----------------------------------------------------
 
     async def get_stats(self, doc_id: str) -> dict[str, Any]:
         """
@@ -586,58 +668,31 @@ class ApexIndex:
         Returns:
             Dict with keys: doc_id, total_nodes, max_depth, leaf_count.
         """
-        async with self._storage.session() as session:
-            return await self._storage.get_document_stats(session, doc_id)
-
-    # -- Management API -----------------------------------------------------
+        return await self._storage.get_document_stats(doc_id)
 
     async def delete(self, doc_id: str) -> int:
         """
-        Delete all tree nodes and page index entries for a document.
+        Delete all tree nodes, temporal meta, and causal edges for a document.
 
         Args:
-            doc_id: The document ID returned by ingest().
+            doc_id: The document ID returned by ingest_file().
 
         Returns:
-            Number of DocumentNodes deleted.
-
-        Raises:
-            DocumentNotFoundError: If the doc_id does not exist.
+            Number of nodes deleted.
         """
-        async with self._lock, self._storage.session() as session:
-            docs: list[str] = list(await self._storage.list_documents(session))
-            if doc_id not in docs:
-                raise DocumentNotFoundError(
-                    message=f"Document '{doc_id}' not found.",
-                    hint="Use index.list_documents() to see available documents.",
-                )
-            return await self._storage.delete_document(session, doc_id)
+        async with self._lock:
+            return await self._storage.delete_document(doc_id)
 
     async def list_documents(self) -> list[str]:
         """Return all doc_ids currently stored in the index."""
-        async with self._storage.session() as session:
-            results = await self._storage.list_documents(session)
-            return list(results)
+        return await self._storage.list_document_ids()
 
-    async def get_document(self, doc_id: str, node_id: int) -> dict[str, Any] | None:
+    async def get_nodes(self, doc_id: str) -> list[dict[str, Any]]:
         """
-        Fetch a specific node by its primary key.
-
-        Args:
-            doc_id:  Document ID the node belongs to (for validation).
-            node_id: Primary key of the DocumentNode.
+        Fetch all nodes for a specific document.
 
         Returns:
-            Node dict or None if not found or doc_id mismatch.
-
-        Raises:
-            DocumentNotFoundError: If the node doesn't exist.
+            List of node dictionaries.
         """
-        async with self._storage.session() as session:
-            node = await self._storage.get_node(session, node_id)
-            if node is None or node.doc_id != doc_id:
-                raise DocumentNotFoundError(
-                    message=f"Node {node_id} not found in document '{doc_id}'.",
-                    hint="Verify the doc_id and node_id. Use get_tree() to list available nodes.",
-                )
-            return node.to_dict()
+        nodes = await self._storage.get_nodes_by_doc(doc_id)
+        return [n.model_dump() for n in nodes]

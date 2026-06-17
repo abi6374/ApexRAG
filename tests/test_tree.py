@@ -10,9 +10,21 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
-from apex_rag.ingestion.legacy import _count_nodes, _parse_markdown_to_tree
+from apex_rag.ingestion.apex_parser import ApexParser
+from apex_rag.ingestion.legacy import _ast_nodes_to_parsed_sections, _count_nodes
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import build_ltree_path, path_depth
+
+
+_parser = ApexParser()
+
+
+def _parse(text: str) -> list:
+    """Parse markdown text into ParsedSections (test helper)."""
+    if not text or not text.strip():
+        return []
+    nodes = _parser.parse_markdown(text)
+    return _ast_nodes_to_parsed_sections(nodes)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -57,43 +69,43 @@ async def storage() -> StorageEngine:
 
 class TestMarkdownParser:
     def test_basic_parse_returns_two_roots(self) -> None:
-        sections = _parse_markdown_to_tree(SAMPLE_MARKDOWN)
+        sections = _parse(SAMPLE_MARKDOWN)
         assert len(sections) == 2, "Expected two top-level chapters"
 
     def test_chapter1_has_two_children(self) -> None:
-        sections = _parse_markdown_to_tree(SAMPLE_MARKDOWN)
+        sections = _parse(SAMPLE_MARKDOWN)
         ch1 = sections[0]
         assert ch1.title == "Chapter 1: Introduction"
         assert len(ch1.children) == 2
 
     def test_nested_section_path(self) -> None:
-        sections = _parse_markdown_to_tree(SAMPLE_MARKDOWN)
+        sections = _parse(SAMPLE_MARKDOWN)
         # Section 1.1.1 should have path "1.1.1"
         sec_111 = sections[0].children[0].children[0]
         assert sec_111.path == "1.1.1"
         assert sec_111.title == "Section 1.1.1: History"
 
     def test_content_extracted(self) -> None:
-        sections = _parse_markdown_to_tree(SAMPLE_MARKDOWN)
+        sections = _parse(SAMPLE_MARKDOWN)
         ch1 = sections[0]
         assert "introduces the topic" in ch1.content
 
     def test_positions_are_sequential(self) -> None:
-        sections = _parse_markdown_to_tree(SAMPLE_MARKDOWN)
+        sections = _parse(SAMPLE_MARKDOWN)
         ch2_children = sections[1].children
         assert [c.position for c in ch2_children] == [1, 2]
 
     def test_total_node_count(self) -> None:
-        sections = _parse_markdown_to_tree(SAMPLE_MARKDOWN)
+        sections = _parse(SAMPLE_MARKDOWN)
         # 2 roots + 4 level-2 + 1 level-3 = 7
         assert _count_nodes(sections) == 7
 
     def test_empty_markdown(self) -> None:
-        sections = _parse_markdown_to_tree("")
+        sections = _parse("")
         assert sections == []
 
     def test_only_text_no_headings(self) -> None:
-        sections = _parse_markdown_to_tree("Just some plain text without headings.")
+        sections = _parse("Just some plain text without headings.")
         assert len(sections) == 1
         assert sections[0].title == "Document"
         assert sections[0].content == "Just some plain text without headings."

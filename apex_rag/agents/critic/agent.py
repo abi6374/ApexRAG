@@ -45,7 +45,9 @@ class EvaluationCriticAgent(CriticAgent):
 
         context_text = ""
         for node in nodes:
-            context_text += f"--- [{node.id}] ---\n{node.content}\n"
+            # Handle both CoreASTNode and UnifiedASTNode
+            nid = getattr(node, "node_id", getattr(node, "id", "unknown"))
+            context_text += f"--- [{nid}] ---\n{node.content}\n"
 
         prompt = _CRITIC_PROMPT.format(sub_queries_text=sub_queries_text, context_text=context_text)
 

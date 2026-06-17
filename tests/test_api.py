@@ -2,11 +2,13 @@
 test_api.py — FastAPI endpoint tests for the ApexRAG API.
 
 Tests all public endpoints including health checks, document management,
-query, and UI routes. Uses httpx AsyncClient and patches app state.
+query, LLM streaming, and orchestrated streaming routes.
+Uses httpx AsyncClient and patches app state.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +16,28 @@ from httpx import ASGITransport, AsyncClient
 
 from apex_rag.api import app, state
 from apex_rag.navigation import NavigationResult
+
+
+async def _mock_stream_query(
+    question: str, doc_id: str, *, tenant_id: str = "default"
+) -> AsyncGenerator[str, None]:
+    """Mock async generator for ApexIndex.stream_query()."""
+    tokens = ["Here", " is", " the", " synthesized", " answer."]
+    for t in tokens:
+        yield t
+
+
+async def _mock_llm_stream(
+    prompt: str,
+    *,
+    temperature: float = 0.0,
+    max_tokens: int = 150,
+    images: list[str] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Mock async generator for LLMProvider.stream_generate()."""
+    tokens = ["Mock", "LLM", " response"]
+    for t in tokens:
+        yield t
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +71,16 @@ def setup_app_state():
         content="Global answer", node_id=0, path="global", title="Global",
         trace=[], verified=True, confidence=1.0,
     ))
+
+    # Stream query mock
+    mock_index.stream_query = _mock_stream_query
+
+    # Mock the underlying LLM model on the agent
+    mock_llm = MagicMock()
+    mock_llm.generate = AsyncMock(return_value="Mock LLM generated response")
+    mock_llm.stream_generate = _mock_llm_stream
+    mock_index._agent = MagicMock()
+    mock_index._agent._model = mock_llm
 
     state.index = mock_index
     state.started = True
@@ -217,6 +251,9 @@ async def test_static_routes_exist() -> None:
             "/query/stream",
             "/query/global",
             "/query/global/stream",
+            "/query/orchestrate/stream",
+            "/llm/stream",
+            "/llm/generate",
         ]
 
         for route in expected_routes:
@@ -271,3 +308,121 @@ async def test_visual_index_page() -> None:
         resp = await client.get("/documents/doc1/index/page")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
+
+
+@pytest.mark.asyncio
+async def test_query_orchestrate_stream_returns_sse() -> None:
+    """POST /query/orchestrate/stream should stream tokens as SSE."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/query/orchestrate/stream",
+            json={
+                "doc_id": "doc1",
+                "question": "What is the answer?",
+                "tenant_id": "default",
+                "mode": "factual",
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+        # Collect SSE events
+        events = []
+        for line in resp.text.strip().split("\n"):
+            if line.startswith("data: "):
+                events.append(line[6:])
+
+        # Should contain at least a 'done' event
+        done_events = [e for e in events if '"done"' in e or '"event": "done"' in e]
+        assert len(done_events) >= 1
+        # Should have at least one token event
+        token_events = [e for e in events if '"token"' in e or '"event": "token"' in e]
+        assert len(token_events) >= 1
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_returns_sse() -> None:
+    """POST /llm/stream should stream LLM tokens as SSE."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/llm/stream",
+            json={
+                "prompt": "Hello world",
+                "temperature": 0.5,
+                "max_tokens": 100,
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+        # Check we got streamed tokens
+        assert '{"event": "token"' in resp.text or '"token"' in resp.text
+        assert '{"event": "done"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_llm_generate_returns_text() -> None:
+    """POST /llm/generate should return generated text."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/llm/generate",
+            json={
+                "prompt": "Generate something",
+                "temperature": 0.0,
+                "max_tokens": 50,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "content" in data
+        assert data["content"] == "Mock LLM generated response"
+
+
+@pytest.mark.asyncio
+async def test_llm_generate_with_images() -> None:
+    """POST /llm/generate should accept images parameter."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/llm/generate",
+            json={
+                "prompt": "Describe this image",
+                "images": ["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "content" in data
+
+
+@pytest.mark.asyncio
+async def test_query_orchestrate_stream_missing_doc() -> None:
+    """Orchestrated stream should handle missing documents gracefully."""
+    # Patch stream_query to raise an error for missing doc
+    async def _mock_stream_error(
+        question: str, doc_id: str, *, tenant_id: str = "default"
+    ) -> AsyncGenerator[str, None]:
+        raise Exception("Document not found")
+        yield  # pragma: no cover
+
+    mock_index = state.index
+    original = mock_index.stream_query
+    mock_index.stream_query = _mock_stream_error
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/query/orchestrate/stream",
+            json={
+                "doc_id": "nonexistent",
+                "question": "Where is it?",
+            },
+        )
+        assert resp.status_code == 200
+        assert "error" in resp.text
+        assert "Document not found" in resp.text
+
+    mock_index.stream_query = original

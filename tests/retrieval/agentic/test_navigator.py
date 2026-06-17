@@ -1,5 +1,5 @@
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -7,34 +7,34 @@ from apex_rag.providers import AsyncLLM
 from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
 from apex_rag.retrieval.deterministic.keyword import KeywordDeterministicRetriever
 from apex_rag.retrieval.verification.strict_verifier import StrictLeafVerifier
-from apex_rag.storage import NodeData, SemanticModelData, StorageEngine
+from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
 
 
 @pytest.mark.asyncio
 async def test_ast_navigation_agent_flow():
-    # In-memory DB
-    storage = await StorageEngine.create("sqlite+aiosqlite:///:memory:")
-
     doc_id = "doc1"
     root_id = str(uuid.uuid4())
     leaf_id = str(uuid.uuid4())
 
-    async with storage.session() as session:
-        # Create Root Node
-        await storage.insert_ast_node(session, NodeData(
-            id=root_id, tenant_id="default", doc_id=doc_id, node_type="Section", content="Root"
-        ))
+    mock_storage = MagicMock(spec=ApexStorage)
+    mock_storage.session.return_value.__aenter__.return_value = AsyncMock()
 
-        # Create Leaf Node
-        await storage.insert_ast_node(session, NodeData(
-            id=leaf_id, tenant_id="default", doc_id=doc_id, parent_id=root_id, node_type="Paragraph", content="The Q3 revenue is $50M."
-        ))
+    # Mock DB rows returned by get_ast_children
+    root_row = ASTNodeRow(
+        node_id=root_id, doc_id=doc_id, node_type="HEADING", content="Root", parent_id=None
+    )
+    leaf_row = ASTNodeRow(
+        node_id=leaf_id, doc_id=doc_id, node_type="PARAGRAPH", content="Financial data for Q3\n\nThe Q3 revenue is $50M.", parent_id=root_id
+    )
 
-        # Create Semantic Map for Leaf
-        session.add(SemanticModelData(
-            node_id=leaf_id, concise_summary="Financial data for Q3"
-        ))
-        await session.commit()
+    async def mock_get_ast_children(session, parent_id, doc_id):
+        if parent_id is None:
+            return [root_row]
+        if parent_id == root_id:
+            return [leaf_row]
+        return []
+
+    mock_storage.get_ast_children = AsyncMock(side_effect=mock_get_ast_children)
 
     # Mock LLM for Navigation
     mock_llm = AsyncMock(spec=AsyncLLM)
@@ -48,7 +48,7 @@ async def test_ast_navigation_agent_flow():
     verifier = StrictLeafVerifier(llm=mock_verifier_llm)
 
     agent = ASTNavigationAgent(
-        storage=storage,
+        storage=mock_storage,
         model=mock_llm,
         retriever=retriever,
         verifier=verifier

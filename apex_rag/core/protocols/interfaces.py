@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from typing import Any, Protocol
 
 from apex_rag.core.ast.models import ASTNode
@@ -49,3 +50,36 @@ class CriticAgent(Protocol):
     """
 
     async def evaluate(self, sub_queries: list[str], nodes: list[ASTNode]) -> bool: ...
+
+
+class LLMProvider(Protocol):
+    """Async LLM provider with generation, streaming, and embedding support."""
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 150,
+        images: list[str] | None = None,
+    ) -> str:
+        ...
+
+    async def stream_generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.0,
+        max_tokens: int = 150,
+        images: list[str] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        ...
+        yield await self.generate(
+            prompt, temperature=temperature, max_tokens=max_tokens, images=images
+        )
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        ...
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support embeddings"
+        )
