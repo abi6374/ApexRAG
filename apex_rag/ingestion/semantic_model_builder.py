@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from typing import Any, Protocol
+from typing import Protocol
 
 from apex_rag.models.unified_models import ASTNode, NodeType
 
@@ -162,7 +162,6 @@ class SemanticModelBuilder:
         heading = node.content[:200] if node.content else "(no title)"
 
         # Collect child content for context
-        child_texts: list[str] = []
         # To avoid reading actual child content (which we might not have),
         # we rely on the node's own content.
         content_preview = node.content[: self._max_content_chars]

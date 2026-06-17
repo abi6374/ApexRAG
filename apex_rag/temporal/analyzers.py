@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Sequence
+from typing import Any
 
 logger = logging.getLogger("apex_rag.temporal.analyzers")
 

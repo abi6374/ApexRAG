@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
-from apex_rag.temporal.temporal_retriever import TemporalRetriever
-from apex_rag.temporal.state_reconstructor import StateReconstructor
+
 from apex_rag.temporal.analyzers import ChangeAnalyzer, TrendAnalyzer
+from apex_rag.temporal.state_reconstructor import StateReconstructor
+from apex_rag.temporal.temporal_retriever import TemporalRetriever
 
 logger = logging.getLogger("apex_rag.temporal.agent")
 
@@ -47,10 +49,8 @@ class TemporalReasoningAgent:
         # Match YYYY-MM-DD
         iso_matches = re.findall(r"\b(\d{4}-\d{2}-\d{2})\b", query)
         for iso_str in iso_matches:
-            try:
+            with contextlib.suppress(ValueError):
                 dates.append(datetime.strptime(iso_str, "%Y-%m-%d").replace(tzinfo=timezone.utc))
-            except ValueError:
-                pass
 
         # Match Year YYYY (2020-2030)
         year_matches = re.findall(r"\b(20[23]\d)\b", query)
@@ -109,13 +109,12 @@ class TemporalReasoningAgent:
             }
 
         # 2. Change / Compare: "Compare Q1 and Q2...", "What changed between..."
-        if "change" in query.lower() or "compare" in query.lower() or "diff" in query.lower():
-            if len(dates) >= 2:
-                # Compare state at date[0] vs date[1]
+        if ("change" in query.lower() or "compare" in query.lower() or "diff" in query.lower()) and len(dates) >= 2:
+            # Compare state at date[0] vs date[1]
                 t1, t2 = sorted(dates)
                 state1 = await self.reconstructor.reconstruct_metrics(doc_id, t1)
                 state2 = await self.reconstructor.reconstruct_metrics(doc_id, t2)
-                
+
                 # Check for "Revenue" or key metrics
                 metric_comparisons = {}
                 for key in set(state1.keys()).union(state2.keys()):
@@ -123,7 +122,7 @@ class TemporalReasoningAgent:
                     val2 = state2.get(key, 0.0)
                     if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
                         metric_comparisons[key] = self.change_analyzer.compare_metrics(float(val1), float(val2))
-                
+
                 text1 = await self.reconstructor.reconstruct_document_state(doc_id, t1)
                 text2 = await self.reconstructor.reconstruct_document_state(doc_id, t2)
                 text_diff = self.change_analyzer.compare_versions(text1, text2)

@@ -14,16 +14,13 @@ Supported input formats:
 from __future__ import annotations
 
 import ast
-import io
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.retrieval.vision.parser import SUPPORTED_EXTENSIONS as _IMAGE_EXTENSIONS
-
 
 # ═══════════════════════════════════════════════════════════════
 # Regex patterns for Markdown parsing
@@ -458,7 +455,7 @@ class ApexParser:
 
         try:
             tree = ast.parse(source_code)
-        except SyntaxError as e:
+        except SyntaxError:
             # If invalid Python, treat as plain text
             return self.parse_markdown(
                 f"# Python Source\n\n```python\n{source_code}\n```",
@@ -547,7 +544,7 @@ def _python_ast_to_nodes(
             if parent_id:
                 _add_child(nodes, parent_id, class_node.node_id)
 
-        elif isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             kind = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
             func_name = node.name
 
@@ -631,7 +628,7 @@ def _chunk_large_sections(
             if len(chunks) > 1:
                 # Create child nodes for each chunk
                 chunk_children: list[str] = []
-                for idx, chunk_text in enumerate(chunks):
+                for _idx, chunk_text in enumerate(chunks):
                     chunk_node = ASTNode(
                         content=chunk_text,
                         node_type=node.node_type,

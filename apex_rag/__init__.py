@@ -1,7 +1,7 @@
 """
 ApexRAG — High-accuracy Structural AI Retrieval Infrastructure.
 
-ApexRAG preserves document hierarchy using Abstract Syntax Trees (AST) instead 
+ApexRAG preserves document hierarchy using Abstract Syntax Trees (AST) instead
 of naive chunking, enabling zero-hallucination agentic navigation.
 
 Basic usage:
@@ -33,23 +33,9 @@ except PackageNotFoundError:
 # ── Primary Library Exports ───────────────────────────────────────────────
 
 from apex_rag.client import ApexIndex
-from apex_rag.providers import (
-    AnthropicProvider,
-    GroqProvider,
-    LLMProvider,
-    OllamaProvider,
-    OpenAIProvider,
-)
 from apex_rag.core.ast.models import ASTNode, ASTNodeMetadata
 from apex_rag.core.evidence.models import EvidencePacket
 from apex_rag.enterprise.auth.models import TenantContext
-from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
-
-# ── Integrations ──────────────────────────────────────────────────────────
-from apex_rag.integrations.langchain import ApexRAGRetriever
-
-# ── Vision / Multi-modal (Part 8) ────────────────────────────────────────
-from apex_rag.retrieval.vision import ImageParser, VisionAdapter
 
 # ── Error Hierarchy ───────────────────────────────────────────────────────
 from apex_rag.exceptions import (
@@ -60,6 +46,20 @@ from apex_rag.exceptions import (
     FileValidationError,
     StorageError,
 )
+
+# ── Integrations ──────────────────────────────────────────────────────────
+from apex_rag.integrations.langchain import ApexRAGRetriever
+from apex_rag.providers import (
+    AnthropicProvider,
+    GroqProvider,
+    LLMProvider,
+    OllamaProvider,
+    OpenAIProvider,
+)
+from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
+
+# ── Vision / Multi-modal (Part 8) ────────────────────────────────────────
+from apex_rag.retrieval.vision import ImageParser, VisionAdapter
 
 __all__ = [
     "ApexIndex",

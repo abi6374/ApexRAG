@@ -1,6 +1,7 @@
 import re
 import uuid
-from typing import Any, List
+from typing import Any
+
 from apex_rag.core.ast.models import ASTNode, ASTNodeMetadata
 from apex_rag.core.protocols.interfaces import DocumentParser
 from apex_rag.graph.edges.models import GraphEdge, RelationType
@@ -55,7 +56,7 @@ class MultiLanguageCodeParser(DocumentParser):
         # Regex heuristics for functions, classes, imports
         func_pattern = re.compile(r"^\s*def\s+(?P<name>\w+)\s*\(", re.MULTILINE)
         class_pattern = re.compile(r"^\s*class\s+(?P<name>\w+)(?:\((?P<base>\w+)\))?:", re.MULTILINE)
-        import_pattern = re.compile(r"^\s*(?:import\s+(?P<imp1>\w+)|from\s+(?P<from>\w+)\s+import\s+(?P<imp2>\w+))", re.MULTILINE)
+        re.compile(r"^\s*(?:import\s+(?P<imp1>\w+)|from\s+(?P<from>\w+)\s+import\s+(?P<imp2>\w+))", re.MULTILINE)
 
         for match in func_pattern.finditer(code):
             node = ASTNode(
@@ -141,7 +142,7 @@ class MultiLanguageCodeParser(DocumentParser):
     def _parse_rust(self, code: str, root: ASTNode, file_path: str) -> None:
         fn_pattern = re.compile(r"^\s*(?:pub\s+)?fn\s+(?P<name>\w+)\s*\(", re.MULTILINE)
         struct_pattern = re.compile(r"^\s*(?:pub\s+)?struct\s+(?P<name>\w+)", re.MULTILINE)
-        impl_pattern = re.compile(r"^\s*(?:pub\s+)?impl(?:\s+for\s+(?P<trait>\w+))?\s+for\s+(?P<name>\w+)", re.MULTILINE)
+        re.compile(r"^\s*(?:pub\s+)?impl(?:\s+for\s+(?P<trait>\w+))?\s+for\s+(?P<name>\w+)", re.MULTILINE)
 
         for match in fn_pattern.finditer(code):
             node = ASTNode(

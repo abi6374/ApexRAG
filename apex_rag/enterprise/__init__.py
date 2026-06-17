@@ -9,9 +9,11 @@ Sub-packages:
 """
 
 from typing import Any
+
+from apex_rag.enterprise.auth.access_control import AccessControlAgent, Roles
 from apex_rag.enterprise.auth.models import APIKey, TenantContext
-from apex_rag.enterprise.auth.access_control import Roles, AccessControlAgent
 from apex_rag.enterprise.code_intel.parser import PythonCodeParser
+
 
 def __getattr__(name: str) -> Any:
     if name == "get_tenant_context":

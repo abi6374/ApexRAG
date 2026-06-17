@@ -1,15 +1,14 @@
 import json
 import logging
 import re
-import time
 from dataclasses import dataclass
 from typing import Any
 
-from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
-from apex_rag.core.protocols.interfaces import DeterministicRetriever, VerificationEngine
 from apex_rag.core.navigation_budget import NavigationBudget
-from apex_rag.providers import AsyncLLM
+from apex_rag.core.protocols.interfaces import DeterministicRetriever, VerificationEngine
 from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
+from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
+from apex_rag.providers import AsyncLLM
 from apex_rag.utils import ReasoningTrace
 
 logger = logging.getLogger("apex_rag.retrieval.agentic.navigator")
@@ -182,7 +181,7 @@ class ASTNavigationAgent:
 
         logger.debug("[NAVIGATE] Node %s has %d candidates", current_node.node_id, len(candidates))
         prompt = _NAVIGATE_PROMPT.format(query=query, children_text=candidate_texts)
-        
+
         # Record LLM call to budget
         budget.record_llm_call()
         raw = await self._model.generate(prompt=prompt, temperature=0.0, max_tokens=150)

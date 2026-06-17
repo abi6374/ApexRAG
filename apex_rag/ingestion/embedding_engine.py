@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
-from collections.abc import AsyncIterator, Sequence
-from typing import Any, Protocol
+from collections.abc import Sequence
+from typing import Protocol
 
 from apex_rag.models.unified_models import ASTNode
 
@@ -142,7 +141,7 @@ class EmbeddingEngine:
         result: list[float] = []
         counter = 0
         while len(result) < self._dimension:
-            extended = hashlib.sha256(f"{text}:{counter}".encode("utf-8")).hexdigest()
+            extended = hashlib.sha256(f"{text}:{counter}".encode()).hexdigest()
             for i in range(0, len(extended), 8):
                 chunk = extended[i : i + 8]
                 # Map hex to float in [-1, 1]

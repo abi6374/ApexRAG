@@ -15,42 +15,31 @@ and evidence chains before passing everything to the synthesizer.
 
 from __future__ import annotations
 
-import asyncio
-import logging
 import time
-from typing import Protocol
 
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
-from apex_rag.core.ast.models import ASTNode as CoreASTNode
-from apex_rag.core.evidence.models import EvidencePacket as CoreEvidencePacket
 from apex_rag.core.protocols.interfaces import CriticAgent, QueryPlanner
+from apex_rag.enterprise.auth.access_control import AccessControlAgent
+from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 from apex_rag.graph.edges.causal_retriever import CausalRetriever
+from apex_rag.graph.reasoning_engine import GraphReasoningEngine
 from apex_rag.models.unified_models import (
     ApexAnswer,
-    ASTNode as UnifiedASTNode,
-    CausalEdge,
-    EdgeType,
-    EvidencePacket as UnifiedEvidencePacket,
-    NodeType,
     TemporalMetadata,
 )
+from apex_rag.models.unified_models import (
+    EvidencePacket as UnifiedEvidencePacket,
+)
+from apex_rag.observability.trace_manager import trace_manager
 from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
 from apex_rag.retrieval.conformal.predictor import ConformalPredictor
-from apex_rag.retrieval.conformal.scorer import (
-    NonconformityScorer,
-    NonconformityStrategy,
-)
+from apex_rag.retrieval.state.machine import RetrievalState, RetrievalStateMachine
 from apex_rag.temporal.contradiction import TemporalContradictionDetector
-from apex_rag.temporal.scorer import FreshnessScorer
-from apex_rag.retrieval.state.machine import RetrievalStateMachine, RetrievalState
-from apex_rag.observability.trace_manager import trace_manager
-from apex_rag.graph.reasoning_engine import GraphReasoningEngine
 from apex_rag.temporal.lineage import DocumentLineageEngine
 from apex_rag.temporal.resolver import ContradictionResolver
+from apex_rag.temporal.scorer import FreshnessScorer
 from apex_rag.utils import ReasoningTrace, logger
-from apex_rag.enterprise.auth.models import TenantContext
-from apex_rag.enterprise.auth.access_control import AccessControlAgent
 
 # ═══════════════════════════════════════════════════════════════════════
 # Constants
@@ -179,7 +168,7 @@ class Orchestrator:
                 sub_queries = await self.planner.plan(enriched_query)
 
             state_machine.transition_to(
-                RetrievalState.PLAN_GENERATED, 
+                RetrievalState.PLAN_GENERATED,
                 {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type}
             )
             trace_manager.publish(trace_id, "reasoning", "PLAN_GENERATED", {
@@ -285,16 +274,17 @@ class Orchestrator:
         start_time = time.perf_counter()
 
         # Check for temporal query using TemporalReasoningAgent
+        import json
+        import uuid
+
+        from apex_rag.temporal.state_reconstructor import StateReconstructor
         from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
         from apex_rag.temporal.temporal_retriever import TemporalRetriever
-        from apex_rag.temporal.state_reconstructor import StateReconstructor
-        import uuid
-        import json
-        
+
         retriever = TemporalRetriever(self.navigator._storage)
         reconstructor = StateReconstructor(self.navigator._storage)
         temporal_agent = TemporalReasoningAgent(retriever, reconstructor)
-        
+
         has_temporal_history = False
         if temporal_agent.detect_time_query(query):
             storage = self.navigator._storage
@@ -317,7 +307,7 @@ class Orchestrator:
 
         if has_temporal_history:
             temp_res = await temporal_agent.solve_temporal_query(query, doc_id)
-            
+
             evidence_packets = []
             answer_text = temp_res.get("reasoning", "")
             res_data = temp_res.get("result", {})
@@ -326,9 +316,11 @@ class Orchestrator:
                 content_str = res_data["content"]
             elif "summary" in res_data:
                 content_str = res_data["summary"]
-                
-            from apex_rag.models.unified_models import ASTNode as UnifiedASTNode, NodeType, EvidencePacket as UnifiedEvidencePacket, TemporalMetadata
-            
+
+            from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
+            from apex_rag.models.unified_models import EvidencePacket as UnifiedEvidencePacket
+            from apex_rag.models.unified_models import NodeType, TemporalMetadata
+
             node = UnifiedASTNode(
                 node_id=str(uuid.uuid4()),
                 content=content_str or "Temporal reasoning results",
@@ -345,16 +337,16 @@ class Orchestrator:
                 content=node.content
             )
             evidence_packets.append(pkt)
-            
+
             if tenant_context is not None:
                 ac_agent = AccessControlAgent(self.navigator._storage)
                 for ep in evidence_packets:
                     ep.content = await ac_agent.mask_content(tenant_context, ep.content)
                 answer_text = await ac_agent.mask_content(tenant_context, answer_text)
                 await ac_agent.log_audit_trail(tenant_context, "TEMPORAL_QUERY", doc_id)
-            
+
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            
+
             return ApexAnswer(
                 answer_text=answer_text,
                 evidence_packets=evidence_packets,
@@ -388,7 +380,7 @@ class Orchestrator:
         # V3 Graph Reasoning stage
         state_machine.transition_to(RetrievalState.GRAPH_REASONING)
         trace_manager.publish(trace_id, "graph", "GRAPH_REASONING", {})
-        
+
         causal_chain = []
         contradictions = []
 
@@ -421,7 +413,7 @@ class Orchestrator:
         resolver = ContradictionResolver(lineage_engine=lineage_engine)
         contradiction_report = resolver.resolve(packets, causal_chain + contradictions)
         packets = contradiction_report.authoritative_packets
-        
+
         # Add resolver contradictions if any
         for conflict in contradiction_report.conflicts:
             for edge in causal_chain + contradictions:
@@ -476,7 +468,7 @@ class Orchestrator:
 
         if self.conformal_predictor is not None:
             conformal_scores = self.conformal_predictor.scorer.score_many(packets)
-            for pkt, score in zip(packets, conformal_scores):
+            for pkt, score in zip(packets, conformal_scores, strict=False):
                 pkt.nonconformity_score = score
 
             calibrator = self.conformal_predictor.calibrator
@@ -491,7 +483,7 @@ class Orchestrator:
                     prediction_set_size = set_size
                 else:
                     coverage_guarantee = calibrator.coverage_level
-                    
+
         trace_manager.publish(trace_id, "conformal", "CONFORMAL_COMPLETE", {
             "coverage_guarantee": coverage_guarantee,
             "prediction_set_size": prediction_set_size
@@ -542,7 +534,7 @@ class Orchestrator:
         packets: list[UnifiedEvidencePacket] = []
         resolved: set[str] = set()
 
-        for i, sq in enumerate(sub_queries):
+        for _i, sq in enumerate(sub_queries):
             logger.info("[NAVIGATE] Resolving sub-query: '%s'", sq)
             nav_result = await self.navigator.find(query=sq, doc_id=doc_id)
 
@@ -550,7 +542,7 @@ class Orchestrator:
                 logger.info(
                     "[NAVIGATE] Node %s answers '%s'", nav_result.node_id, sq
                 )
-                
+
                 # Build UnifiedEvidencePacket directly
                 pkt = UnifiedEvidencePacket(
                     node=nav_result.node,

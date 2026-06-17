@@ -1,8 +1,8 @@
 import re
 from collections import Counter
 
-from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.core.protocols.interfaces import DeterministicRetriever
+from apex_rag.models.unified_models import ASTNode, NodeType
 
 
 class KeywordDeterministicRetriever(DeterministicRetriever):

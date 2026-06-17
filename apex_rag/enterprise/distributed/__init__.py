@@ -10,12 +10,12 @@ implementations for horizontally scaled document parsing:
 Both enforce **tenant isolation** via ``TenantContext`` on every operation.
 """
 
-from apex_rag.enterprise.distributed.interfaces import DistributedIndexer
 from apex_rag.enterprise.distributed.indexers import (
     CeleryIndexer,
     JobRecord,
     RedisQueueIndexer,
 )
+from apex_rag.enterprise.distributed.interfaces import DistributedIndexer
 
 __all__ = [
     "DistributedIndexer",

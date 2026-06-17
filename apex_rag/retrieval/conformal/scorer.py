@@ -16,7 +16,6 @@ Available strategies (see :class:`NonconformityStrategy`):
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
 
 from apex_rag.core.evidence.models import EvidencePacket as CoreEvidencePacket
 

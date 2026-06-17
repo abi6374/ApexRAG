@@ -11,7 +11,6 @@ import logging
 from collections import deque
 from typing import Protocol
 
-from apex_rag.graph.edges.models import GraphEdge, RelationType
 from apex_rag.models.unified_models import ASTNode, CausalEdge, EdgeType
 
 logger = logging.getLogger("apex_rag.graph.causal_retriever")

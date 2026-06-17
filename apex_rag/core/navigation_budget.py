@@ -39,9 +39,7 @@ class NavigationBudget:
             return False
         if self.backtracks > self.max_backtracks:
             return False
-        if self.current_depth > self.max_depth:
-            return False
-        return True
+        return not self.current_depth > self.max_depth
 
     def record_llm_call(self) -> None:
         self.llm_calls += 1

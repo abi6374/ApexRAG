@@ -23,10 +23,8 @@ from dataclasses import dataclass
 from apex_rag.models.unified_models import (
     ASTNode,
     CausalEdge,
-    EdgeType,
     EvidencePacket,
     NodeType,
-    TemporalMetadata,
 )
 from apex_rag.temporal.contradiction import TemporalContradictionDetector
 from apex_rag.temporal.scorer import FreshnessScorer

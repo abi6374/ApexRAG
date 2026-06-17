@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,7 @@ class RetrievalState(str, Enum):
 class StateTransition(BaseModel):
     """Records a single state transition in the lifecycle."""
 
-    from_state: Optional[RetrievalState]
+    from_state: RetrievalState | None
     to_state: RetrievalState
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: float = 0.0

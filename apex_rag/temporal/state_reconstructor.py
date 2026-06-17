@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import datetime
 from typing import Any
+
 from sqlalchemy import select
-from apex_rag.ingestion.apex_storage import ApexStorage, NodeVersionRow, StateSnapshotRow, CausalEdgeRow
-from apex_rag.models.unified_models import ASTNode, CausalEdge, EdgeType, NodeType
+
+from apex_rag.ingestion.apex_storage import (
+    ApexStorage,
+    CausalEdgeRow,
+)
 
 logger = logging.getLogger("apex_rag.temporal.reconstructor")
 
@@ -42,7 +47,6 @@ class StateReconstructor:
         return res
 
     async def _get_causal_edges(self, as_of: datetime) -> list:
-        import inspect
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -58,7 +62,6 @@ class StateReconstructor:
             return []
 
     async def _get_change_history(self, entity_id: str, as_of: datetime) -> list:
-        import inspect
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -159,10 +162,8 @@ class StateReconstructor:
             content = getattr(node, "content", "")
             if content and type(content).__name__ not in ("MagicMock", "Mock", "AsyncMock") and isinstance(content, str):
                 if content.strip().startswith("{") and content.strip().endswith("}"):
-                    try:
+                    with contextlib.suppress(json.JSONDecodeError):
                         records.append(json.loads(content))
-                    except json.JSONDecodeError:
-                        pass
                 else:
                     # Add content as a general record
                     records.append({

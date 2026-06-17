@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
 from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.ingestion.apex_storage import ApexStorage, AuditLogRow
 
@@ -138,7 +139,7 @@ class AccessControlAgent:
         Uses a sandboxed execution context to evaluate Python expressions or execute scripts safely.
         """
         import datetime
-        
+
         # Prepare evaluation scope/environment
         local_env = {
             "context": context,
@@ -174,23 +175,23 @@ class AccessControlAgent:
             rule_type = getattr(rule, "rule_type", "expression")
             expression = getattr(rule, "expression", "")
             rule_name = getattr(rule, "name", "unknown")
-            
+
             if rule_type == "expression":
                 # Evaluate python expression (expression is expected to return bool)
                 return bool(eval(expression, globals_env, local_env))
             elif rule_type == "script":
                 # Execute python script block
                 exec(expression, globals_env, local_env)
-                
+
                 # Check for an 'evaluate' function in the local namespace
                 if "evaluate" in local_env and callable(local_env["evaluate"]):
                     res = local_env["evaluate"](context, resource_type, action, env or {})
                     return bool(res)
-                
+
                 # Fallback: check for 'result' variable
                 if "result" in local_env:
                     return bool(local_env["result"])
-                
+
                 logger.error(f"Custom script rule '{rule_name}' completed without setting 'result' or defining 'evaluate'")
                 return False
             else:
@@ -294,9 +295,8 @@ class AccessControlAgent:
             elif role == Roles.AUDITOR:
                 if action in ("read", "traverse", "audit"):
                     return True
-            elif role in (Roles.VIEWER, Roles.GUEST):
-                if action in ("read", "traverse"):
-                    return True
+            elif role in (Roles.VIEWER, Roles.GUEST) and action in ("read", "traverse"):
+                return True
 
         return False
 
@@ -327,10 +327,9 @@ class AccessControlAgent:
             elif role in (Roles.AUDITOR, Roles.VIEWER):
                 if field_name not in ("Profit Margin", "Salary"):
                     return True
-            elif role == Roles.GUEST:
+            elif role == Roles.GUEST and field_name not in ("Revenue", "Profit Margin", "Stock", "Salary"):
                 # Guest is heavily restricted
-                if field_name not in ("Revenue", "Profit Margin", "Stock", "Salary"):
-                    return True
+                return True
 
         return False
 
@@ -354,11 +353,11 @@ class AccessControlAgent:
                 pattern = rf"\b({field})\b\s*(?:=|\:|of|is)?\s*[\$\w\d\.\,\-]+"
                 masked_content = re.sub(
                     pattern,
-                    rf"\1 = [REDACTED]",
+                    r"\1 = [REDACTED]",
                     masked_content,
                     flags=re.IGNORECASE
                 )
-                
+
                 # Broad word replacements for anything containing the field
                 # (e.g. "profit margin of 20%" -> "profit margin of [REDACTED]")
                 pattern_margin = r"\b(profit\s+margin)\b\s*(?:=|\:|of|is)?\s*[\$\w\d\.\,\-%]+"
@@ -382,7 +381,7 @@ class AccessControlAgent:
         """Creates and saves a secure audit trail log row."""
         before_str = json.dumps(before_state) if before_state is not None else None
         after_str = json.dumps(after_state) if after_state is not None else None
-        
+
         # Primary role is usually first or defaults
         role = context.roles[0] if context.roles else Roles.GUEST
 

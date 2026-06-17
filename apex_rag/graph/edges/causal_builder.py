@@ -452,6 +452,4 @@ EVIDENCE:Passage A provides a more detailed breakdown of the revenue figures men
         """Check if two nodes are parent-child or siblings."""
         if a.parent_id == b.node_id or b.parent_id == a.node_id:
             return True
-        if a.parent_id is not None and a.parent_id == b.parent_id:
-            return True
-        return False
+        return bool(a.parent_id is not None and a.parent_id == b.parent_id)

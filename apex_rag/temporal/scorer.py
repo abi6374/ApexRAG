@@ -18,7 +18,7 @@ Default decay rates by domain:
 from __future__ import annotations
 
 import math
-from datetime import datetime, date, timezone
+from datetime import date, datetime, timezone
 
 # ═══════════════════════════════════════════════════════════════
 # Domain registry
@@ -98,10 +98,7 @@ class FreshnessScorer:
         if source_date is None:
             return 1.0
 
-        if isinstance(source_date, datetime):
-            source_date_d = source_date.date()
-        else:
-            source_date_d = source_date
+        source_date_d = source_date.date() if isinstance(source_date, datetime) else source_date
 
         days = (self._reference_date - source_date_d).days
 

@@ -8,8 +8,8 @@ Provides:
 
 from __future__ import annotations
 
-from apex_rag.retrieval.vision.provider import VisionAdapter
 from apex_rag.retrieval.vision.parser import ImageParser
+from apex_rag.retrieval.vision.provider import VisionAdapter
 
 __all__ = [
     "VisionAdapter",

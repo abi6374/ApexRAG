@@ -1,5 +1,5 @@
-from typing import Any, Dict, List, Tuple
 from pydantic import BaseModel, Field
+
 from apex_rag.models.unified_models import CausalEdge, EdgeType, EvidencePacket
 from apex_rag.temporal.lineage import DocumentLineageEngine
 

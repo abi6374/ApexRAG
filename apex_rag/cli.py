@@ -10,19 +10,17 @@ never writes to ``print()`` directly.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
-import logging
 import platform
 import shutil
 import sys
 import textwrap
-import time
-from collections.abc import AsyncGenerator, Callable
-from datetime import datetime, timezone
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from rich import box
-from rich.console import Console, Group
+from rich.console import Console
 from rich.errors import MarkupError
 from rich.live import Live
 from rich.markdown import Markdown
@@ -34,9 +32,8 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from rich.prompt import Confirm, Prompt
+from rich.prompt import Prompt
 from rich.status import Status
-from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from rich.traceback import Traceback
@@ -230,11 +227,11 @@ def _get_welcome_message() -> str:
     return (
         "[bold cyan]Welcome to ApexRAG REPL[/]\n"
         "  Type a question to query an indexed document, or one of:\n"
-        f"  [bold]!help[/]    — Show this message\n"
-        f"  [bold]!list[/]    — List indexed documents\n"
-        f"  [bold]!info[/]    — Show system info\n"
-        f"  [bold]!stats[/]   — Show document stats\n"
-        f"  [bold]!quit[/]    — Exit REPL\n"
+        "  [bold]!help[/]    — Show this message\n"
+        "  [bold]!list[/]    — List indexed documents\n"
+        "  [bold]!info[/]    — Show system info\n"
+        "  [bold]!stats[/]   — Show document stats\n"
+        "  [bold]!quit[/]    — Exit REPL\n"
     )
 
 
@@ -245,10 +242,8 @@ async def repl_loop(index: Any) -> None:
         index: An initialised :class:`ApexIndex` instance.
     """
     docs: list[str] = []
-    try:
+    with contextlib.suppress(Exception):
         docs = await index.list_documents()
-    except Exception:
-        pass
 
     if not docs:
         format_warning(
@@ -288,7 +283,7 @@ async def repl_loop(index: Any) -> None:
     while True:
         try:
             line = Prompt.ask(
-                f"[bold cyan]query[/]"
+                "[bold cyan]query[/]"
                 + (f"([dim]{current_doc}[/])" if current_doc else "")
                 + "[bold]>[/]",
                 default="",

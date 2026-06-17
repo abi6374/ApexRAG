@@ -65,15 +65,15 @@ class QueryPlannerAgent(QueryPlanner):
         try:
             match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
             data = json.loads(match.group(0)) if match else json.loads(raw.strip())
-            
+
             # Ensure correct format
             if not isinstance(data, dict):
                 return fallback
-            
+
             sub_queries = data.get("sub_queries", [])
             if not isinstance(sub_queries, list) or not sub_queries:
                 data["sub_queries"] = [query]
-            
+
             query_type = data.get("query_type", "FACTUAL").upper()
             valid_types = {
                 "FACTUAL", "COMPARATIVE", "TEMPORAL", "CAUSAL", "LEGAL",

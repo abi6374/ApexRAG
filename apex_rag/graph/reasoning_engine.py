@@ -1,8 +1,9 @@
 import uuid
 from collections import deque
-from typing import Any, Protocol, Sequence
+from typing import Protocol
 
 from pydantic import BaseModel, Field
+
 from apex_rag.models.unified_models import ASTNode, CausalEdge, EdgeType
 
 
@@ -89,7 +90,7 @@ class GraphReasoningEngine:
 
                 # Identify target neighbor
                 neighbor_id = edge.target_node_id if edge.source_node_id == node_id else edge.source_node_id
-                
+
                 # Check for contradictions
                 if edge.edge_type in (EdgeType.CONTRADICTS, EdgeType.OVERRIDES):
                     contradictions.append(edge)

@@ -15,7 +15,6 @@ import importlib
 from collections.abc import AsyncGenerator
 from typing import Any, Protocol, runtime_checkable
 
-
 # ═══════════════════════════════════════════════════════════════
 # LLMProvider Protocol (Part 7: Full interface)
 # ═══════════════════════════════════════════════════════════════
@@ -465,7 +464,7 @@ class GeminiProvider:
         content: list[Any] = [prompt]
         if images:
             import base64
-            from google.generativeai.types import content_types
+
             for img in images:
                 content.append({
                     "mime_type": "image/png",

@@ -31,16 +31,16 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import AsyncGenerator, Any
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from apex_rag.agents.audit.conformal_wrapper import ConformalWrapperAgent
 from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.orchestrator import Orchestrator
-from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
-from apex_rag.models.unified_models import ApexAnswer, CausalEdge
-from apex_rag.observability.telemetry import TelemetryTracker, get_tracer
-from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.enterprise.auth.access_control import AccessControlAgent
+from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.models.unified_models import ApexAnswer
+from apex_rag.observability.telemetry import get_tracer
 
 logger = logging.getLogger("apex_rag.agents.apex_orchestrator")
 
@@ -102,7 +102,7 @@ class ApexOrchestrator(Orchestrator):
         doc_id: str,
         *,
         max_iterations: int | None = None,
-        domain: str = "general",
+        domain: str = "general",  # noqa: ARG002
         calibration_scores: list[float] | None = None,
         ablation_mode: bool = False,
         tenant_context: TenantContext | None = None,
@@ -132,11 +132,12 @@ class ApexOrchestrator(Orchestrator):
         start = time.perf_counter()
 
         # Check for temporal query using TemporalReasoningAgent
+        import json
+        import uuid
+
+        from apex_rag.temporal.state_reconstructor import StateReconstructor
         from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
         from apex_rag.temporal.temporal_retriever import TemporalRetriever
-        from apex_rag.temporal.state_reconstructor import StateReconstructor
-        import uuid
-        import json
 
         retriever = TemporalRetriever(self.navigator._storage)
         reconstructor = StateReconstructor(self.navigator._storage)
@@ -174,7 +175,9 @@ class ApexOrchestrator(Orchestrator):
             elif "summary" in res_data:
                 content_str = res_data["summary"]
 
-            from apex_rag.models.unified_models import ASTNode as UnifiedASTNode, NodeType, EvidencePacket as UnifiedEvidencePacket, TemporalMetadata
+            from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
+            from apex_rag.models.unified_models import EvidencePacket as UnifiedEvidencePacket
+            from apex_rag.models.unified_models import NodeType, TemporalMetadata
 
             node = UnifiedASTNode(
                 node_id=str(uuid.uuid4()),
@@ -286,7 +289,7 @@ class ApexOrchestrator(Orchestrator):
         doc_id: str,
         *,
         max_iterations: int | None = None,
-        domain: str = "general",
+        domain: str = "general",  # noqa: ARG002
         tenant_context: TenantContext | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the answer tokens as they are generated.

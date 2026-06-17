@@ -1,6 +1,7 @@
 import json
 import re
-from typing import Any, Dict
+from typing import Any
+
 from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.providers import AsyncLLM
 
@@ -23,11 +24,11 @@ class BaseVerifier:
         try:
             match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
             data = json.loads(match.group(0)) if match else json.loads(raw.strip())
-            
+
             verified = bool(data.get("verified", False))
             confidence = float(data.get("confidence", 0.5))
             reason = str(data.get("reason", ""))
-            
+
             return {
                 "verified": verified,
                 "confidence": min(max(confidence, 0.0), 1.0),
@@ -46,7 +47,7 @@ class FactualVerifier(BaseVerifier):
     """Verifies general factual truth and alignment with the query."""
 
     async def verify(self, query: str, node: ASTNode) -> dict[str, Any]:
-        prompt = f"""You are a specialized Factual Verification Engine. 
+        prompt = f"""You are a specialized Factual Verification Engine.
 Query: "{query}"
 Node Content: "{node.content}"
 
@@ -210,7 +211,7 @@ class VerifierRegistry:
     """Manages routing of queries to specialized verification engines."""
 
     def __init__(self, llm: AsyncLLM):
-        self.verifiers: Dict[str, BaseVerifier] = {
+        self.verifiers: dict[str, BaseVerifier] = {
             "factual": FactualVerifier(llm),
             "numerical": NumericalVerifier(llm),
             "table": TableVerifier(llm),

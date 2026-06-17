@@ -1,6 +1,7 @@
 import re
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Sequence
+
 from apex_rag.models.unified_models import ASTNode, NodeType
 
 

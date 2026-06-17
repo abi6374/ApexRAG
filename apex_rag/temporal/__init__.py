@@ -6,10 +6,10 @@ Components:
     - FreshnessScorer:       Exponential-decay freshness computation
     - TemporalContradictionDetector:  3-step conflict detection between nodes
 """
-from apex_rag.temporal.temporal_retriever import TemporalRetriever
-from apex_rag.temporal.state_reconstructor import StateReconstructor
 from apex_rag.temporal.analyzers import ChangeAnalyzer, TrendAnalyzer
+from apex_rag.temporal.state_reconstructor import StateReconstructor
 from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
+from apex_rag.temporal.temporal_retriever import TemporalRetriever
 
 __all__ = [
     "TemporalRetriever",

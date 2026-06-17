@@ -56,7 +56,6 @@ _NEGATION_PHRASES: list[re.Pattern[str]] = [
 
 from apex_rag.core.protocols.interfaces import LLMProvider  # noqa: TC001
 
-
 # ═══════════════════════════════════════════════════════════════
 # TemporalContradictionDetector
 # ═══════════════════════════════════════════════════════════════

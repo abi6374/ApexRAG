@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Optional, Sequence
+from typing import Any
+
 from sqlalchemy import select
-from apex_rag.ingestion.apex_storage import ApexStorage, NodeVersionRow, TemporalNodeRow
+
+from apex_rag.ingestion.apex_storage import ApexStorage, NodeVersionRow
 from apex_rag.models.unified_models import ASTNode, NodeType
 
 logger = logging.getLogger("apex_rag.temporal.retriever")
@@ -31,7 +33,7 @@ class TemporalRetriever:
             async with self.storage.session() as session:
                 stmt = select(NodeVersionRow).where(
                     NodeVersionRow.doc_id == doc_id,
-                    NodeVersionRow.is_current == True
+                    NodeVersionRow.is_current
                 )
                 result = await session.execute(stmt)
                 return result.scalars().all()

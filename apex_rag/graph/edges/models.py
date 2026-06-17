@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from apex_rag.models.unified_models import CausalEdge, EdgeType
 
-
 # ── Extended relation types beyond the base EdgeType ─────────────────
 
 

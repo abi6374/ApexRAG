@@ -1,7 +1,8 @@
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -24,8 +25,8 @@ class TraceManager:
     """
 
     def __init__(self) -> None:
-        self.active_listeners: Dict[str, List[asyncio.Queue]] = {}
-        self.trace_start_times: Dict[str, float] = {}
+        self.active_listeners: dict[str, list[asyncio.Queue]] = {}
+        self.trace_start_times: dict[str, float] = {}
 
     def start_trace(self, trace_id: str) -> None:
         """Starts time tracking for a specific trace session."""

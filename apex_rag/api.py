@@ -57,9 +57,8 @@ from apex_rag.exceptions import (
 )
 from apex_rag.models.unified_models import ApexAnswer
 from apex_rag.navigation import NavigationResult
-from apex_rag.utils import logger
 from apex_rag.observability.trace_manager import trace_manager
-
+from apex_rag.utils import logger
 
 # ---------------------------------------------------------------------------
 # Security helpers

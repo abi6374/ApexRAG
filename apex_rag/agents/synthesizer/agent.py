@@ -1,4 +1,5 @@
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from apex_rag.core.evidence.models import EvidencePacket
 from apex_rag.providers import AsyncLLM
 
@@ -51,7 +52,7 @@ INSTRUCTIONS:
     ) -> AsyncGenerator[str, None]:
         """
         Stream token-by-token synthesis with inline citation markers like [[INDEX]].
-        
+
         The resulting stream can be intercepted to resolve [[INDEX]] to [Node ID: <node_id>].
         """
         if not packets:

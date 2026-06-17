@@ -27,9 +27,11 @@ from sqlalchemy import (
     Text,
     delete,
     event,
-    select,
-    text as sa_text,
     or_,
+    select,
+)
+from sqlalchemy import (
+    text as sa_text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -43,7 +45,6 @@ from apex_rag.models.unified_models import (
     ASTNode,
     CausalEdge,
     EdgeType,
-    EvidencePacket,
     NodeType,
     TemporalMetadata,
 )
@@ -546,17 +547,6 @@ class ApexStorage:
         result = await session.execute(stmt)
         rows = result.scalars().all()
         return [_row_to_ast_node(r) for r in rows]
-
-    async def get_all_nodes(self) -> list[ASTNode]:
-        """Fetch all AST nodes across all documents.
-
-        Returns:
-            A list of all :class:`ASTNode` objects.
-        """
-        async with self.session() as session:
-            result = await session.execute(select(ASTNodeRow))
-            rows = result.scalars().all()
-            return [_row_to_ast_node(r) for r in rows]
 
     async def get_all_nodes(self) -> list[ASTNode]:
         """Fetch all AST nodes across all documents.

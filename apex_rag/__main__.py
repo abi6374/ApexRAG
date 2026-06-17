@@ -19,11 +19,9 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
-from typing import Any
 
 from apex_rag import __version__
 from apex_rag.cli import (
-    COMMAND_HELP,
     console,
     display_streaming,
     doctor_check,
@@ -171,7 +169,7 @@ async def _cmd_query(args: argparse.Namespace) -> None:
     print_banner(subtitle="Query")
 
     async with await ApexIndex.create(trace_enabled=args.verbose) as index:
-        with spinner_context(text="Searching document tree…") as status:
+        with spinner_context(text="Searching document tree…"):
             result = await index.query(args.question, args.doc_id)
 
         if result and result.answer_text:
@@ -229,7 +227,7 @@ async def _cmd_global_query(args: argparse.Namespace) -> None:
     print_banner(subtitle="Global Query")
 
     async with await ApexIndex.create(trace_enabled=args.verbose) as index:
-        with spinner_context(text="Searching all documents…") as status:
+        with spinner_context(text="Searching all documents…"):
             result = await index.query_global(args.question, synthesize=True)
         if result:
             content = result.answer_text if hasattr(result, "answer_text") else str(result)

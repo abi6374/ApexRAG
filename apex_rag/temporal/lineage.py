@@ -1,6 +1,9 @@
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
+
 from pydantic import BaseModel, Field
+
 from apex_rag.models.unified_models import ASTNode
 
 
@@ -9,9 +12,9 @@ class DocumentVersion(BaseModel):
 
     doc_id: str
     version: str
-    superseded_by: Optional[str] = None
+    superseded_by: str | None = None
     effective_from: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     is_authoritative: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -23,16 +26,16 @@ class DocumentLineageEngine:
     """
 
     def __init__(self) -> None:
-        self.versions: Dict[str, DocumentVersion] = {}
-        self.supersession_map: Dict[str, str] = {}  # old_doc_id -> new_doc_id
+        self.versions: dict[str, DocumentVersion] = {}
+        self.supersession_map: dict[str, str] = {}  # old_doc_id -> new_doc_id
 
     def register_version(
         self,
         doc_id: str,
         version: str,
-        superseded_by: Optional[str] = None,
-        effective_from: Optional[datetime] = None,
-        expires_at: Optional[datetime] = None,
+        superseded_by: str | None = None,
+        effective_from: datetime | None = None,
+        expires_at: datetime | None = None,
         is_authoritative: bool = True,
         metadata: dict[str, Any] | None = None,
     ) -> None:
@@ -84,9 +87,8 @@ class DocumentLineageEngine:
 
             # 1. Supersession filter
             if self.is_superseded(doc_id):
-                latest_doc_id = self.resolve_latest_version(doc_id)
+                self.resolve_latest_version(doc_id)
                 # If the latest doc is in our candidate list or available, we suppress the old doc
-                logger_msg = f"Suppressing node {node.node_id} because doc {doc_id} is superseded by {latest_doc_id}"
                 continue
 
             # 2. Expiration filter

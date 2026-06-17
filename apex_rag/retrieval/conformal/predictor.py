@@ -98,7 +98,7 @@ class ConformalPredictor:
 
         # Filter by threshold
         filtered: list[CoreEvidencePacket | UnifiedEvidencePacket] = [
-            pkt for pkt, s in zip(packets, scores) if s <= threshold  # type: ignore[misc]
+            pkt for pkt, s in zip(packets, scores, strict=False) if s <= threshold  # type: ignore[misc]
         ]
 
         return (

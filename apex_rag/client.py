@@ -26,19 +26,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Optional
+from typing import Any
 
 import networkx as nx
 from typing_extensions import Self
-
-# Unified Models
-from apex_rag.models.unified_models import ASTNode, ApexAnswer, EvidencePacket, NodeType
-from apex_rag.enterprise.auth.models import TenantContext
 
 # Agents
 from apex_rag.agents.apex_orchestrator import ApexOrchestrator
@@ -47,17 +42,22 @@ from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.critic.agent import EvaluationCriticAgent
 from apex_rag.agents.planner.agent import QueryPlannerAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
-from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
+from apex_rag.enterprise.auth.models import TenantContext
+
+# Exceptions & Utilities
+from apex_rag.exceptions import DocumentNotFoundError
+from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 
 # Ingestion
 from apex_rag.ingestion.apex_parser import ApexParser
 from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.ingestion.embedding_engine import EmbeddingEngine
-from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
-from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 
-# Exceptions & Utilities
-from apex_rag.exceptions import DocumentNotFoundError
+# Legacy / To be deprecated
+from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
+
+# Unified Models
+from apex_rag.models.unified_models import ApexAnswer, NodeType
 from apex_rag.providers import (
     AnthropicProvider,
     AsyncLLM,
@@ -67,13 +67,17 @@ from apex_rag.providers import (
     OpenAIProvider,
     OpenRouterProvier,
 )
+from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
 from apex_rag.utils import logger
 
-# Legacy / To be deprecated
-from apex_rag.ingestion.legacy import IngestionEngine
-from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult
-from apex_rag.search import EmbeddingsEngine, HybridSearch
-from apex_rag.storage import StorageEngine
+# Legacy / To be deprecated & re-exported models
+from apex_rag.ingestion.legacy import IngestionEngine  # noqa: F401
+from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult  # noqa: F401
+from apex_rag.search import EmbeddingsEngine, HybridSearch  # noqa: F401
+from apex_rag.storage import StorageEngine  # noqa: F401
+from apex_rag.models.unified_models import ASTNode, EvidencePacket  # noqa: F401
+
+
 
 class ApexIndex:
     """
@@ -150,7 +154,7 @@ class ApexIndex:
         """
         # 1. Resolve Provider
         llm: AsyncLLM
-        
+
         if hasattr(model, "generate") and hasattr(model, "embed"):
             llm = model  # type: ignore[assignment]
         elif hasattr(provider, "generate") and hasattr(provider, "embed"):
@@ -181,21 +185,21 @@ class ApexIndex:
 
         # 4. Initialise Agents
         planner = QueryPlannerAgent(llm=llm)
-        
+
         # ASTNavigationAgent requires a retriever and verifier
         from apex_rag.retrieval.deterministic.keyword import KeywordDeterministicRetriever
         from apex_rag.retrieval.verification.strict_verifier import StrictLeafVerifier
-        
+
         retriever = KeywordDeterministicRetriever()
         verifier = StrictLeafVerifier(llm=llm)
-        
+
         navigator = ASTNavigationAgent(
-            storage=storage, 
+            storage=storage,
             model=llm,
             retriever=retriever,
             verifier=verifier
         )
-        
+
         critic = EvaluationCriticAgent(llm=llm)
         synthesizer = EvidenceSynthesizerAgent(llm=llm)
         temporal_auditor = TemporalAuditAgent()
@@ -569,7 +573,7 @@ class ApexIndex:
         # otherwise we log a warning.
         if hasattr(self._orchestrator.conformal_wrapper, "calibrate_from_data"):
              return await self._orchestrator.conformal_wrapper.calibrate_from_data(data)
-        
+
         logger.warning("Calibration not supported by current wrapper implementation.")
         return 0.0
 
@@ -609,7 +613,7 @@ class ApexIndex:
             List of node dicts.
         """
         nodes = await self._storage.get_nodes_by_doc(doc_id)
-        # Sort by depth and then by some order if possible, 
+        # Sort by depth and then by some order if possible,
         # but for now we just return them.
         return [n.model_dump() for n in nodes]
 

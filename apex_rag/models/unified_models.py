@@ -11,10 +11,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
 
 # ─────────────────────────────────────────────────────────────
 # Enums
@@ -85,14 +84,14 @@ class ASTNode(BaseModel):
     content: str
     node_type: NodeType
     depth: int = 0
-    parent_id: Optional[str] = None
-    children: list[Union[str, "ASTNode"]] = Field(default_factory=list)
+    parent_id: str | None = None
+    children: list[str | ASTNode] = Field(default_factory=list)
     doc_id: str
-    source_date: Optional[datetime] = None
+    source_date: datetime | None = None
     ingestion_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    page_number: Optional[int] = Field(default=None, description="Page number in the source document (1-based)")
+    page_number: int | None = Field(default=None, description="Page number in the source document (1-based)")
     embedding: list[float] = Field(default_factory=list)
-    image_data: Optional[str] = Field(default=None, description="Base64-encoded image data URI for IMAGE nodes")
+    image_data: str | None = Field(default=None, description="Base64-encoded image data URI for IMAGE nodes")
 
     @field_validator("node_id")
     @classmethod
@@ -150,22 +149,22 @@ class TemporalMetadata(BaseModel):
     """
 
     node_id: str
-    source_date: Optional[datetime] = None
+    source_date: datetime | None = None
     ingestion_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     freshness_score: float = Field(default=1.0, ge=0.0, le=1.0)
     decay_rate: float = 0.001
-    superseded_by: Optional[str] = None
+    superseded_by: str | None = None
 
     # Temporal Intelligence extensions
-    created_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
-    effective_from: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
-    effective_to: Optional[datetime] = None
+    created_at: datetime | None = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime | None = Field(default_factory=lambda: datetime.now(timezone.utc))
+    effective_from: datetime | None = Field(default_factory=lambda: datetime.now(timezone.utc))
+    effective_to: datetime | None = None
     version_number: int = 1
     revision_number: int = 0
-    source_timestamp: Optional[datetime] = None
+    source_timestamp: datetime | None = None
     is_current: bool = True
-    previous_version: Optional[str] = None
+    previous_version: str | None = None
 
     @field_validator("node_id")
     @classmethod
