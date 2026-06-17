@@ -186,6 +186,142 @@ class QueryCacheRow(ApexBase):
     )
 
 
+class NodeVersionRow(ApexBase):
+    """SQL row representing a specific version of an AST Node."""
+
+    __tablename__ = "node_versions"
+
+    version_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    superseded_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    previous_version: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+
+
+class TemporalNodeRow(ApexBase):
+    """SQL row storing node validity periods and temporal attributes."""
+
+    __tablename__ = "temporal_nodes"
+
+    node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    superseded_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    previous_version: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class AuditLogRow(ApexBase):
+    """SQL row for enterprise RBAC and historical query audit logging."""
+
+    __tablename__ = "audit_logs"
+
+    record_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    before_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    after_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ChangeHistoryRow(ApexBase):
+    """SQL row tracking field-level changes across entities over time."""
+
+    __tablename__ = "change_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    changed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TimelineEventRow(ApexBase):
+    """SQL row tracking time-series numeric events (e.g. sales date and revenue amount)."""
+
+    __tablename__ = "timeline_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    event_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class RolePermissionRow(ApexBase):
+    """SQL row defining role-level access permissions."""
+
+    __tablename__ = "role_permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class FieldPermissionRow(ApexBase):
+    """SQL row defining field-level access permissions/visibility rules."""
+
+    __tablename__ = "field_permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    is_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class StateSnapshotRow(ApexBase):
+    """SQL row storing complete document/graph state snapshots at a point in time."""
+
+    __tablename__ = "state_snapshots"
+
+    snapshot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    snapshot_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    snapshot_data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+
 # ═══════════════════════════════════════════════════════════════
 # ApexStorage
 # ═══════════════════════════════════════════════════════════════
@@ -819,6 +955,242 @@ class ApexStorage:
                 delete(ASTNodeRow).where(ASTNodeRow.doc_id == doc_id)
             )
             return result.rowcount
+
+    # ── Temporal Intelligence CRUD ──────────────────────────────────────────
+
+    async def save_node_version(self, version_row: NodeVersionRow, session: AsyncSession | None = None) -> None:
+        """Persist a node version row."""
+        async def _save(sess: AsyncSession):
+            sess.add(version_row)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_node_versions(self, node_id: str, session: AsyncSession | None = None) -> list[NodeVersionRow]:
+        """Fetch all versions of a node, ordered by version_number."""
+        async def _get(sess: AsyncSession):
+            stmt = select(NodeVersionRow).where(NodeVersionRow.node_id == node_id).order_by(NodeVersionRow.version_number)
+            res = await sess.execute(stmt)
+            return list(res.scalars().all())
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    async def get_node_version_as_of(self, node_id: str, as_of: datetime, session: AsyncSession | None = None) -> NodeVersionRow | None:
+        """Fetch the node version active/effective as of a specific datetime."""
+        async def _get(sess: AsyncSession):
+            stmt = select(NodeVersionRow).where(
+                NodeVersionRow.node_id == node_id,
+                NodeVersionRow.effective_from <= as_of,
+                (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of))
+            ).order_by(NodeVersionRow.version_number.desc())
+            res = await sess.execute(stmt)
+            return res.scalars().first()
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    async def get_nodes_as_of(self, doc_id: str, as_of: datetime, session: AsyncSession | None = None) -> list[NodeVersionRow]:
+        """Fetch all active node versions for a document as of a specific datetime."""
+        async def _get(sess: AsyncSession):
+            stmt = select(NodeVersionRow).where(
+                NodeVersionRow.doc_id == doc_id,
+                NodeVersionRow.effective_from <= as_of,
+                (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of))
+            )
+            res = await sess.execute(stmt)
+            return list(res.scalars().all())
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    async def save_temporal_node(self, temporal_node: TemporalNodeRow, session: AsyncSession | None = None) -> None:
+        """Save a temporal node row."""
+        async def _save(sess: AsyncSession):
+            existing = await sess.get(TemporalNodeRow, temporal_node.node_id)
+            if existing is not None:
+                existing.updated_at = temporal_node.updated_at
+                existing.effective_from = temporal_node.effective_from
+                existing.effective_to = temporal_node.effective_to
+                existing.version_number = temporal_node.version_number
+                existing.revision_number = temporal_node.revision_number
+                existing.source_timestamp = temporal_node.source_timestamp
+                existing.is_current = temporal_node.is_current
+                existing.superseded_by = temporal_node.superseded_by
+                existing.previous_version = temporal_node.previous_version
+            else:
+                sess.add(temporal_node)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_temporal_node(self, node_id: str, session: AsyncSession | None = None) -> TemporalNodeRow | None:
+        """Fetch temporal node context by node ID."""
+        async def _get(sess: AsyncSession):
+            return await sess.get(TemporalNodeRow, node_id)
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    # ── Audit Trail CRUD ───────────────────────────────────────────────────
+
+    async def save_audit_log(self, audit_row: AuditLogRow, session: AsyncSession | None = None) -> None:
+        """Persist an audit log record."""
+        async def _save(sess: AsyncSession):
+            sess.add(audit_row)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_audit_logs(self, tenant_id: str | None = None, session: AsyncSession | None = None) -> list[AuditLogRow]:
+        """Fetch audit logs, optionally filtered by tenant."""
+        async def _get(sess: AsyncSession):
+            if tenant_id:
+                stmt = select(AuditLogRow).where(AuditLogRow.tenant_id == tenant_id).order_by(AuditLogRow.timestamp.desc())
+            else:
+                stmt = select(AuditLogRow).order_by(AuditLogRow.timestamp.desc())
+            res = await sess.execute(stmt)
+            return list(res.scalars().all())
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    # ── Change History CRUD ────────────────────────────────────────────────
+
+    async def save_change_history(self, change_row: ChangeHistoryRow, session: AsyncSession | None = None) -> None:
+        """Persist a change history record."""
+        async def _save(sess: AsyncSession):
+            sess.add(change_row)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_change_history(self, entity_id: str, session: AsyncSession | None = None) -> list[ChangeHistoryRow]:
+        """Fetch change history for an entity, ordered by change time."""
+        async def _get(sess: AsyncSession):
+            stmt = select(ChangeHistoryRow).where(ChangeHistoryRow.entity_id == entity_id).order_by(ChangeHistoryRow.changed_at.desc())
+            res = await sess.execute(stmt)
+            return list(res.scalars().all())
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    # ── Timeline Events CRUD ───────────────────────────────────────────────
+
+    async def save_timeline_event(self, event_row: TimelineEventRow, session: AsyncSession | None = None) -> None:
+        """Persist a timeline event."""
+        async def _save(sess: AsyncSession):
+            sess.add(event_row)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_timeline_events(self, entity_id: str, session: AsyncSession | None = None) -> list[TimelineEventRow]:
+        """Fetch timeline events for an entity, ordered by event date."""
+        async def _get(sess: AsyncSession):
+            stmt = select(TimelineEventRow).where(TimelineEventRow.entity_id == entity_id).order_by(TimelineEventRow.event_date.asc())
+            res = await sess.execute(stmt)
+            return list(res.scalars().all())
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    # ── Role/Field Permissions CRUD ────────────────────────────────────────
+
+    async def save_role_permission(self, perm: RolePermissionRow, session: AsyncSession | None = None) -> None:
+        """Persist role permission rules."""
+        async def _save(sess: AsyncSession):
+            sess.add(perm)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_role_permission(self, role: str, resource_type: str, action: str, session: AsyncSession | None = None) -> bool:
+        """Query if a role is allowed to perform action on a resource type."""
+        async def _get(sess: AsyncSession):
+            stmt = select(RolePermissionRow.is_allowed).where(
+                RolePermissionRow.role == role,
+                RolePermissionRow.resource_type == resource_type,
+                RolePermissionRow.action == action
+            )
+            res = await sess.execute(stmt)
+            val = res.scalar()
+            return val if val is not None else False
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    async def save_field_permission(self, perm: FieldPermissionRow, session: AsyncSession | None = None) -> None:
+        """Persist field permission rules."""
+        async def _save(sess: AsyncSession):
+            sess.add(perm)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_field_permission(self, role: str, resource_type: str, field_name: str, session: AsyncSession | None = None) -> bool:
+        """Query if a role is allowed to view/access a field of a resource type."""
+        async def _get(sess: AsyncSession):
+            stmt = select(FieldPermissionRow.is_allowed).where(
+                FieldPermissionRow.role == role,
+                FieldPermissionRow.resource_type == resource_type,
+                FieldPermissionRow.field_name == field_name
+            )
+            res = await sess.execute(stmt)
+            val = res.scalar()
+            return val if val is not None else False
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
+
+    # ── State Snapshots CRUD ───────────────────────────────────────────────
+
+    async def save_state_snapshot(self, snapshot_row: StateSnapshotRow, session: AsyncSession | None = None) -> None:
+        """Persist a state snapshot."""
+        async def _save(sess: AsyncSession):
+            sess.add(snapshot_row)
+        if session is not None:
+            await _save(session)
+        else:
+            async with self.session() as sess:
+                await _save(sess)
+
+    async def get_state_snapshot(self, doc_id: str, as_of: datetime, session: AsyncSession | None = None) -> StateSnapshotRow | None:
+        """Fetch state snapshot for document as of a specific date."""
+        async def _get(sess: AsyncSession):
+            stmt = select(StateSnapshotRow).where(
+                StateSnapshotRow.doc_id == doc_id,
+                StateSnapshotRow.snapshot_date <= as_of
+            ).order_by(StateSnapshotRow.snapshot_date.desc())
+            res = await sess.execute(stmt)
+            return res.scalars().first()
+        if session is not None:
+            return await _get(session)
+        async with self.session() as sess:
+            return await _get(sess)
 
 
 # ═══════════════════════════════════════════════════════════════

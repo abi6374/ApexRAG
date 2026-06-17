@@ -49,6 +49,8 @@ from apex_rag.graph.reasoning_engine import GraphReasoningEngine
 from apex_rag.temporal.lineage import DocumentLineageEngine
 from apex_rag.temporal.resolver import ContradictionResolver
 from apex_rag.utils import ReasoningTrace, logger
+from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.enterprise.auth.access_control import AccessControlAgent
 
 # ═══════════════════════════════════════════════════════════════════════
 # Constants
@@ -113,6 +115,7 @@ class Orchestrator:
         doc_id: str,
         *,
         max_iterations: int | None = None,
+        tenant_context: TenantContext | None = None,
     ) -> list[UnifiedEvidencePacket] | None:
         """
         Execute the reasoning loop with iterative refinement.
@@ -130,6 +133,15 @@ class Orchestrator:
             A list of verified :class:`UnifiedEvidencePacket` objects, or
             ``None`` if the query could not be answered.
         """
+        if tenant_context is not None:
+            ac_agent = AccessControlAgent(self.navigator._storage)
+            has_access = await ac_agent.check_access(tenant_context, "read", "document", doc_tenant_id=doc_id)
+            if not has_access:
+                logger.warning("Access Denied for user context on document %s", doc_id)
+                await ac_agent.log_audit_trail(tenant_context, "ACCESS_DENIED_READ", doc_id)
+                return None
+            await ac_agent.log_audit_trail(tenant_context, "QUERY_INITIATED", doc_id, before_state={"query": query})
+
         iters = max_iterations if max_iterations is not None else self.max_iterations
         missing_context: str = ""
         best_packets: list[UnifiedEvidencePacket] | None = None
@@ -212,6 +224,11 @@ class Orchestrator:
                 )
                 state_machine.transition_to(RetrievalState.COMPLETED, {"iterations": iteration})
                 trace_manager.publish(trace_id, "critic", "CRITIC_APPROVED", {"iterations": iteration})
+                if tenant_context is not None:
+                    ac_agent = AccessControlAgent(self.navigator._storage)
+                    for pkt in packets:
+                        pkt.content = await ac_agent.mask_content(tenant_context, pkt.content)
+                        await ac_agent.log_audit_trail(tenant_context, "READ_NODE", pkt.node_id)
                 return packets
 
             # Determine what was missing for the next iteration
@@ -230,6 +247,11 @@ class Orchestrator:
             iters,
         )
         # Return the best effort from the last successful iteration
+        if best_packets and tenant_context is not None:
+            ac_agent = AccessControlAgent(self.navigator._storage)
+            for pkt in best_packets:
+                pkt.content = await ac_agent.mask_content(tenant_context, pkt.content)
+                await ac_agent.log_audit_trail(tenant_context, "READ_NODE", pkt.node_id)
         return best_packets
 
     # ── Integrated execution (temporal + causal + synthesis) ───────────
@@ -241,6 +263,7 @@ class Orchestrator:
         *,
         max_iterations: int | None = None,
         domain: str = "general",
+        tenant_context: TenantContext | None = None,
     ) -> ApexAnswer | None:
         """
         Full integrated pipeline: iterative retrieval → temporal scoring →
@@ -261,13 +284,76 @@ class Orchestrator:
         """
         start_time = time.perf_counter()
 
+        # Check for temporal query using TemporalReasoningAgent
+        from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
+        from apex_rag.temporal.temporal_retriever import TemporalRetriever
+        from apex_rag.temporal.state_reconstructor import StateReconstructor
+        import uuid
+        import json
+        
+        retriever = TemporalRetriever(self.navigator._storage)
+        reconstructor = StateReconstructor(self.navigator._storage)
+        temporal_agent = TemporalReasoningAgent(retriever, reconstructor)
+        
+        if temporal_agent.detect_time_query(query):
+            temp_res = await temporal_agent.solve_temporal_query(query, doc_id)
+            
+            evidence_packets = []
+            answer_text = temp_res.get("reasoning", "")
+            res_data = temp_res.get("result", {})
+            content_str = json.dumps(res_data) if res_data else ""
+            if "content" in res_data:
+                content_str = res_data["content"]
+            elif "summary" in res_data:
+                content_str = res_data["summary"]
+                
+            from apex_rag.models.unified_models import ASTNode, NodeType, EvidencePacket, TemporalMetadata
+            
+            node = UnifiedASTNode(
+                node_id=str(uuid.uuid4()),
+                content=content_str or "Temporal reasoning results",
+                node_type=NodeType.PARAGRAPH,
+                doc_id=doc_id
+            )
+            pkt = UnifiedEvidencePacket(
+                node=node,
+                temporal_metadata=TemporalMetadata(
+                    node_id=node.node_id,
+                    freshness_score=1.0
+                ),
+                retrieval_score=1.0,
+                content=node.content
+            )
+            evidence_packets.append(pkt)
+            
+            if tenant_context is not None:
+                ac_agent = AccessControlAgent(self.navigator._storage)
+                for ep in evidence_packets:
+                    ep.content = await ac_agent.mask_content(tenant_context, ep.content)
+                answer_text = await ac_agent.mask_content(tenant_context, answer_text)
+                await ac_agent.log_audit_trail(tenant_context, "TEMPORAL_QUERY", doc_id)
+            
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            
+            return ApexAnswer(
+                answer_text=answer_text,
+                evidence_packets=evidence_packets,
+                temporal_freshness=1.0,
+                contradictions=[],
+                coverage_guarantee=1.0,
+                prediction_set_size=len(evidence_packets),
+                causal_chain=[],
+                query=query,
+                latency_ms=round(elapsed_ms, 1)
+            )
+
         trace_id = getattr(self, "trace_id", None) or f"trace-{int(time.time() * 1000)}"
         self.trace_id = trace_id
         trace_manager.start_trace(trace_id)
         state_machine = RetrievalStateMachine(query_id=trace_id)
 
         # 1. Iterative retrieval (Plan → Navigate → Critic)
-        packets = await self.execute_query(query, doc_id, max_iterations=max_iterations)
+        packets = await self.execute_query(query, doc_id, max_iterations=max_iterations, tenant_context=tenant_context)
         if not packets:
             state_machine.transition_to(RetrievalState.FAILED, {"reason": "No evidence retrieved in integrated run"})
             return None
@@ -404,6 +490,10 @@ class Orchestrator:
 
         state_machine.transition_to(RetrievalState.COMPLETED)
         trace_manager.publish(trace_id, "synthesis", "COMPLETED", {"latency_ms": elapsed_ms})
+
+        if tenant_context is not None:
+            ac_agent = AccessControlAgent(self.navigator._storage)
+            answer_text = await ac_agent.mask_content(tenant_context, answer_text)
 
         return ApexAnswer(
             answer_text=answer_text,

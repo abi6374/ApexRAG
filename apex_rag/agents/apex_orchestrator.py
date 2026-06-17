@@ -39,6 +39,8 @@ from apex_rag.agents.orchestrator import Orchestrator
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 from apex_rag.models.unified_models import ApexAnswer, CausalEdge
 from apex_rag.observability.telemetry import TelemetryTracker, get_tracer
+from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.enterprise.auth.access_control import AccessControlAgent
 
 logger = logging.getLogger("apex_rag.agents.apex_orchestrator")
 
@@ -103,6 +105,7 @@ class ApexOrchestrator(Orchestrator):
         domain: str = "general",
         calibration_scores: list[float] | None = None,
         ablation_mode: bool = False,
+        tenant_context: TenantContext | None = None,
     ) -> ApexAnswer | None:
         """Execute the full pipeline and return a populated ApexAnswer.
 
@@ -128,9 +131,72 @@ class ApexOrchestrator(Orchestrator):
         """
         start = time.perf_counter()
 
+        # Check for temporal query using TemporalReasoningAgent
+        from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
+        from apex_rag.temporal.temporal_retriever import TemporalRetriever
+        from apex_rag.temporal.state_reconstructor import StateReconstructor
+        import uuid
+        import json
+
+        retriever = TemporalRetriever(self.navigator._storage)
+        reconstructor = StateReconstructor(self.navigator._storage)
+        temporal_agent = TemporalReasoningAgent(retriever, reconstructor)
+
+        if not ablation_mode and temporal_agent.detect_time_query(query):
+            temp_res = await temporal_agent.solve_temporal_query(query, doc_id)
+
+            evidence_packets = []
+            answer_text = temp_res.get("reasoning", "")
+            res_data = temp_res.get("result", {})
+            content_str = json.dumps(res_data) if res_data else ""
+            if "content" in res_data:
+                content_str = res_data["content"]
+            elif "summary" in res_data:
+                content_str = res_data["summary"]
+
+            from apex_rag.models.unified_models import ASTNode, NodeType, EvidencePacket, TemporalMetadata
+
+            node = UnifiedASTNode(
+                node_id=str(uuid.uuid4()),
+                content=content_str or "Temporal reasoning results",
+                node_type=NodeType.PARAGRAPH,
+                doc_id=doc_id
+            )
+            pkt = UnifiedEvidencePacket(
+                node=node,
+                temporal_metadata=TemporalMetadata(
+                    node_id=node.node_id,
+                    freshness_score=1.0
+                ),
+                retrieval_score=1.0,
+                content=node.content
+            )
+            evidence_packets.append(pkt)
+
+            if tenant_context is not None:
+                ac_agent = AccessControlAgent(self.navigator._storage)
+                for ep in evidence_packets:
+                    ep.content = await ac_agent.mask_content(tenant_context, ep.content)
+                answer_text = await ac_agent.mask_content(tenant_context, answer_text)
+                await ac_agent.log_audit_trail(tenant_context, "TEMPORAL_QUERY", doc_id)
+
+            elapsed = (time.perf_counter() - start) * 1000
+
+            return ApexAnswer(
+                answer_text=answer_text,
+                evidence_packets=evidence_packets,
+                temporal_freshness=1.0,
+                contradictions=[],
+                coverage_guarantee=1.0,
+                prediction_set_size=len(evidence_packets),
+                causal_chain=[],
+                query=query,
+                latency_ms=round(elapsed, 1),
+            )
+
         # 1. Iterative retrieval
         unified_packets = await self.execute_query(
-            query, doc_id, max_iterations=max_iterations,
+            query, doc_id, max_iterations=max_iterations, tenant_context=tenant_context
         )
 
         if not unified_packets:
@@ -176,6 +242,10 @@ class ApexOrchestrator(Orchestrator):
 
         elapsed = (time.perf_counter() - start) * 1000
 
+        if tenant_context is not None:
+            ac_agent = AccessControlAgent(self.navigator._storage)
+            answer_text = await ac_agent.mask_content(tenant_context, answer_text)
+
         return ApexAnswer(
             answer_text=answer_text,
             evidence_packets=filtered_packets,
@@ -197,6 +267,7 @@ class ApexOrchestrator(Orchestrator):
         *,
         max_iterations: int | None = None,
         domain: str = "general",
+        tenant_context: TenantContext | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the answer tokens as they are generated.
 
@@ -220,7 +291,7 @@ class ApexOrchestrator(Orchestrator):
             span.set_attribute("max_iterations", max_iterations or self.max_iterations)
 
             base_packets = await self.execute_query(
-                query, doc_id, max_iterations=max_iterations,
+                query, doc_id, max_iterations=max_iterations, tenant_context=tenant_context
             )
 
             span.set_attribute("packets_retrieved", len(base_packets) if base_packets else 0)

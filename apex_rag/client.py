@@ -38,6 +38,7 @@ from typing_extensions import Self
 
 # Unified Models
 from apex_rag.models.unified_models import ASTNode, ApexAnswer, EvidencePacket, NodeType
+from apex_rag.enterprise.auth.models import TenantContext
 
 # Agents
 from apex_rag.agents.apex_orchestrator import ApexOrchestrator
@@ -417,6 +418,7 @@ class ApexIndex:
         ablation_mode: bool = False,
         root_node_id: str | int | None = None,
         event_queue: asyncio.Queue[Any] | None = None,
+        tenant_context: TenantContext | None = None,
     ) -> ApexAnswer:
         """
         Query the index with a mathematically rigorous confidence guarantee.
@@ -442,6 +444,7 @@ class ApexIndex:
             doc_id=doc_id,
             domain=domain,
             ablation_mode=ablation_mode,
+            tenant_context=tenant_context,
         )
 
         if answer is None:
@@ -463,6 +466,7 @@ class ApexIndex:
         *,
         domain: str = "general",
         tenant_id: str = "default",
+        tenant_context: TenantContext | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream answer tokens as they are generated.
@@ -475,10 +479,15 @@ class ApexIndex:
         Yields:
             Token chunks from the LLM.
         """
+        ctx = tenant_context
+        if ctx is None and tenant_id:
+            ctx = TenantContext(tenant_id=tenant_id, user_id="inferred-user-id", roles=["Guest"])
+
         async for chunk in self._orchestrator.stream(
             query=question,
             doc_id=doc_id,
             domain=domain,
+            tenant_context=ctx,
         ):
             yield chunk
 
