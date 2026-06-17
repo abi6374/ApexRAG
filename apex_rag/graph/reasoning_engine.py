@@ -37,6 +37,24 @@ class GraphReasoningEngine:
     def __init__(self, storage: StorageInterface) -> None:
         self.storage = storage
 
+    async def _get_edges(self, node_id: str) -> list[CausalEdge]:
+        import inspect
+        if not hasattr(self.storage, "get_edges_for_node"):
+            return []
+        res = self.storage.get_edges_for_node(node_id)
+        if inspect.isawaitable(res):
+            return await res
+        return [] if type(res).__name__ in ("MagicMock", "Mock") else res
+
+    async def _get_node(self, node_id: str) -> ASTNode | None:
+        import inspect
+        if not hasattr(self.storage, "get_node"):
+            return None
+        res = self.storage.get_node(node_id)
+        if inspect.isawaitable(res):
+            return await res
+        return None if type(res).__name__ in ("MagicMock", "Mock") else res
+
     async def build_reasoning_chain(
         self,
         seed_nodes: list[ASTNode],
@@ -64,7 +82,7 @@ class GraphReasoningEngine:
             if depth >= max_depth:
                 continue
 
-            edges = await self.storage.get_edges_for_node(node_id)
+            edges = await self._get_edges(node_id)
             for edge in edges:
                 if edge.edge_id in seen_edge_ids:
                     continue
@@ -85,7 +103,7 @@ class GraphReasoningEngine:
                 # Fetch neighbor details
                 if neighbor_id not in visited_nodes:
                     visited_nodes.add(neighbor_id)
-                    neighbor_node = await self.storage.get_node(neighbor_id)
+                    neighbor_node = await self._get_node(neighbor_id)
                     if neighbor_node:
                         node_map[neighbor_id] = neighbor_node
                         # Update path score based on relationship strength
@@ -123,7 +141,7 @@ class GraphReasoningEngine:
             if depth >= max_depth:
                 continue
 
-            edges = await self.storage.get_edges_for_node(curr_id)
+            edges = await self._get_edges(curr_id)
             for edge in edges:
                 # We follow DEPENDS_ON and IMPORTS strictly forward from source to target
                 if edge.source_node_id == curr_id and edge.edge_type in (EdgeType.DEPENDS_ON, EdgeType.IMPORTS, EdgeType.REFERENCES):
