@@ -30,12 +30,20 @@ class RelationType(str, Enum):
     CONTRADICTS = "CONTRADICTS"
     OVERRIDES = "OVERRIDES"
     REFINES = "REFINES"
+    DEPENDS_ON = "DEPENDS_ON"
+    REFERENCES = "REFERENCES"
+    EXPLAINS = "EXPLAINS"
+    SAME_TOPIC = "SAME_TOPIC"
+    IMPLEMENTS = "IMPLEMENTS"
+    CALLS = "CALLS"
+    IMPORTS = "IMPORTS"
+    SUCCESSOR = "SUCCESSOR"
+    PREDECESSOR = "PREDECESSOR"
+    VERSION_OF = "VERSION_OF"
+    SUPERSEDES = "SUPERSEDES"
 
     # Structural Retrieval Graph extensions
     REFERENCES_TABLE = "REFERENCES_TABLE"
-    EXPLAINS = "EXPLAINS"
-    DEPENDS_ON = "DEPENDS_ON"
-    SAME_TOPIC = "SAME_TOPIC"
 
     @classmethod
     def from_edge_type(cls, et: EdgeType | str) -> RelationType:

@@ -43,6 +43,11 @@ from apex_rag.retrieval.conformal.scorer import (
 )
 from apex_rag.temporal.contradiction import TemporalContradictionDetector
 from apex_rag.temporal.scorer import FreshnessScorer
+from apex_rag.retrieval.state.machine import RetrievalStateMachine, RetrievalState
+from apex_rag.observability.trace_manager import trace_manager
+from apex_rag.graph.reasoning_engine import GraphReasoningEngine
+from apex_rag.temporal.lineage import DocumentLineageEngine
+from apex_rag.temporal.resolver import ContradictionResolver
 from apex_rag.utils import ReasoningTrace, logger
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -129,6 +134,14 @@ class Orchestrator:
         missing_context: str = ""
         best_packets: list[UnifiedEvidencePacket] | None = None
 
+        trace_id = getattr(self, "trace_id", None) or f"trace-{int(time.time() * 1000)}"
+        self.trace_id = trace_id
+        trace_manager.start_trace(trace_id)
+        state_machine = RetrievalStateMachine(query_id=trace_id)
+
+        state_machine.transition_to(RetrievalState.QUERY_CLASSIFIED, {"query": query})
+        trace_manager.publish(trace_id, "reasoning", "QUERY_CLASSIFIED", {"query": query})
+
         for iteration in range(1, iters + 1):
             logger.info(
                 "[ORCHESTRATOR] Iteration %d/%d — planning...",
@@ -142,15 +155,39 @@ class Orchestrator:
                 enriched_query = (
                     f"{query}\n\n[Previous attempt missing: {missing_context}]"
                 )
-            sub_queries = await self.planner.plan(enriched_query)
-            logger.info(
-                "[ORCHESTRATOR] Plan → %d sub-queries: %s",
-                len(sub_queries),
-                sub_queries,
+
+            # Use plan_query if available to support classification
+            query_type = "FACTUAL"
+            from apex_rag.agents.planner.agent import QueryPlannerAgent
+            if isinstance(self.planner, QueryPlannerAgent) and hasattr(self.planner, "plan_query"):
+                planner_data = await self.planner.plan_query(enriched_query)
+                query_type = planner_data.get("query_type", "FACTUAL")
+                sub_queries = planner_data.get("sub_queries", [query])
+            else:
+                sub_queries = await self.planner.plan(enriched_query)
+
+            state_machine.transition_to(
+                RetrievalState.PLAN_GENERATED, 
+                {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type}
             )
+            trace_manager.publish(trace_id, "reasoning", "PLAN_GENERATED", {
+                "sub_queries": sub_queries,
+                "iteration": iteration,
+                "query_type": query_type
+            })
 
             # 2. Navigate
+            state_machine.transition_to(RetrievalState.NAVIGATION_RUNNING)
+            trace_manager.publish(trace_id, "navigation", "NAVIGATION_RUNNING", {"iteration": iteration})
+
             packets, resolved_sqs = await self._navigate_all(sub_queries, doc_id)
+
+            # Transition to VERIFICATION_RUNNING
+            state_machine.transition_to(RetrievalState.VERIFICATION_RUNNING)
+            trace_manager.publish(trace_id, "verification", "VERIFICATION_RUNNING", {
+                "iteration": iteration,
+                "packets_count": len(packets) if packets else 0
+            })
 
             # Save best effort so far
             if packets:
@@ -158,16 +195,23 @@ class Orchestrator:
 
             if not packets:
                 logger.info("[ORCHESTRATOR] No evidence retrieved — aborting.")
+                state_machine.transition_to(RetrievalState.FAILED, {"reason": "No evidence retrieved"})
+                trace_manager.publish(trace_id, "navigation", "NAVIGATION_FAILED", {})
                 return None
 
             # 3. Critic
-            passes = await self.critic.evaluate(sub_queries, [p.node for p in packets])
+            state_machine.transition_to(RetrievalState.CRITIC_REVIEW)
+            trace_manager.publish(trace_id, "critic", "CRITIC_REVIEW", {})
+
+            passes = await self.critic.evaluate(sub_queries, [p.node for p in packets if p.node])
 
             if passes:
                 logger.info(
                     "[ORCHESTRATOR] Critic approved after %d iteration(s).",
                     iteration,
                 )
+                state_machine.transition_to(RetrievalState.COMPLETED, {"iterations": iteration})
+                trace_manager.publish(trace_id, "critic", "CRITIC_APPROVED", {"iterations": iteration})
                 return packets
 
             # Determine what was missing for the next iteration
@@ -177,6 +221,9 @@ class Orchestrator:
                 "[ORCHESTRATOR] Critic rejected — missing: %s",
                 missing_context,
             )
+
+            state_machine.record_retry(RetrievalState.PLAN_GENERATED)
+            state_machine.rollback_to(RetrievalState.PLAN_GENERATED, reason=f"Critic rejected, missing: {missing_context}")
 
         logger.warning(
             "[ORCHESTRATOR] Exceeded max iterations (%d) — returning best effort.",
@@ -214,29 +261,86 @@ class Orchestrator:
         """
         start_time = time.perf_counter()
 
+        trace_id = getattr(self, "trace_id", None) or f"trace-{int(time.time() * 1000)}"
+        self.trace_id = trace_id
+        trace_manager.start_trace(trace_id)
+        state_machine = RetrievalStateMachine(query_id=trace_id)
+
         # 1. Iterative retrieval (Plan → Navigate → Critic)
         packets = await self.execute_query(query, doc_id, max_iterations=max_iterations)
         if not packets:
+            state_machine.transition_to(RetrievalState.FAILED, {"reason": "No evidence retrieved in integrated run"})
             return None
 
         # 2. Temporal scoring & enrichment
         scorer = self.scorer if self.scorer is not None else FreshnessScorer(domain=domain)
         for pkt in packets:
-            # Recompute freshness score if needed
-            pkt.temporal_metadata.freshness_score = scorer.compute(pkt.node.source_date)
+            if pkt.node:
+                pkt.temporal_metadata.freshness_score = scorer.compute(pkt.node.source_date)
+                pkt.freshness_score = pkt.temporal_metadata.freshness_score
 
-        mean_freshness = sum(p.temporal_metadata.freshness_score for p in packets) / len(packets)
+        # V3 Graph Reasoning stage
+        state_machine.transition_to(RetrievalState.GRAPH_REASONING)
+        trace_manager.publish(trace_id, "graph", "GRAPH_REASONING", {})
+        
+        causal_chain = []
+        contradictions = []
 
-        # 3. Contradiction detection
-        contradictions: list[CausalEdge] = []
+        # Graph Reasoning BFS Traversal
+        reasoning_engine = GraphReasoningEngine(storage=self.navigator._storage)
+        seed_nodes = [p.node for p in packets if p.node]
+        if seed_nodes:
+            reasoning_chain = await reasoning_engine.build_reasoning_chain(seed_nodes)
+            causal_chain.extend(reasoning_chain.edges)
+            contradictions.extend(reasoning_chain.contradictions)
+            trace_manager.publish(trace_id, "graph", "REASONING_CHAIN_BUILT", {
+                "edges_count": len(reasoning_chain.edges),
+                "score": reasoning_chain.score,
+                "contradictions_count": len(reasoning_chain.contradictions)
+            })
+
+        # 3. Temporal audit / Lineage and contradiction resolution
+        state_machine.transition_to(RetrievalState.TEMPORAL_AUDIT)
+        trace_manager.publish(trace_id, "temporal", "TEMPORAL_AUDIT", {})
+
+        lineage_engine = DocumentLineageEngine()
+        lineage_engine.register_version(doc_id, version="1.0")
+
+        if seed_nodes:
+            active_nodes = lineage_engine.filter_obsolete_nodes(seed_nodes)
+            active_ids = {n.node_id for n in active_nodes}
+            packets = [p for p in packets if p.node_id in active_ids or (p.node and p.node.node_id in active_ids)]
+
+        # Run contradiction resolver to handle conflicts
+        resolver = ContradictionResolver(lineage_engine=lineage_engine)
+        contradiction_report = resolver.resolve(packets, causal_chain + contradictions)
+        packets = contradiction_report.authoritative_packets
+        
+        # Add resolver contradictions if any
+        for conflict in contradiction_report.conflicts:
+            for edge in causal_chain + contradictions:
+                if edge.edge_id == conflict.edge_id and edge not in contradictions:
+                    contradictions.append(edge)
+
+        # Call contradiction_detector if configured for mock compatibility
         if self.contradiction_detector is not None and len(packets) >= 2:
-            contradictions = await self.contradiction_detector.detect_all([p.node for p in packets])
+            detected_contradictions = await self.contradiction_detector.detect_all([p.node for p in packets if p.node])
+            for dc in detected_contradictions:
+                if dc not in contradictions:
+                    contradictions.append(dc)
 
-        # 4. Causal graph building
-        causal_chain: list[CausalEdge] = []
+        trace_manager.publish(trace_id, "temporal", "LINEAGE_AUDIT_COMPLETE", {
+            "has_conflicts": contradiction_report.has_conflicts or (len(contradictions) > 0),
+            "conflicts_count": len(contradictions),
+            "authoritative_count": len(packets)
+        })
+
+        mean_freshness = sum(p.freshness_score for p in packets) / len(packets) if packets else 1.0
+
+        # Run normal builders for backward compatibility or extra coverage
         if self.causal_builder is not None and len(packets) >= 2:
             graph_edges = await self.causal_builder.build_all(
-                [p.node for p in packets],
+                [p.node for p in packets if p.node],
                 include_temporal=True,
                 include_semantic=True,
                 include_structural=False,
@@ -244,17 +348,22 @@ class Orchestrator:
             )
             for ge in graph_edges:
                 ce = ge.to_causal_edge()
-                if ce is not None:
+                if ce is not None and ce not in causal_chain:
                     causal_chain.append(ce)
 
-        # 5. Evidence chain building
+        # 5. Evidence chain building (legacy)
         if self.causal_retriever is not None and len(packets) >= 2:
             evidence_chain = await self.causal_retriever.build_chain(
-                [p.node for p in packets], max_depth=3, max_edges=20
+                [p.node for p in packets if p.node], max_depth=3, max_edges=20
             )
-            causal_chain.extend(evidence_chain)
+            for ec in evidence_chain:
+                if ec not in causal_chain:
+                    causal_chain.append(ec)
 
         # 6. Conformal prediction
+        state_machine.transition_to(RetrievalState.CONFORMAL_FILTERING)
+        trace_manager.publish(trace_id, "conformal", "CONFORMAL_FILTERING", {})
+
         conformal_packets = list(packets)
         coverage_guarantee = 0.0
         prediction_set_size = len(packets)
@@ -276,14 +385,25 @@ class Orchestrator:
                     prediction_set_size = set_size
                 else:
                     coverage_guarantee = calibrator.coverage_level
+                    
+        trace_manager.publish(trace_id, "conformal", "CONFORMAL_COMPLETE", {
+            "coverage_guarantee": coverage_guarantee,
+            "prediction_set_size": prediction_set_size
+        })
 
         # 7. Synthesis
+        state_machine.transition_to(RetrievalState.SYNTHESIS)
+        trace_manager.publish(trace_id, "synthesis", "SYNTHESIS", {})
+
         if self.synthesizer is not None:
             answer_text = await self.synthesizer.synthesize(query, conformal_packets)
         else:
             answer_text = self._fallback_synthesis(query, conformal_packets)
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        state_machine.transition_to(RetrievalState.COMPLETED)
+        trace_manager.publish(trace_id, "synthesis", "COMPLETED", {"latency_ms": elapsed_ms})
 
         return ApexAnswer(
             answer_text=answer_text,

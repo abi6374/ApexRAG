@@ -11,9 +11,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ─────────────────────────────────────────────────────────────
@@ -34,20 +34,24 @@ class NodeType(str, Enum):
 
 
 class EdgeType(str, Enum):
-    """Typed relationships in the Causal Knowledge Graph.
-
-    SUPPORTS:    Two nodes reinforce the same claim.
-    CONTRADICTS: Two nodes make conflicting factual claims.
-    OVERRIDES:   A newer node supersedes an older one that
-                 contradicts it.
-    REFINES:     One node cites or references another to add
-                 detail or scope.
-    """
+    """Typed relationships in the Causal Knowledge Graph."""
 
     SUPPORTS = "SUPPORTS"
     CONTRADICTS = "CONTRADICTS"
     OVERRIDES = "OVERRIDES"
     REFINES = "REFINES"
+    DEPENDS_ON = "DEPENDS_ON"
+    REFERENCES = "REFERENCES"
+    EXPLAINS = "EXPLAINS"
+    SAME_TOPIC = "SAME_TOPIC"
+    IMPLEMENTS = "IMPLEMENTS"
+    CALLS = "CALLS"
+    IMPORTS = "IMPORTS"
+    SUCCESSOR = "SUCCESSOR"
+    PREDECESSOR = "PREDECESSOR"
+    VERSION_OF = "VERSION_OF"
+    SUPERSEDES = "SUPERSEDES"
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -240,30 +244,71 @@ class CausalEdge(BaseModel):
 class EvidencePacket(BaseModel):
     """A fully annotated piece of evidence for the Synthesizer.
 
-    Wraps an ASTNode together with its temporal metadata, relevant
-    causal edges, retrieval scores, and conformal nonconformity
-    score.  Only verified EvidencePackets are passed to the
-    SynthesizerAgent.
-
-    Attributes:
-        node:                 The retrieved ASTNode.
-        temporal_metadata:    Temporal context for freshness.
-        causal_edges:         All causal edges involving this node
-                              that were discovered during retrieval.
-        retrieval_score:      Similarity or relevance score from the
-                              retrieval step (higher = more relevant).
-        nonconformity_score:  Conformal nonconformity score (lower =
-                              more conforming / stronger evidence).
-        rank:                 Ordinal rank of this packet in the
-                              final evidence set (1 = best).
+    Only verified EvidencePackets are passed to the SynthesizerAgent.
     """
 
-    node: ASTNode
-    temporal_metadata: TemporalMetadata
-    causal_edges: list[CausalEdge] = Field(default_factory=list)
+    node_id: str = ""
+    document_id: str = ""
+    tenant_id: str = "default"
+    page_number: int | None = None
+    section_path: str = ""
     retrieval_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    verification_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    freshness_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    graph_context: dict[str, Any] = Field(default_factory=dict)
+    reasoning_trace: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    content: str = ""
+
+    # Legacy compatibility fields
+    node: ASTNode | None = None
+    temporal_metadata: TemporalMetadata | None = None
+    causal_edges: list[CausalEdge] = Field(default_factory=list)
     nonconformity_score: float = Field(default=1.0, ge=0.0)
     rank: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _populate_from_legacy(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Extract fields from legacy node if present
+            node = data.get("node")
+            if node:
+                node_id = getattr(node, "node_id", None) or (node.get("node_id") if isinstance(node, dict) else None)
+                doc_id = getattr(node, "doc_id", None) or (node.get("doc_id") if isinstance(node, dict) else None)
+                content = getattr(node, "content", None) or (node.get("content") if isinstance(node, dict) else None)
+                page_number = getattr(node, "page_number", None) or (node.get("page_number") if isinstance(node, dict) else None)
+                path = getattr(node, "path", None) or (node.get("path") if isinstance(node, dict) else None)
+
+                if node_id and not data.get("node_id"):
+                    data["node_id"] = node_id
+                if doc_id and not data.get("document_id"):
+                    data["document_id"] = doc_id
+                if content and not data.get("content"):
+                    data["content"] = content
+                if page_number is not None and data.get("page_number") is None:
+                    data["page_number"] = page_number
+                if path and not data.get("section_path"):
+                    data["section_path"] = path
+
+            # Extract fields from legacy temporal_metadata if present
+            temporal_meta = data.get("temporal_metadata")
+            if temporal_meta:
+                freshness = getattr(temporal_meta, "freshness_score", None) or (temporal_meta.get("freshness_score") if isinstance(temporal_meta, dict) else None)
+                if freshness is not None and data.get("freshness_score") is None:
+                    data["freshness_score"] = freshness
+
+            # Default node_id and document_id if not present
+            if not data.get("node_id"):
+                data["node_id"] = ""
+            if not data.get("document_id"):
+                data["document_id"] = ""
+
+        return data
+
+    @property
+    def doc_id(self) -> str:
+        return self.document_id
 
     @field_validator("rank")
     @classmethod
@@ -274,6 +319,7 @@ class EvidencePacket(BaseModel):
 
     class Config:
         json_encoders = {datetime: lambda dt: dt.isoformat()}
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -330,3 +376,8 @@ class ApexAnswer(BaseModel):
 
     class Config:
         json_encoders = {datetime: lambda dt: dt.isoformat()}
+
+
+EvidencePacket.model_rebuild()
+ApexAnswer.model_rebuild()
+

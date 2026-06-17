@@ -158,12 +158,38 @@ class ConformalCalibrator:
         covered = sum(1 for s in scores if s <= threshold)
         return covered / len(scores)
 
+    def compute_hierarchical_confidence(
+        self,
+        retrieval_conf: float,
+        verification_conf: float,
+        temporal_conf: float,
+        graph_conf: float,
+        synthesis_conf: float,
+    ) -> float:
+        """
+        Compute a GlobalConfidenceScore by combining hierarchical confidence levels:
+        1. Retrieval Confidence
+        2. Verification Confidence
+        3. Temporal Confidence
+        4. Graph Confidence
+        5. Synthesis Confidence
+        """
+        global_score = (
+            retrieval_conf
+            * verification_conf
+            * temporal_conf
+            * graph_conf
+            * synthesis_conf
+        )
+        return round(global_score, 4)
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}"
             f"(coverage_level={self.coverage_level}, "
             f"min_calibration_size={self.min_calibration_size})"
         )
+
 
 
 # ═══════════════════════════════════════════════════════════════════════

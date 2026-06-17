@@ -83,3 +83,21 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
             if isinstance(child, ASTNode):
                 nodes.extend(self._flatten_ast(child))
         return nodes
+
+    def filter_candidates(
+        self,
+        query: str,
+        nodes: list[ASTNode],
+        page_index_map: dict[str, list[int]] | None = None,
+        max_candidates: int = 80,
+    ) -> list[ASTNode]:
+        """Evolved v3 filter method leveraging StructuralFilterEngine."""
+        from apex_rag.retrieval.deterministic.filter_engine import StructuralFilterEngine
+        engine = StructuralFilterEngine(stop_words=self.stop_words)
+        return engine.filter_candidates(
+            query=query,
+            nodes=nodes,
+            page_index_map=page_index_map,
+            max_candidates=max_candidates,
+        )
+

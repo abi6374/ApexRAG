@@ -1,11 +1,13 @@
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
 from apex_rag.core.protocols.interfaces import DeterministicRetriever, VerificationEngine
+from apex_rag.core.navigation_budget import NavigationBudget
 from apex_rag.providers import AsyncLLM
 from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
 from apex_rag.utils import ReasoningTrace
@@ -58,7 +60,7 @@ Respond ONLY with valid JSON.
 class ASTNavigationAgent:
     """
     Phase 1 Universal AST Navigation Agent.
-    Uses Deterministic pre-filtering before invoking LLM logic.
+    Uses Deterministic pre-filtering before invoking LLM logic, with strict budget constraints.
     """
 
     def __init__(
@@ -76,8 +78,15 @@ class ASTNavigationAgent:
         self._trace = trace or ReasoningTrace(enabled=True)
 
     async def find(
-        self, query: str, doc_id: str, root_node_id: str | None = None
+        self,
+        query: str,
+        doc_id: str,
+        root_node_id: str | None = None,
+        budget: NavigationBudget | None = None,
     ) -> ASTNavigationResult | None:
+        if budget is None:
+            budget = NavigationBudget()
+
         async with self._storage.session() as session:
             # 1. Fetch root nodes from DB
             db_nodes = await self._storage.get_ast_children(
@@ -99,6 +108,7 @@ class ASTNavigationAgent:
                     current_node=root,
                     traversal_trace=traversal_trace,
                     visited=visited,
+                    budget=budget,
                 )
                 if result:
                     return result
@@ -112,7 +122,16 @@ class ASTNavigationAgent:
         current_node: UnifiedASTNode,
         traversal_trace: list[tuple[str, str]],
         visited: set[str],
+        budget: NavigationBudget,
     ) -> ASTNavigationResult | None:
+        # Check budget limits
+        if not budget.check_valid():
+            logger.warning(
+                "[BUDGET] Navigation budget exceeded: %s. Aborting branch.",
+                budget.to_dict(),
+            )
+            return None
+
         if current_node.node_id in visited:
             return None
         visited.add(current_node.node_id)
@@ -121,16 +140,20 @@ class ASTNavigationAgent:
         title = current_node.content[:100].split("\n")[0]
         traversal_trace.append((current_node.node_id, title))
 
+        # Record traversal depth in budget
+        budget.record_depth(current_node.depth)
+
         # Determine if Leaf (no children)
         if not current_node.children:
             # Phase 1 Verification
             is_verified = await self._verifier.verify(query, current_node)
             if not is_verified:
+                budget.record_backtrack()
                 return None
 
             return ASTNavigationResult(
                 node=current_node,
-                path="",  # Path building to be added
+                path=getattr(current_node, "path", "") or "",
                 title=title,
                 trace=list(traversal_trace),
                 verified=True,
@@ -138,7 +161,13 @@ class ASTNavigationAgent:
             )
 
         # It's an internal node. Pre-filter candidates deterministically.
-        candidates = await self._retriever.retrieve(query, current_node, top_k=5)
+        # Check if the retriever supports advanced v3 filter engine filtering
+        if hasattr(self._retriever, "filter_candidates"):
+            candidates = self._retriever.filter_candidates(
+                query, current_node.children, max_candidates=budget.max_candidates
+            )
+        else:
+            candidates = await self._retriever.retrieve(query, current_node, top_k=budget.max_candidates)
 
         if not candidates:
             logger.debug("[NAVIGATE] No candidates found for node %s", current_node.node_id)
@@ -153,6 +182,9 @@ class ASTNavigationAgent:
 
         logger.debug("[NAVIGATE] Node %s has %d candidates", current_node.node_id, len(candidates))
         prompt = _NAVIGATE_PROMPT.format(query=query, children_text=candidate_texts)
+        
+        # Record LLM call to budget
+        budget.record_llm_call()
         raw = await self._model.generate(prompt=prompt, temperature=0.0, max_tokens=150)
 
         chosen_id, fallback_id = self._parse_json_ids(raw)
@@ -166,10 +198,18 @@ class ASTNavigationAgent:
             # Find the actual candidate node
             child_node = next((c for c in candidates if c.node_id == cid), None)
             if child_node:
-                res = await self._navigate(query, session, child_node, traversal_trace, visited)
+                res = await self._navigate(
+                    query=query,
+                    session=session,
+                    current_node=child_node,
+                    traversal_trace=traversal_trace,
+                    visited=visited,
+                    budget=budget,
+                )
                 if res:
                     return res
 
+        budget.record_backtrack()
         return None
 
     def _parse_json_ids(self, raw: str) -> tuple[str | None, str | None]:

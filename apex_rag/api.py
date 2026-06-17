@@ -58,6 +58,8 @@ from apex_rag.exceptions import (
 from apex_rag.models.unified_models import ApexAnswer
 from apex_rag.navigation import NavigationResult
 from apex_rag.utils import logger
+from apex_rag.observability.trace_manager import trace_manager
+
 
 # ---------------------------------------------------------------------------
 # Security helpers
@@ -546,29 +548,42 @@ async def delete_document(doc_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Shared SSE Streaming Helper
 # ---------------------------------------------------------------------------
-
-
 async def _stream_query_to_sse(
     task_coro: asyncio.Task[Any],
     event_queue: asyncio.Queue[Any],
+    trace_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Shared SSE generator: polls an event queue and a background task,
+    Shared SSE generator: polls an event queue, trace manager, and a background task,
     yielding SSE-formatted events until the task completes.
-
-    Args:
-        task_coro:   An asyncio.Task that produces events.
-        event_queue: Queue fed by the background task.
     """
+    trace_queue = None
+    if trace_id:
+        trace_queue = trace_manager.register_listener(trace_id)
+
     try:
         while True:
+            # Gather events from all active sources
+            coros = [asyncio.create_task(event_queue.get()), task_coro]
+            if trace_queue:
+                coros.append(asyncio.create_task(trace_queue.get()))
+
             done, _ = await asyncio.wait(
-                [asyncio.create_task(event_queue.get()), task_coro],
+                coros,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+
+            # Flush event queue
             while not event_queue.empty():
                 event = await event_queue.get()
                 yield f"data: {json.dumps(event)}\n\n"
+
+            # Flush trace queue
+            if trace_queue:
+                while not trace_queue.empty():
+                    event = await trace_queue.get()
+                    yield f"data: {json.dumps(event)}\n\n"
+
             if task_coro.done():
                 result = await task_coro
                 if isinstance(result, str):
@@ -580,15 +595,16 @@ async def _stream_query_to_sse(
                         "verified": True,
                     }
                 elif result:
+                    content_val = getattr(result, "content", getattr(result, "answer_text", ""))
                     final_data = {
                         "event": "result",
                         "found": True,
-                        "content": result.content,
-                        "node_id": result.node_id,
-                        "path": result.path,
-                        "title": result.title,
-                        "verified": result.verified,
-                        "confidence": result.confidence,
+                        "content": content_val,
+                        "node_id": getattr(result, "node_id", None),
+                        "path": getattr(result, "path", None),
+                        "title": getattr(result, "title", "Result"),
+                        "verified": getattr(result, "verified", True),
+                        "confidence": getattr(result, "confidence", 1.0),
                     }
                 else:
                     final_data = {"event": "result", "found": False}
@@ -597,6 +613,9 @@ async def _stream_query_to_sse(
     except asyncio.CancelledError:
         task_coro.cancel()
         raise
+    finally:
+        if trace_id and trace_queue:
+            trace_manager.unregister_listener(trace_id, trace_queue)
 
 
 # ---------------------------------------------------------------------------
