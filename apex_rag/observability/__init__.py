@@ -1,13 +1,18 @@
 """
-apex_rag.observability — Production observability infrastructure.
+Observability module for ApexRAG.
 
-Provides OpenTelemetry-based distributed tracing for instrumenting
-agent actions across the ApexRAG pipeline.
+Provides centralized access to metrics, tracing, and logging.
+
+Usage:
+    from apex_rag.observability import metrics_service
+    metrics_service.record_retrieval_latency(ms=145.2)
 """
 
-from apex_rag.observability.telemetry import TelemetryTracker, get_tracer
+from apex_rag.observability.metrics_service import MetricsService, metrics_service
+from apex_rag.observability.trace_manager import trace_manager
 
 __all__ = [
-    "TelemetryTracker",
-    "get_tracer",
+    "MetricsService",
+    "metrics_service",
+    "trace_manager",
 ]

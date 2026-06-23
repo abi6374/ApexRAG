@@ -146,19 +146,18 @@ class ApexOrchestrator(Orchestrator):
         has_temporal_history = False
         if not ablation_mode and temporal_agent.detect_time_query(query):
             storage = self.navigator._storage
-            if storage and type(storage).__name__ not in ("MagicMock", "Mock", "AsyncMock"):
+            if storage is not None:
                 try:
                     latest_nodes = await retriever.get_latest_nodes(doc_id)
                     if latest_nodes:
                         has_temporal_history = True
                     elif hasattr(storage, "get_timeline_events"):
-                        import inspect
                         res = storage.get_timeline_events(doc_id)
                         if inspect.isawaitable(res):
                             events = await res
                         else:
                             events = res
-                        if events and type(events).__name__ not in ("MagicMock", "Mock", "AsyncMock"):
+                        if events:
                             has_temporal_history = True
                 except Exception:
                     pass

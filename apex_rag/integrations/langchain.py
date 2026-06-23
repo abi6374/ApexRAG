@@ -1,3 +1,4 @@
+from pydantic import ConfigDict
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
@@ -31,8 +32,7 @@ class ApexRAGRetriever(BaseRetriever):
     doc_id: str
     tenant_id: str = "default"
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun

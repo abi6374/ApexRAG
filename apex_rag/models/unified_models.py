@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ─────────────────────────────────────────────────────────────
 # Enums
@@ -50,6 +50,11 @@ class EdgeType(str, Enum):
     PREDECESSOR = "PREDECESSOR"
     VERSION_OF = "VERSION_OF"
     SUPERSEDES = "SUPERSEDES"
+    REPLACED_BY = "REPLACED_BY"
+    VALID_DURING = "VALID_DURING"
+    EFFECTIVE_DURING = "EFFECTIVE_DURING"
+    SNAPSHOT_OF = "SNAPSHOT_OF"
+    HISTORICAL_PARENT = "HISTORICAL_PARENT"
 
 
 
@@ -116,9 +121,7 @@ class ASTNode(BaseModel):
         # embedding is allowed to be empty (pre-embedding pass)
         return v
 
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda dt: dt.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
 
 
 ASTNode.model_rebuild()
@@ -153,7 +156,6 @@ class TemporalMetadata(BaseModel):
     ingestion_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     freshness_score: float = Field(default=1.0, ge=0.0, le=1.0)
     decay_rate: float = 0.001
-    superseded_by: str | None = None
 
     # Temporal Intelligence extensions
     created_at: datetime | None = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -163,8 +165,11 @@ class TemporalMetadata(BaseModel):
     version_number: int = 1
     revision_number: int = 0
     source_timestamp: datetime | None = None
+    approval_timestamp: datetime | None = Field(default=None, description="When this version was officially approved")
     is_current: bool = True
+    superseded_by: str | None = None
     previous_version: str | None = None
+    validity_status: str = Field(default="ACTIVE", description="Validity status: ACTIVE, PENDING, EXPIRED, SUPERSEDED, DRAFT, ARCHIVED")
 
     @field_validator("node_id")
     @classmethod
@@ -189,8 +194,7 @@ class TemporalMetadata(BaseModel):
             raise ValueError(f"freshness_score must be in [0, 1], got {v}")
         return v
 
-    class Config:
-        json_encoders = {datetime: lambda dt: dt.isoformat()}
+    model_config = ConfigDict()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -241,9 +245,7 @@ class CausalEdge(BaseModel):
             raise ValueError(f"Node reference must be a valid UUID4 string, got {v!r}")
         return v
 
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda dt: dt.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -327,8 +329,7 @@ class EvidencePacket(BaseModel):
             raise ValueError(f"rank must be >= 0, got {v}")
         return v
 
-    class Config:
-        json_encoders = {datetime: lambda dt: dt.isoformat()}
+    model_config = ConfigDict()
 
 
 
@@ -384,10 +385,149 @@ class ApexAnswer(BaseModel):
             raise ValueError(f"prediction_set_size must be >= 0, got {v}")
         return v
 
-    class Config:
-        json_encoders = {datetime: lambda dt: dt.isoformat()}
+    model_config = ConfigDict()
 
 
 EvidencePacket.model_rebuild()
 ApexAnswer.model_rebuild()
+
+
+# ─────────────────────────────────────────────────────────────
+# Temporal Node Version (temporal/temporal_models.py candidate)
+# ─────────────────────────────────────────────────────────────
+
+
+class TemporalNodeVersion(BaseModel):
+    """A specific versioned snapshot of an ASTNode with full temporal context.
+
+    Captures every mutation to a node as an immutable version record,
+    enabling time-travel queries, audit trails, and lineage tracking.
+    """
+
+    version_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    node_id: str
+    content: str = ""
+    doc_id: str
+    tenant_id: str = "default"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    effective_from: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    effective_to: datetime | None = None
+    version_number: int = 1
+    revision_number: int = 0
+    source_timestamp: datetime | None = None
+    approval_timestamp: datetime | None = None
+    is_current: bool = True
+    superseded_by: str | None = None
+    previous_version: str | None = None
+    validity_status: str = "ACTIVE"
+
+    model_config = ConfigDict()
+
+
+class NodeVersionHistory(BaseModel):
+    """Complete version history for a single node, ordered by version number.
+
+    Provides a full audit trail of every modification to a node over time,
+    with pointers to previous and superseding versions.
+    """
+
+    node_id: str
+    doc_id: str
+    versions: list[TemporalNodeVersion] = Field(default_factory=list)
+    current_version: TemporalNodeVersion | None = None
+    total_versions: int = 0
+
+    model_config = ConfigDict()
+
+
+class VersionLineage(BaseModel):
+    """Tracks the lineage chain of a node across supersession events.
+
+    Forms a directed acyclic graph (DAG) showing how a node evolved
+    through versions A → B → C, with supersession metadata at each step.
+    """
+
+    lineage_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    node_id: str
+    doc_id: str
+    tenant_id: str = "default"
+    source_version_id: str
+    target_version_id: str | None = None
+    lineage_type: str = "VERSION_OF"  # VERSION_OF, SUPERSEDES, REPLACED_BY
+    strength: float = 1.0
+    evidence: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict()
+
+
+# ─────────────────────────────────────────────────────────────
+# Permission Models (Enterprise RBAC)
+# ─────────────────────────────────────────────────────────────
+
+
+class Permission(BaseModel):
+    """Base permission model representing an allow/deny rule."""
+
+    permission_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    role: str
+    action: str  # read, write, delete, traverse, audit
+    is_allowed: bool = True
+    priority: int = 0  # Higher priority overrides lower
+
+    model_config = ConfigDict()
+
+
+class ResourcePermission(Permission):
+    """Permission scoped to a specific resource type."""
+
+    resource_type: str  # document, node, version, field
+
+
+class NodePermission(ResourcePermission):
+    """Permission scoped to a specific AST node."""
+
+    node_id: str | None = None  # None = applies to all nodes of this type
+    node_type_filter: str | None = None
+
+
+class DocumentPermission(ResourcePermission):
+    """Permission scoped to a specific document."""
+
+    doc_id: str | None = None
+
+
+class FieldPermission(Permission):
+    """Field-level security: controls visibility of specific fields in content."""
+
+    resource_type: str = "ASTNode"
+    field_name: str
+
+
+# ─────────────────────────────────────────────────────────────
+# Access Audit Record
+# ─────────────────────────────────────────────────────────────
+
+
+class AccessAuditRecord(BaseModel):
+    """Detailed audit record for every access attempt.
+
+    Captures who accessed what, when, which nodes were
+    allowed/blocked, and the retrieval mode used.
+    """
+
+    request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    tenant_id: str
+    user_id: str
+    role: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    query: str = ""
+    accessed_nodes: list[str] = Field(default_factory=list)
+    blocked_nodes: list[str] = Field(default_factory=list)
+    retrieval_mode: str = ""
+    temporal_as_of: datetime | None = None
+    allowed: bool = True
+    duration_ms: float = 0.0
+
+    model_config = ConfigDict()
 

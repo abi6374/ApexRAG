@@ -4,10 +4,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from apex_rag.core.cache import NavigationCache
 from apex_rag.core.navigation_budget import NavigationBudget
 from apex_rag.core.protocols.interfaces import DeterministicRetriever, VerificationEngine
 from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
 from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
+from apex_rag.observability.metrics_service import metrics_service
 from apex_rag.providers import AsyncLLM
 from apex_rag.utils import ReasoningTrace
 
@@ -75,6 +77,7 @@ class ASTNavigationAgent:
         self._retriever = retriever
         self._verifier = verifier
         self._trace = trace or ReasoningTrace(enabled=True)
+        self._nav_cache = NavigationCache()
 
     async def find(
         self,
@@ -180,13 +183,29 @@ class ASTNavigationAgent:
             candidate_texts += f"[{cand.node_id}] {cand.node_type}: {summary}\n"
 
         logger.debug("[NAVIGATE] Node %s has %d candidates", current_node.node_id, len(candidates))
-        prompt = _NAVIGATE_PROMPT.format(query=query, children_text=candidate_texts)
 
-        # Record LLM call to budget
-        budget.record_llm_call()
-        raw = await self._model.generate(prompt=prompt, temperature=0.0, max_tokens=150)
+        # Check NavigationCache before LLM call
+        cached_nav = await self._nav_cache.get(query, current_node.node_id)
+        if cached_nav is not None:
+            metrics_service.record_cache_hit()
+            chosen_id = cached_nav.get("chosen_id")
+            fallback_id = cached_nav.get("fallback_id")
+            logger.debug("[NAVIGATE] Cache HIT for %s: %s (fallback: %s)", current_node.node_id, chosen_id, fallback_id)
+        else:
+            metrics_service.record_cache_miss()
+            prompt = _NAVIGATE_PROMPT.format(query=query, children_text=candidate_texts)
 
-        chosen_id, fallback_id = self._parse_json_ids(raw)
+            # Record LLM call to budget
+            budget.record_llm_call()
+            raw = await self._model.generate(prompt=prompt, temperature=0.0, max_tokens=150)
+
+            chosen_id, fallback_id = self._parse_json_ids(raw)
+
+            # Cache the navigation decision
+            await self._nav_cache.set(
+                query, current_node.node_id,
+                {"chosen_id": chosen_id, "fallback_id": fallback_id},
+            )
         logger.debug("[NAVIGATE] LLM chose: %s (fallback: %s)", chosen_id, fallback_id)
 
         # Execute navigation
