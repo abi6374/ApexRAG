@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import logging
 from datetime import datetime
@@ -8,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from apex_rag.core.metrics.parser import MetricValueParser, ParsedMetric, UnitType
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
     CausalEdgeRow,
@@ -25,30 +27,22 @@ class StateReconstructor:
         self.storage = storage
 
     async def _get_nodes_as_of(self, doc_id: str, as_of: datetime) -> list:
-        import inspect
         if not hasattr(self.storage, "get_nodes_as_of"):
             return []
         res = self.storage.get_nodes_as_of(doc_id, as_of)
         if inspect.isawaitable(res):
             res = await res
-        if type(res).__name__ in ("MagicMock", "Mock", "AsyncMock"):
-            return []
-        return res or []
+        return list(res) if res else []
 
     async def _get_state_snapshot(self, entity_id: str, as_of: datetime) -> Any:
-        import inspect
         if not hasattr(self.storage, "get_state_snapshot"):
             return None
         res = self.storage.get_state_snapshot(entity_id, as_of)
         if inspect.isawaitable(res):
             res = await res
-        if type(res).__name__ in ("MagicMock", "Mock", "AsyncMock"):
-            return None
         return res
 
     async def _get_causal_edges(self, as_of: datetime) -> list:
-        if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
-            return []
         if not hasattr(self.storage, "session"):
             return []
         try:
@@ -62,8 +56,6 @@ class StateReconstructor:
             return []
 
     async def _get_change_history(self, entity_id: str, as_of: datetime) -> list:
-        if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
-            return []
         if not hasattr(self.storage, "session"):
             return []
         try:
@@ -82,16 +74,22 @@ class StateReconstructor:
         """
         Reconstructs the full raw text content of a document as of the target datetime
         by concatenating all active node contents in order.
+
+        Nodes are sorted by tree position (version_number, created_at) to preserve
+        document structure. String-based node_id sorting (n1, n10, n2) is avoided.
         """
         # Fetch nodes effective as of the date
         nodes = await self._get_nodes_as_of(doc_id, as_of)
         if not nodes:
             return ""
 
-        # In order to reconstruct correctly, we can sort by node_id or revision/version details
-        # For a simple structured reconstruction, we order by version_id/node_id
-        nodes.sort(key=lambda n: n.node_id)
-        return "\n\n".join(node.content for node in nodes)
+        # Sort by tree position: version_number first, then created_at as tiebreaker
+        # This preserves document structure better than string-sorting node_id
+        nodes.sort(key=lambda n: (getattr(n, "version_number", 0) or 0, getattr(n, "created_at", datetime.min) or datetime.min))
+        return "\n\n".join(
+            getattr(node, "content", "") or ""
+            for node in nodes
+        )
 
     async def reconstruct_graph_state(self, doc_id: str, as_of: datetime) -> dict[str, Any]:
         """
@@ -131,9 +129,9 @@ class StateReconstructor:
         """
         # Attempt to read from state_snapshots first
         snapshot = await self._get_state_snapshot(entity_id, as_of)
-        if snapshot and type(snapshot).__name__ not in ("MagicMock", "Mock", "AsyncMock"):
+        if snapshot:
             data = getattr(snapshot, "snapshot_data", "")
-            if data and type(data).__name__ not in ("MagicMock", "Mock", "AsyncMock") and isinstance(data, str):
+            if data and isinstance(data, str):
                 try:
                     return json.loads(data)
                 except json.JSONDecodeError:
@@ -144,10 +142,17 @@ class StateReconstructor:
 
         metrics = {}
         for change in change_rows:
-            try:
-                metrics[change.field_name] = float(change.new_value) if change.new_value is not None else 0.0
-            except ValueError:
-                metrics[change.field_name] = change.new_value
+            if change.new_value is not None:
+                parsed = MetricValueParser.parse(change.new_value)
+                if parsed.unit_type != UnitType.UNKNOWN:
+                    metrics[change.field_name] = parsed.numeric_value
+                else:
+                    try:
+                        metrics[change.field_name] = float(change.new_value)
+                    except (ValueError, TypeError):
+                        metrics[change.field_name] = change.new_value
+            else:
+                metrics[change.field_name] = 0.0
         return metrics
 
     async def reconstruct_business_records(self, doc_id: str, as_of: datetime) -> list[dict[str, Any]]:
@@ -160,7 +165,7 @@ class StateReconstructor:
         for node in nodes:
             # Simple content parser: if the node content contains key-value strings or json
             content = getattr(node, "content", "")
-            if content and type(content).__name__ not in ("MagicMock", "Mock", "AsyncMock") and isinstance(content, str):
+            if content and isinstance(content, str):
                 if content.strip().startswith("{") and content.strip().endswith("}"):
                     with contextlib.suppress(json.JSONDecodeError):
                         records.append(json.loads(content))
@@ -169,6 +174,6 @@ class StateReconstructor:
                     records.append({
                         "node_id": node.node_id,
                         "content": content,
-                        "version_number": node.version_number
+                        "version_number": getattr(node, "version_number", 0),
                     })
         return records

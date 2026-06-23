@@ -57,6 +57,7 @@ from apex_rag.exceptions import (
 )
 from apex_rag.models.unified_models import ApexAnswer
 from apex_rag.navigation import NavigationResult
+from apex_rag.observability.metrics_service import metrics_service
 from apex_rag.observability.trace_manager import trace_manager
 from apex_rag.utils import logger
 
@@ -218,7 +219,7 @@ async def api_key_middleware(request: Request, call_next: Any) -> Response:
     """If APEX_API_KEY is set, require it in X-API-Key header."""
     if settings.api_key:
         path = request.url.path
-        if path in ("/health", "/health/ready", "/docs", "/redoc", "/openapi.json"):
+        if path in ("/health", "/health/ready", "/docs", "/redoc", "/openapi.json", "/metrics"):
             return cast(Response, await call_next(request))
 
         api_key = request.headers.get("X-API-Key", "")
@@ -887,6 +888,38 @@ async def llm_generate(req: LLMGenerateRequest) -> dict[str, Any]:
     except Exception as exc:
         logger.error("LLM generation error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Metrics — Prometheus Endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.get("/metrics", tags=["System"])
+async def get_metrics() -> Response:
+    """Prometheus-compatible metrics endpoint.
+
+    Exposes:
+      - apex_rag_uptime_seconds
+      - apex_rag_total_queries
+      - apex_rag_llm_calls
+      - apex_rag_cache_hits
+      - apex_rag_cache_misses
+      - apex_rag_cache_hit_rate
+      - apex_rag_retrieval_latency_ms (histogram)
+      - apex_rag_planner_latency_ms (histogram)
+      - apex_rag_navigator_latency_ms (histogram)
+      - apex_rag_verifier_latency_ms (histogram)
+      - apex_rag_critic_latency_ms (histogram)
+      - apex_rag_tenant_queries_total (labelled by tenant)
+
+    Returns:
+        Plain-text Prometheus exposition format.
+    """
+    return Response(
+        content=metrics_service.get_prometheus_metrics(),
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 # ---------------------------------------------------------------------------

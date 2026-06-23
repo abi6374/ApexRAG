@@ -6,13 +6,22 @@ Conformal Uncertainty Quantification.
 """
 
 from apex_rag.models.unified_models import (
+    AccessAuditRecord,
     ApexAnswer,
     ASTNode,
     CausalEdge,
+    DocumentPermission,
     EdgeType,
     EvidencePacket,
+    FieldPermission,
+    NodePermission,
     NodeType,
+    NodeVersionHistory,
+    Permission,
+    ResourcePermission,
     TemporalMetadata,
+    TemporalNodeVersion,
+    VersionLineage,
 )
 
 __all__ = [
@@ -23,4 +32,13 @@ __all__ = [
     "EdgeType",
     "EvidencePacket",
     "ApexAnswer",
+    "TemporalNodeVersion",
+    "NodeVersionHistory",
+    "VersionLineage",
+    "Permission",
+    "ResourcePermission",
+    "FieldPermission",
+    "NodePermission",
+    "DocumentPermission",
+    "AccessAuditRecord",
 ]
