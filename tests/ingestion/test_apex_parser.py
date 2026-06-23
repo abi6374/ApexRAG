@@ -678,8 +678,9 @@ class TestApexStorage:
             node_type=NodeType.PARAGRAPH,
             doc_id="doc-123",
         )
-        await storage.save_node(node)
-        retrieved = await storage.get_node(node.node_id)
+        await storage.save_node(node, tenant_context="default")
+
+        retrieved = await storage.get_node(node.node_id, tenant_context="default")
         assert retrieved is not None
         assert retrieved.content == "Test content"
         assert retrieved.node_type == NodeType.PARAGRAPH
@@ -692,7 +693,7 @@ class TestApexStorage:
             ASTNode(content=f"Node {i}", node_type=NodeType.PARAGRAPH, doc_id="doc-1")
             for i in range(5)
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
         count = await storage.count_nodes("doc-1")
         assert count == 5
 
@@ -704,12 +705,12 @@ class TestApexStorage:
             ASTNode(content="B", node_type=NodeType.PARAGRAPH, doc_id="doc-a"),
             ASTNode(content="C", node_type=NodeType.PARAGRAPH, doc_id="doc-b"),
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
 
-        doc_a_nodes = await storage.get_nodes_by_doc("doc-a")
+        doc_a_nodes = await storage.get_nodes_by_doc("doc-a", tenant_context="default")
         assert len(doc_a_nodes) == 2
 
-        doc_b_nodes = await storage.get_nodes_by_doc("doc-b")
+        doc_b_nodes = await storage.get_nodes_by_doc("doc-b", tenant_context="default")
         assert len(doc_b_nodes) == 1
 
     @pytest.mark.asyncio
@@ -720,15 +721,15 @@ class TestApexStorage:
             node_type=NodeType.PARAGRAPH,
             doc_id="doc-1",
         )
-        await storage.save_node(node)
-        assert await storage.get_node(node.node_id) is not None
+        await storage.save_node(node, tenant_context="default")
+        assert await storage.get_node(node.node_id, tenant_context="default") is not None
 
-        deleted = await storage.delete_node(node.node_id)
+        deleted = await storage.delete_node(node.node_id, tenant_context="default")
         assert deleted is True
-        assert await storage.get_node(node.node_id) is None
+        assert await storage.get_node(node.node_id, tenant_context="default") is None
 
         # Delete non-existent
-        assert await storage.delete_node(str(uuid.uuid4())) is False
+        assert await storage.delete_node(str(uuid.uuid4()), tenant_context="default") is False
 
     @pytest.mark.asyncio
     async def test_temporal_metadata_crud(self, storage: ApexStorage) -> None:
@@ -738,14 +739,14 @@ class TestApexStorage:
             node_type=NodeType.PARAGRAPH,
             doc_id="doc-1",
         )
-        await storage.save_node(node)
+        await storage.save_node(node, tenant_context="default")
 
         meta = TemporalMetadata(
             node_id=node.node_id,
             freshness_score=0.85,
             decay_rate=0.002,
         )
-        await storage.save_temporal_metadata(meta)
+        await storage.save_temporal_metadata(meta, tenant_context="default")
 
         retrieved = await storage.get_temporal_metadata(node.node_id)
         assert retrieved is not None
@@ -757,7 +758,7 @@ class TestApexStorage:
         """Save and retrieve causal edges."""
         node_a = ASTNode(content="A", node_type=NodeType.PARAGRAPH, doc_id="doc-1")
         node_b = ASTNode(content="B", node_type=NodeType.PARAGRAPH, doc_id="doc-1")
-        await storage.save_nodes([node_a, node_b])
+        await storage.save_nodes([node_a, node_b], tenant_context="default")
 
         edge = CausalEdge(
             source_node_id=node_a.node_id,
@@ -790,13 +791,13 @@ class TestApexStorage:
         )
         parent.children = [child.node_id]
 
-        await storage.save_nodes([parent, child])
+        await storage.save_nodes([parent, child], tenant_context="default")
 
-        retrieved_parent = await storage.get_node(parent.node_id)
+        retrieved_parent = await storage.get_node(parent.node_id, tenant_context="default")
         assert retrieved_parent is not None
         assert child.node_id in retrieved_parent.children
 
-        retrieved_child = await storage.get_node(child.node_id)
+        retrieved_child = await storage.get_node(child.node_id, tenant_context="default")
         assert retrieved_child is not None
         assert retrieved_child.parent_id == parent.node_id
 
@@ -808,7 +809,7 @@ class TestApexStorage:
             ASTNode(content="2", node_type=NodeType.PARAGRAPH, doc_id="d1"),
             ASTNode(content="3", node_type=NodeType.PARAGRAPH, doc_id="d2"),
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
         assert await storage.count_nodes() == 3
         assert await storage.count_nodes("d1") == 2
         assert await storage.count_nodes("d2") == 1
@@ -821,7 +822,7 @@ class TestApexStorage:
             ASTNode(content="1", node_type=NodeType.PARAGRAPH, doc_id="d1"),
             ASTNode(content="2", node_type=NodeType.PARAGRAPH, doc_id="d2"),
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
         all_nodes = await storage.get_all_nodes()
         assert len(all_nodes) == 2
 
@@ -831,7 +832,7 @@ class TestApexStorage:
         node_a = ASTNode(content="A", node_type=NodeType.PARAGRAPH, doc_id="d1")
         node_b = ASTNode(content="B", node_type=NodeType.PARAGRAPH, doc_id="d1")
         node_c = ASTNode(content="C", node_type=NodeType.PARAGRAPH, doc_id="d1")
-        await storage.save_nodes([node_a, node_b, node_c])
+        await storage.save_nodes([node_a, node_b, node_c], tenant_context="default")
 
         edges = [
             CausalEdge(source_node_id=node_a.node_id, target_node_id=node_b.node_id, edge_type=EdgeType.SUPPORTS),
@@ -863,7 +864,7 @@ class TestApexStoragePageIndex:
     async def test_save_and_retrieve_single_entry(self, storage: ApexStorage) -> None:
         """Save a page index entry and retrieve it."""
         node = ASTNode(content="Test", node_type=NodeType.HEADING, doc_id="doc-1")
-        await storage.save_node(node)
+        await storage.save_node(node, tenant_context="default")
 
         entry = {
             "node_id": node.node_id,
@@ -882,7 +883,7 @@ class TestApexStoragePageIndex:
     async def test_save_and_retrieve_multiple_entries(self, storage: ApexStorage) -> None:
         """Multiple entries are stored and retrieved, sorted by term."""
         node = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1")
-        await storage.save_node(node)
+        await storage.save_node(node, tenant_context="default")
 
         entries = [
             {"node_id": node.node_id, "doc_id": "doc-1", "term": "Zebra", "page_number": 10},
@@ -901,7 +902,7 @@ class TestApexStoragePageIndex:
     async def test_search_page_index(self, storage: ApexStorage) -> None:
         """Search page index by term partial match (case-insensitive)."""
         node = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1")
-        await storage.save_node(node)
+        await storage.save_node(node, tenant_context="default")
 
         entries = [
             {"node_id": node.node_id, "doc_id": "doc-1", "term": "Revenue Growth", "page_number": 12},
@@ -910,7 +911,7 @@ class TestApexStoragePageIndex:
         ]
         await storage.save_page_index_entries(entries)
 
-        results = await storage.search_page_index("doc-1", "revenue")
+        results = await storage.search_page_index("doc-1", "revenue", tenant_context="default")
         assert len(results) == 2, f"Expected 2 matches for 'revenue', got {len(results)}"
         assert all("Revenue" in r["term"] for r in results)
 
@@ -918,13 +919,13 @@ class TestApexStoragePageIndex:
     async def test_search_page_index_no_match(self, storage: ApexStorage) -> None:
         """Search with no matches returns empty list."""
         node = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1")
-        await storage.save_node(node)
+        await storage.save_node(node, tenant_context="default")
 
         await storage.save_page_index_entry({
             "node_id": node.node_id, "doc_id": "doc-1", "term": "Only Entry", "page_number": 1
         })
 
-        results = await storage.search_page_index("doc-1", "nonexistent")
+        results = await storage.search_page_index("doc-1", "nonexistent", tenant_context="default")
         assert len(results) == 0
 
     @pytest.mark.asyncio
@@ -1011,9 +1012,9 @@ class TestApexStorageGlobalSearch:
             ASTNode(content="A", node_type=NodeType.PARAGRAPH, doc_id="doc-1"),
             ASTNode(content="B", node_type=NodeType.PARAGRAPH, doc_id="doc-2"),
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
 
-        doc_ids = await storage.list_document_ids()
+        doc_ids = await storage.list_document_ids(tenant_context="default")
         assert "doc-1" in doc_ids
         assert "doc-2" in doc_ids
 
@@ -1022,7 +1023,7 @@ class TestApexStorageGlobalSearch:
         """Fetch root-level nodes for a document."""
         root = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1")
         child = ASTNode(content="Child", node_type=NodeType.PARAGRAPH, parent_id=root.node_id, doc_id="doc-1")
-        await storage.save_nodes([root, child])
+        await storage.save_nodes([root, child], tenant_context="default")
 
         roots = await storage.get_document_root_nodes("doc-1")
         assert len(roots) == 1
@@ -1036,9 +1037,9 @@ class TestApexStorageGlobalSearch:
             ASTNode(content="Operating costs stable", node_type=NodeType.PARAGRAPH, doc_id="doc-1"),
             ASTNode(content="Revenue outlook positive", node_type=NodeType.PARAGRAPH, doc_id="doc-2"),
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
 
-        results = await storage.search_nodes_global("revenue")
+        results = await storage.search_nodes_global("revenue", tenant_context="default")
         assert len(results) == 2, f"Expected 2 matches for 'revenue', got {len(results)}"
         assert all("revenue" in n.content.lower() for n in results)
 
@@ -1049,9 +1050,9 @@ class TestApexStorageGlobalSearch:
         leaf1 = ASTNode(content="Leaf 1", node_type=NodeType.PARAGRAPH, doc_id="doc-1", depth=1, parent_id=root.node_id)
         leaf2 = ASTNode(content="Leaf 2", node_type=NodeType.PARAGRAPH, doc_id="doc-1", depth=1, parent_id=root.node_id)
         root.children = [leaf1.node_id, leaf2.node_id]
-        await storage.save_nodes([root, leaf1, leaf2])
+        await storage.save_nodes([root, leaf1, leaf2], tenant_context="default")
 
-        stats = await storage.get_document_stats("doc-1")
+        stats = await storage.get_document_stats("doc-1", tenant_context="default")
         assert stats["doc_id"] == "doc-1"
         assert stats["total_nodes"] == 3
         assert stats["max_depth"] == 1
@@ -1065,9 +1066,9 @@ class TestApexStorageGlobalSearch:
             ASTNode(content="N2", node_type=NodeType.PARAGRAPH, doc_id="doc-1"),
             ASTNode(content="N3", node_type=NodeType.PARAGRAPH, doc_id="doc-2"),
         ]
-        await storage.save_nodes(nodes)
+        await storage.save_nodes(nodes, tenant_context="default")
 
-        deleted = await storage.delete_document("doc-1")
+        deleted = await storage.delete_document("doc-1", tenant_context="default")
         assert deleted == 2
         assert await storage.count_nodes("doc-1") == 0
         assert await storage.count_nodes("doc-2") == 1

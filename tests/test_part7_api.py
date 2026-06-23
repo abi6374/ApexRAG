@@ -102,6 +102,11 @@ async def test_ingest_file_pipeline(mock_llm) -> None:
                 index._graph_builder = MagicMock()
                 index._graph_builder.build_all = AsyncMock(return_value=[])
 
+                # Mock the fact pipeline to avoid storage session setup
+                mock_pipeline = AsyncMock()
+                mock_pipeline.enqueue_document = AsyncMock()
+                index._get_fact_pipeline = MagicMock(return_value=mock_pipeline)
+
                 doc_id = await index.ingest_file(dummy_file)
                 
                 assert doc_id == "test-doc"

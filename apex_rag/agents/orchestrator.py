@@ -415,6 +415,7 @@ class Orchestrator:
                 query=query,
                 latency_ms=round(elapsed_ms, 1)
             )
+        trace_id = getattr(self, "trace_id", None) or f"trace-{int(time.time() * 1000)}"
         self.trace_id = trace_id
         trace_manager.start_trace(trace_id)
         state_machine = RetrievalStateMachine(query_id=trace_id)

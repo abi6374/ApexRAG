@@ -92,6 +92,11 @@ from apex_rag.enterprise.auth.role_aware_synthesis import (
 )
 from apex_rag.enterprise.auth.access_control import AccessControlAgent
 
+# Fact pipeline
+from apex_rag.ingestion.fact_pipeline import FactPipeline
+from apex_rag.temporal.fact_store import FactStore
+from apex_rag.temporal.fact_extractor import FactExtractor
+
 
 class ApexIndex:
     """
@@ -141,6 +146,11 @@ class ApexIndex:
 
         self._trace_enabled = trace_enabled
         self._lock = asyncio.Lock()
+
+        # Fact extraction pipeline (lazily initialised)
+        self._fact_pipeline: FactPipeline | None = None
+        self._fact_store: FactStore | None = None
+        self._fact_extractor: FactExtractor | None = None
 
     # -- Factory ------------------------------------------------------------
 
@@ -301,7 +311,7 @@ class ApexIndex:
             edges = await self._graph_builder.build_all(nodes)
 
             # 5. Persistence (Save nodes first to satisfy foreign keys)
-            await self._storage.save_nodes(nodes)
+            await self._storage.save_nodes(nodes, tenant_context="default")
             for edge in edges:
                 await self._storage.save_causal_edge(edge.to_causal_edge())
 
@@ -322,7 +332,14 @@ class ApexIndex:
                 if inspect.isawaitable(result):
                     await result
 
-            logger.info("Ingested document %s: %d nodes", resolved_doc_id, len(nodes))
+            # 7. Non-blocking fact extraction (enqueue, don't await processing)
+            pipeline = self._get_fact_pipeline()
+            await pipeline.enqueue_document(resolved_doc_id, nodes, tenant_id="default")
+
+            logger.info(
+                "Ingested document %s: %d nodes (fact extraction enqueued)",
+                resolved_doc_id, len(nodes),
+            )
             return resolved_doc_id
 
     async def ingest(
@@ -378,7 +395,7 @@ class ApexIndex:
             edges = await self._graph_builder.build_all(nodes)
 
             # 5. Persistence (Save nodes first to satisfy foreign keys)
-            await self._storage.save_nodes(nodes)
+            await self._storage.save_nodes(nodes, tenant_context="default")
             for edge in edges:
                 await self._storage.save_causal_edge(edge.to_causal_edge())
 
@@ -399,7 +416,14 @@ class ApexIndex:
                 if inspect.isawaitable(result):
                     await result
 
-            logger.info("Ingested text %s: %d nodes", doc_id, len(nodes))
+            # 7. Non-blocking fact extraction (enqueue, don't await processing)
+            pipeline = self._get_fact_pipeline()
+            await pipeline.enqueue_document(doc_id, nodes, tenant_id="default")
+
+            logger.info(
+                "Ingested text %s: %d nodes (fact extraction enqueued)",
+                doc_id, len(nodes),
+            )
             return doc_id
 
     async def ingest_many(
@@ -625,7 +649,7 @@ class ApexIndex:
         Returns:
             List of node dicts.
         """
-        nodes = await self._storage.get_nodes_by_doc(doc_id)
+        nodes = await self._storage.get_nodes_by_doc(doc_id, tenant_context="default")
         # Sort by depth and then by some order if possible,
         # but for now we just return them.
         return [n.model_dump() for n in nodes]
@@ -639,7 +663,7 @@ class ApexIndex:
         Returns:
             List of root node dicts, each with nested 'children_nodes'.
         """
-        flat_nodes = await self._storage.get_nodes_by_doc(doc_id)
+        flat_nodes = await self._storage.get_nodes_by_doc(doc_id, tenant_context="default")
         if not flat_nodes:
             return []
 
@@ -683,7 +707,7 @@ class ApexIndex:
         Returns:
             Matching PageIndexEntry dicts.
         """
-        return await self._storage.search_page_index(doc_id, query)
+        return await self._storage.search_page_index(doc_id, query, tenant_context="default")
 
     # -- Management API -----------------------------------------------------
 
@@ -694,7 +718,7 @@ class ApexIndex:
         Returns:
             Dict with keys: doc_id, total_nodes, max_depth, leaf_count.
         """
-        return await self._storage.get_document_stats(doc_id)
+        return await self._storage.get_document_stats(doc_id, tenant_context="default")
 
     async def delete(self, doc_id: str) -> int:
         """
@@ -707,11 +731,11 @@ class ApexIndex:
             Number of nodes deleted.
         """
         async with self._lock:
-            return await self._storage.delete_document(doc_id)
+            return await self._storage.delete_document(doc_id, tenant_context="default")
 
     async def list_documents(self) -> list[str]:
         """Return all doc_ids currently stored in the index."""
-        return await self._storage.list_document_ids()
+        return await self._storage.list_document_ids(tenant_context="default")
 
     async def get_nodes(self, doc_id: str) -> list[dict[str, Any]]:
         """
@@ -720,7 +744,7 @@ class ApexIndex:
         Returns:
             List of node dictionaries.
         """
-        nodes = await self._storage.get_nodes_by_doc(doc_id)
+        nodes = await self._storage.get_nodes_by_doc(doc_id, tenant_context="default")
         return [n.model_dump() for n in nodes]
 
     # ── Enterprise: Temporal Query API ─────────────────────────────────
@@ -902,6 +926,18 @@ class ApexIndex:
             coverage_guarantee=1.0,
             prediction_set_size=len(result.packets),
         )
+
+    # ── Fact Pipeline ──────────────────────────────────────────────────
+
+    def _get_fact_pipeline(self) -> FactPipeline:
+        """Lazy-initialise and return the singleton FactPipeline."""
+        if self._fact_pipeline is None:
+            self._fact_store = FactStore(self._storage)
+            self._fact_extractor = FactExtractor()
+            self._fact_pipeline = FactPipeline(
+                self._storage, self._fact_store, self._fact_extractor,
+            )
+        return self._fact_pipeline
 
     async def temporal_compare(
         self,

@@ -85,7 +85,20 @@ class ASTNavigationAgent:
         doc_id: str,
         root_node_id: str | None = None,
         budget: NavigationBudget | None = None,
+        tenant_context: str | None = None,
     ) -> ASTNavigationResult | None:
+        """Navigate the AST to find a node answering the query.
+
+        Args:
+            query:          The user's query.
+            doc_id:         Target document ID.
+            root_node_id:   Optional starting node.
+            budget:         Optional navigation budget.
+            tenant_context: Optional tenant ID for tenant-aware caching and isolation.
+
+        Returns:
+            An ASTNavigationResult if found, or None.
+        """
         if budget is None:
             budget = NavigationBudget()
 
@@ -111,6 +124,7 @@ class ASTNavigationAgent:
                     traversal_trace=traversal_trace,
                     visited=visited,
                     budget=budget,
+                    tenant_context=tenant_context,
                 )
                 if result:
                     return result
@@ -125,6 +139,7 @@ class ASTNavigationAgent:
         traversal_trace: list[tuple[str, str]],
         visited: set[str],
         budget: NavigationBudget,
+        tenant_context: str | None = None,
     ) -> ASTNavigationResult | None:
         # Check budget limits
         if not budget.check_valid():
@@ -184,8 +199,11 @@ class ASTNavigationAgent:
 
         logger.debug("[NAVIGATE] Node %s has %d candidates", current_node.node_id, len(candidates))
 
+        # Determine tenant ID for cache key isolation
+        nav_tenant_id = tenant_context or "default"
+
         # Check NavigationCache before LLM call
-        cached_nav = await self._nav_cache.get(query, current_node.node_id)
+        cached_nav = await self._nav_cache.get(query, current_node.node_id, tenant_id=nav_tenant_id)
         if cached_nav is not None:
             metrics_service.record_cache_hit()
             chosen_id = cached_nav.get("chosen_id")
@@ -201,10 +219,11 @@ class ASTNavigationAgent:
 
             chosen_id, fallback_id = self._parse_json_ids(raw)
 
-            # Cache the navigation decision
+            # Cache the navigation decision (tenant-aware key — Principle 19)
             await self._nav_cache.set(
                 query, current_node.node_id,
                 {"chosen_id": chosen_id, "fallback_id": fallback_id},
+                tenant_id=nav_tenant_id,
             )
         logger.debug("[NAVIGATE] LLM chose: %s (fallback: %s)", chosen_id, fallback_id)
 
@@ -223,6 +242,7 @@ class ASTNavigationAgent:
                     traversal_trace=traversal_trace,
                     visited=visited,
                     budget=budget,
+                    tenant_context=tenant_context,
                 )
                 if res:
                     return res

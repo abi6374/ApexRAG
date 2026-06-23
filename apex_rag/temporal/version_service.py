@@ -335,12 +335,12 @@ class TemporalVersionService:
         session: Any,
         node_id: str,
     ) -> NodeVersionRow | None:
+        # NOTE: Must query by node_id only (not is_current=True) because the
+        # previous version's is_current was already set to False by the caller
+        # before this method is called.
         stmt = (
             select(NodeVersionRow)
-            .where(
-                NodeVersionRow.node_id == node_id,
-                NodeVersionRow.is_current.is_(True),
-            )
+            .where(NodeVersionRow.node_id == node_id)
             .order_by(NodeVersionRow.version_number.desc())
             .limit(1)
         )

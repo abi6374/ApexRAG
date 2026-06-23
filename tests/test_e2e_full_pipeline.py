@@ -215,12 +215,12 @@ class TestE2EFullPipeline:
             uuid.UUID(node.node_id, version=4)
 
         # Store
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
         count = await apex_storage.count_nodes(doc_id="e2e-financial-report")  # type: ignore[arg-type]
         assert count == len(nodes), f"Stored {count} nodes, expected {len(nodes)}"
 
         # Retrieve
-        retrieved = await apex_storage.get_nodes_by_doc("e2e-financial-report")  # type: ignore[arg-type]
+        retrieved = await apex_storage.get_nodes_by_doc("e2e-financial-report", tenant_context="default")  # type: ignore[arg-type]
         assert len(retrieved) == len(nodes)
 
     async def test_embedding_pass(
@@ -228,7 +228,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 2: EmbeddingEngine populates node embeddings (fingerprint fallback)."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         # Embed using fingerprint fallback (no real embedder)
         engine = EmbeddingEngine(embedder=None, dimension=384)
@@ -243,10 +243,10 @@ class TestE2EFullPipeline:
 
         # Save embeddings back to storage
         for node in nodes:
-            await apex_storage.save_node(node)  # type: ignore[arg-type]
+            await apex_storage.save_node(node, tenant_context="default")  # type: ignore[arg-type]
 
         # Re-read and verify persistence
-        retrieved = await apex_storage.get_nodes_by_doc("e2e-financial-report")  # type: ignore[arg-type]
+        retrieved = await apex_storage.get_nodes_by_doc("e2e-financial-report", tenant_context="default")  # type: ignore[arg-type]
         for node in retrieved:
             assert len(node.embedding) == 384
 
@@ -255,7 +255,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 2: SemanticModelBuilder generates signposts for heading nodes."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         mock_llm = _make_mock_llm()
         builder = SemanticModelBuilder(llm=mock_llm, max_concurrent=4)
@@ -285,7 +285,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 3: TemporalExtractor extracts dates from node content."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         mock_llm = _make_mock_llm()
         extractor = TemporalExtractor(llm=mock_llm)
@@ -309,7 +309,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 3: FreshnessScorer computes decay-based scores for each node."""
         nodes = parsed_nodes  # type: ignore[valid-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         scorer = FreshnessScorer(domain="financial")
         scores: list[float] = []
@@ -338,7 +338,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 3: TemporalContradictionDetector finds contradictions between nodes."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         mock_llm = _make_mock_llm()
 
@@ -360,7 +360,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 4: CausalGraphBuilder + CausalRetriever build edges and chains."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         # Embed
         engine = EmbeddingEngine(embedder=None, dimension=384)
@@ -419,7 +419,7 @@ class TestE2EFullPipeline:
     ) -> None:
         """Part 5: EvidenceSynthesizerAgent produces a grounded answer."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         mock_llm = _make_mock_llm()
         synthesizer = EvidenceSynthesizerAgent(llm=mock_llm)
@@ -453,13 +453,13 @@ class TestE2EFullPipeline:
     ) -> None:
         """All 5 parts: Full pipeline produces a valid ApexAnswer."""
         nodes = parsed_nodes  # type: ignore[arg-type]
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         # ── Part 2: Embed ──
         engine = EmbeddingEngine(embedder=None, dimension=384)
         await engine.embed_nodes(nodes)
         for node in nodes:
-            await apex_storage.save_node(node)  # type: ignore[arg-type]
+            await apex_storage.save_node(node, tenant_context="default")  # type: ignore[arg-type]
 
         # ── Part 2: Signposts ──
         mock_llm = _make_mock_llm()
@@ -794,7 +794,7 @@ class TestE2ECrossSystem:
         )
 
         # Store in ApexStorage (new system)
-        await apex_storage.save_nodes(nodes)  # type: ignore[arg-type]
+        await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         # Verify new storage
         new_count = await apex_storage.count_nodes(doc_id="cross-system-test")  # type: ignore[arg-type]
