@@ -49,7 +49,7 @@ jobs:
     - name: Install all dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev,web,vectors,telemetry]"
+        pip install -e ".[dev,web,telemetry]"
     - name: Run Pytest (core + API + edge cases + benchmarks)
       run: |
         pytest -v tests/ --tb=short --cov=apex_rag --cov-report=term-missing

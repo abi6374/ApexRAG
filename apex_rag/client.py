@@ -53,11 +53,20 @@ from apex_rag.ingestion.apex_parser import ApexParser
 from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.ingestion.embedding_engine import EmbeddingEngine
 
+# Legacy / To be deprecated & re-exported models
+from apex_rag.ingestion.legacy import IngestionEngine  # noqa: F401
+
 # Legacy / To be deprecated
 from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
 
 # Unified Models
-from apex_rag.models.unified_models import ApexAnswer, NodeType
+from apex_rag.models.unified_models import (  # noqa: F401
+    ApexAnswer,
+    ASTNode,
+    EvidencePacket,
+    NodeType,
+)
+from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult  # noqa: F401
 from apex_rag.providers import (
     AnthropicProvider,
     AsyncLLM,
@@ -68,15 +77,9 @@ from apex_rag.providers import (
     OpenRouterProvier,
 )
 from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
-from apex_rag.utils import logger
-
-# Legacy / To be deprecated & re-exported models
-from apex_rag.ingestion.legacy import IngestionEngine  # noqa: F401
-from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult  # noqa: F401
 from apex_rag.search import EmbeddingsEngine, HybridSearch  # noqa: F401
 from apex_rag.storage import StorageEngine  # noqa: F401
-from apex_rag.models.unified_models import ASTNode, EvidencePacket  # noqa: F401
-
+from apex_rag.utils import logger
 
 
 class ApexIndex:
@@ -158,7 +161,7 @@ class ApexIndex:
         if hasattr(model, "generate") and hasattr(model, "embed"):
             llm = model  # type: ignore[assignment]
         elif hasattr(provider, "generate") and hasattr(provider, "embed"):
-            llm = provider # type: ignore
+            llm = provider  # type: ignore
         else:
             p_name = str(provider).lower()
             if p_name == "openai":
@@ -194,10 +197,7 @@ class ApexIndex:
         verifier = StrictLeafVerifier(llm=llm)
 
         navigator = ASTNavigationAgent(
-            storage=storage,
-            model=llm,
-            retriever=retriever,
-            verifier=verifier
+            storage=storage, model=llm, retriever=retriever, verifier=verifier
         )
 
         critic = EvaluationCriticAgent(llm=llm)
@@ -250,7 +250,7 @@ class ApexIndex:
         file_path: str | Path,
         *,
         doc_id: str | None = None,
-        source_date: datetime | None = None,
+        source_date: datetime | None = None,  # noqa: ARG002
         synthesize_summaries: bool = True,
     ) -> str:
         """
@@ -298,12 +298,14 @@ class ApexIndex:
             page_entries = []
             for node in nodes:
                 if node.node_type == NodeType.HEADING:
-                    page_entries.append({
-                        "node_id": node.node_id,
-                        "doc_id": resolved_doc_id,
-                        "term": node.content,
-                        "page_number": node.page_number
-                    })
+                    page_entries.append(
+                        {
+                            "node_id": node.node_id,
+                            "doc_id": resolved_doc_id,
+                            "term": node.content,
+                            "page_number": node.page_number,
+                        }
+                    )
             if page_entries:
                 result = self._storage.save_page_index_entries(page_entries)
                 if inspect.isawaitable(result):
@@ -349,9 +351,7 @@ class ApexIndex:
         """
         async with self._lock:
             # 1. Parse
-            nodes = self._parser.parse_markdown(
-                text, doc_id=doc_id, source_date=source_date
-            )
+            nodes = self._parser.parse_markdown(text, doc_id=doc_id, source_date=source_date)
 
             # 2. Signpost
             if synthesize_summaries:
@@ -375,12 +375,14 @@ class ApexIndex:
             page_entries = []
             for node in nodes:
                 if node.node_type == NodeType.HEADING:
-                    page_entries.append({
-                        "node_id": node.node_id,
-                        "doc_id": doc_id,
-                        "term": node.content,
-                        "page_number": node.page_number
-                    })
+                    page_entries.append(
+                        {
+                            "node_id": node.node_id,
+                            "doc_id": doc_id,
+                            "term": node.content,
+                            "page_number": node.page_number,
+                        }
+                    )
             if page_entries:
                 result = self._storage.save_page_index_entries(page_entries)
                 if inspect.isawaitable(result):
@@ -420,7 +422,7 @@ class ApexIndex:
         coverage: float = 0.90,
         domain: str = "general",
         ablation_mode: bool = False,
-        root_node_id: str | int | None = None,
+        root_node_id: str | int | None = None,  # noqa: ARG002
         event_queue: asyncio.Queue[Any] | None = None,
         tenant_context: TenantContext | None = None,
     ) -> ApexAnswer:
@@ -499,7 +501,7 @@ class ApexIndex:
         self,
         question: str,
         *,
-        synthesize: bool = True,
+        synthesize: bool = True,  # noqa: ARG002
         coverage: float = 0.90,
         domain: str = "general",
         event_queue: asyncio.Queue[Any] | None = None,
@@ -572,7 +574,7 @@ class ApexIndex:
         # For simplicity, we delegate to the wrapper's calibrate method if it exists,
         # otherwise we log a warning.
         if hasattr(self._orchestrator.conformal_wrapper, "calibrate_from_data"):
-             return await self._orchestrator.conformal_wrapper.calibrate_from_data(data)
+            return await self._orchestrator.conformal_wrapper.calibrate_from_data(data)
 
         logger.warning("Calibration not supported by current wrapper implementation.")
         return 0.0

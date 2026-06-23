@@ -84,7 +84,7 @@ class TestTemporalIntelligence:
         assert metrics["Revenue"] == 100000.0
         assert metrics["Stock"] == 500.0
 
-    def test_change_analyzer(self) -> None:
+    async def test_change_analyzer(self) -> None:
         analyzer = ChangeAnalyzer()
         
         # Test metric comparison
@@ -99,7 +99,7 @@ class TestTemporalIntelligence:
         assert "Line 2" in diff["removed_lines"]
         assert diff["changes_count"] == 2
 
-    def test_trend_analyzer(self) -> None:
+    async def test_trend_analyzer(self) -> None:
         analyzer = TrendAnalyzer()
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 1, 2, tzinfo=timezone.utc)
