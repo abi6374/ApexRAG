@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import deque
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -519,23 +520,39 @@ class ApexStorage:
     async def _create_schema(self) -> None:
         """Create all tables if they don't already exist.
 
-        Handles SQLite's lack of IF NOT EXISTS for indexes by catching
-        and ignoring duplicate index errors.  This ensures idempotent
-        schema creation across multiple service instantiations.
+        Handles SQLite's lack of ``IF NOT EXISTS`` for indexes by
+        catching and ignoring duplicate index errors PER TABLE.
+        This prevents a single failing index from rolling back the
+        creation of all other tables (which ``create_all`` does when
+        run within a single transaction).
+
+        Strategy:
+          1. Fast path — try ``create_all`` once (succeeds on fresh DB).
+          2. Fallback — if step 1 fails, create each table individually
+             so a duplicate-index error on one table doesn't cascade.
         """
+        # Fast path: single create_all for fresh databases
         async with self._engine.begin() as conn:
             try:
                 await conn.run_sync(ApexBase.metadata.create_all)
+                return
             except Exception:
-                # SQLite may raise OperationalError for duplicate indexes
-                # when create_all is called multiple times on the same DB.
-                # We catch and re-try without indexes as a fallback.
                 logger.warning(
-                    "Schema creation with indexes failed, retrying without indexes..."
+                    "Fast-path create_all failed (likely duplicate index). "
+                    "Falling back to per-table creation..."
                 )
-                # Some SQLite versions/storage modes create tables but fail
-                # on indexes.  The tables exist, so we can proceed.
-                pass
+
+        # Fallback: create each table individually so a failure on one
+        # table's indexes doesn't roll back the others.
+        for table in ApexBase.metadata.sorted_tables:
+            try:
+                async with self._engine.begin() as conn:
+                    await conn.run_sync(table.create, checkfirst=True)
+            except Exception as exc:
+                logger.warning(
+                    "Table '%s' already exists or index failed: %s",
+                    table.name, exc,
+                )
 
     async def drop_all(self) -> None:
         """Drop all ApexRAG tables — use with caution (tests only)."""
@@ -589,10 +606,10 @@ class ApexStorage:
         validator = TenantIsolationValidator(self)
         await validator.assert_tenant_write_access(tenant_context, self._get_table_name(ASTNodeRow))
         if session is not None:
-            await self._save_node_single(session, node)
+            await self._save_node_single(session, node, tenant_context=tenant_context)
         else:
             async with self.session() as sess:
-                await self._save_node_single(sess, node)
+                await self._save_node_single(sess, node, tenant_context=tenant_context)
 
     async def save_nodes(
         self, nodes: list[ASTNode], session: AsyncSession | None = None, *, tenant_context: str | None = None
@@ -624,8 +641,16 @@ class ApexStorage:
                 for node in nodes:
                     await self._save_node_single(sess, node)
 
-    async def _save_node_single(self, session: AsyncSession, node: ASTNode) -> None:
-        """Map an ASTNode to a row and INSERT or UPDATE."""
+    async def _save_node_single(
+        self, session: AsyncSession, node: ASTNode, *, tenant_context: str | None = None,
+    ) -> None:
+        """Map an ASTNode to a row and INSERT or UPDATE.
+
+        Args:
+            session:         The active database session.
+            node:            The AST node to persist.
+            tenant_context:  Required tenant ID — used to set the tenant_id column.
+        """
         existing = await session.get(ASTNodeRow, node.node_id)
         if existing is not None:
             # Update
@@ -639,6 +664,8 @@ class ApexStorage:
             existing.ingestion_date = node.ingestion_date
             existing.embedding_json = json.dumps(node.embedding)
             existing.page_number = node.page_number
+            if tenant_context:
+                existing.tenant_id = tenant_context
         else:
             node_type_str = node.node_type if isinstance(node.node_type, str) else node.node_type.value
             row = ASTNodeRow(
@@ -653,6 +680,7 @@ class ApexStorage:
                 ingestion_date=node.ingestion_date,
                 embedding_json=json.dumps(node.embedding),
                 page_number=node.page_number,
+                tenant_id=tenant_context or "default",
             )
             session.add(row)
 
@@ -826,6 +854,10 @@ class ApexStorage:
         historical data is NEVER overwritten.  Each call creates a new immutable
         version row instead of updating the existing one.
 
+        After version creation, the :class:`TemporalMetadataRow` is upserted
+        with the caller's metadata values (freshness_score, decay_rate, etc.)
+        to ensure they are preserved.
+
         Args:
             meta: The :class:`TemporalMetadata` to save.
             tenant_context: Required tenant ID for multi-tenant isolation.
@@ -853,6 +885,32 @@ class ApexStorage:
             approval_timestamp=meta.approval_timestamp,
             validity_status=meta.validity_status or "ACTIVE",
         )
+        # Upsert the TemporalMetadataRow with the caller's actual metadata values
+        async with self.session() as session:
+            existing = await session.get(TemporalMetadataRow, meta.node_id)
+            now = datetime.now(timezone.utc)
+            if existing is not None:
+                existing.freshness_score = meta.freshness_score
+                existing.decay_rate = meta.decay_rate
+                existing.source_date = meta.source_date
+                existing.updated_at = now
+            else:
+                row = TemporalMetadataRow(
+                    node_id=meta.node_id,
+                    source_date=meta.source_date,
+                    ingestion_date=meta.ingestion_date,
+                    freshness_score=meta.freshness_score,
+                    decay_rate=meta.decay_rate,
+                    superseded_by=meta.superseded_by,
+                    created_at=now,
+                    updated_at=now,
+                    effective_from=meta.effective_from or now,
+                    effective_to=meta.effective_to,
+                    version_number=meta.version_number,
+                    is_current=meta.is_current,
+                    validity_status=meta.validity_status or "ACTIVE",
+                )
+                session.add(row)
 
     async def get_temporal_metadata(self, node_id: str) -> TemporalMetadata | None:
         """Fetch temporal metadata for a node.
@@ -889,15 +947,74 @@ class ApexStorage:
 
     # ── Causal Edge CRUD ───────────────────────────────────────────────────
 
+    async def _detect_cycle_in_causal_graph(
+        self,
+        source_node_id: str,
+        target_node_id: str,
+        session: AsyncSession,
+        max_depth: int = 50,
+    ) -> bool:
+        """Check if adding an edge from ``source_node_id`` to ``target_node_id``
+        would create a cycle in the causal graph.
+
+        Uses BFS from ``target_node_id`` to see if it can reach ``source_node_id``
+        via existing edges.  If yes, the new edge would create a cycle.
+
+        PRINCIPLE 3 — DAG Lineage.
+        Cycle detection occurs during write, never during reads.
+
+        Args:
+            source_node_id: The origin node of the proposed edge.
+            target_node_id: The destination node of the proposed edge.
+            session:        The active database session.
+            max_depth:      Maximum BFS depth to prevent unbounded traversal.
+
+        Returns:
+            ``True`` if adding the edge would create a cycle.
+        """
+        # BFS from target_node_id following outgoing edges to see if we can reach source_node_id
+        visited: set[str] = {target_node_id}
+        bfs_queue: deque[str] = deque([target_node_id])
+        depth = 0
+
+        while bfs_queue and depth < max_depth:
+            current_id = bfs_queue.popleft()
+            if current_id == source_node_id:
+                return True
+            stmt = select(CausalEdgeRow).where(
+                CausalEdgeRow.source_node_id == current_id,
+            )
+            result = await session.execute(stmt)
+            for row in result.scalars().all():
+                if row.target_node_id not in visited:
+                    visited.add(row.target_node_id)
+                    bfs_queue.append(row.target_node_id)
+            depth += 1
+
+        return False
+
     async def save_causal_edge(self, edge: CausalEdge) -> None:
-        """Persist a causal edge.
+        """Persist a causal edge with DAG cycle detection.
+
+        PRINCIPLE 3 — DAG Lineage.
+        PRINCIPLE 11 — Enforce DAG Acyclicity At Write Time.
+
+        Before inserting a new edge, this method checks whether the
+        proposed edge would create a cycle in the causal graph.
+        If a cycle is detected, a :class:`ValueError` is raised and
+        the edge is **not** persisted.
 
         Args:
             edge: The :class:`CausalEdge` to save.
+
+        Raises:
+            ValueError: If the edge would create a cycle in the causal graph.
         """
         async with self.session() as session:
-            existing = await session.get(CausalEdgeRow, edge.edge_id)
             edge_type_str = edge.edge_type if isinstance(edge.edge_type, str) else edge.edge_type.value
+
+            # Check for existing edge with same ID — upsert is safe
+            existing = await session.get(CausalEdgeRow, edge.edge_id)
             if existing is not None:
                 existing.source_node_id = edge.source_node_id
                 existing.target_node_id = edge.target_node_id
@@ -905,17 +1022,29 @@ class ApexStorage:
                 existing.strength = edge.strength
                 existing.evidence = edge.evidence
                 existing.discovered_at = edge.discovered_at
-            else:
-                row = CausalEdgeRow(
-                    edge_id=edge.edge_id,
-                    source_node_id=edge.source_node_id,
-                    target_node_id=edge.target_node_id,
-                    edge_type=edge_type_str,
-                    strength=edge.strength,
-                    evidence=edge.evidence,
-                    discovered_at=edge.discovered_at,
+                return
+
+            # DAG cycle detection: reject if the new edge would create a cycle
+            if await self._detect_cycle_in_causal_graph(
+                edge.source_node_id, edge.target_node_id, session,
+            ):
+                raise ValueError(
+                    f"Cannot add causal edge {edge.edge_id}: "
+                    f"{edge.source_node_id} → {edge.target_node_id} would create a cycle "
+                    f"in the causal graph.  Cycles are rejected at write time "
+                    f"(Principle 11 — DAG Acyclicity)."
                 )
-                session.add(row)
+
+            row = CausalEdgeRow(
+                edge_id=edge.edge_id,
+                source_node_id=edge.source_node_id,
+                target_node_id=edge.target_node_id,
+                edge_type=edge_type_str,
+                strength=edge.strength,
+                evidence=edge.evidence,
+                discovered_at=edge.discovered_at,
+            )
+            session.add(row)
 
     async def get_edges_for_node(
         self, node_id: str
@@ -1373,21 +1502,19 @@ class ApexStorage:
             return await _get(sess)
 
     async def save_temporal_node(self, temporal_node: TemporalNodeRow, session: AsyncSession | None = None) -> None:
-        """Save a temporal node row."""
+        """Save a temporal node row (INSERT-only).
+
+        PRINCIPLE 1 — Immutable Temporal Facts.
+        Every change creates a new row instead of mutating existing data.
+        The caller is responsible for versioning via :class:`TemporalVersionService`.
+
+        Args:
+            temporal_node: The :class:`TemporalNodeRow` to insert.
+            session:       Optional existing session.
+        """
         async def _save(sess: AsyncSession):
-            existing = await sess.get(TemporalNodeRow, temporal_node.node_id)
-            if existing is not None:
-                existing.updated_at = temporal_node.updated_at
-                existing.effective_from = temporal_node.effective_from
-                existing.effective_to = temporal_node.effective_to
-                existing.version_number = temporal_node.version_number
-                existing.revision_number = temporal_node.revision_number
-                existing.source_timestamp = temporal_node.source_timestamp
-                existing.is_current = temporal_node.is_current
-                existing.superseded_by = temporal_node.superseded_by
-                existing.previous_version = temporal_node.previous_version
-            else:
-                sess.add(temporal_node)
+            # INSERT-only — never mutate existing rows
+            sess.add(temporal_node)
         if session is not None:
             await _save(session)
         else:
@@ -1632,9 +1759,79 @@ class ApexStorage:
 
     # ── Version Lineage CRUD ──────────────────────────────────────
 
+    async def _detect_cycle_in_version_lineage(
+        self,
+        source_version_id: str,
+        target_version_id: str,
+        session: AsyncSession,
+        max_depth: int = 50,
+    ) -> bool:
+        """Check if adding a lineage edge from ``source_version_id`` to
+        ``target_version_id`` would create a cycle.
+
+        Uses BFS from ``target_version_id`` following outgoing lineage edges
+        to see if it can reach ``source_version_id``.
+
+        PRINCIPLE 3 — DAG Lineage.
+
+        Args:
+            source_version_id: The origin version of the proposed lineage edge.
+            target_version_id: The destination version.
+            session:           The active database session.
+            max_depth:         Maximum BFS depth.
+
+        Returns:
+            ``True`` if adding the edge would create a cycle.
+        """
+        visited: set[str] = {target_version_id}
+        bfs_queue: deque[str] = deque([target_version_id])
+        depth = 0
+
+        while bfs_queue and depth < max_depth:
+            current_id = bfs_queue.popleft()
+            if current_id == source_version_id:
+                return True
+            stmt = select(VersionLineageRow).where(
+                VersionLineageRow.source_version_id == current_id,
+            )
+            result = await session.execute(stmt)
+            for row in result.scalars().all():
+                nid = row.target_version_id
+                if nid and nid not in visited:
+                    visited.add(nid)
+                    bfs_queue.append(nid)
+            depth += 1
+
+        return False
+
     async def save_version_lineage(self, lineage_row: VersionLineageRow, session: AsyncSession | None = None) -> None:
-        """Persist a version lineage entry."""
+        """Persist a version lineage entry with DAG cycle detection.
+
+        PRINCIPLE 3 — DAG Lineage.
+        PRINCIPLE 11 — Enforce DAG Acyclicity At Write Time.
+
+        Before inserting a new lineage entry, this method checks whether
+        the proposed edge would create a cycle.  If so, a :class:`ValueError`
+        is raised.
+
+        Args:
+            lineage_row: The :class:`VersionLineageRow` to save.
+
+        Raises:
+            ValueError: If the edge would create a cycle.
+        """
         async def _save(sess: AsyncSession):
+            # DAG cycle detection
+            source_vid = lineage_row.source_version_id
+            target_vid = lineage_row.target_version_id
+            if target_vid and await self._detect_cycle_in_version_lineage(
+                source_vid, target_vid, sess,
+            ):
+                raise ValueError(
+                    f"Cannot add version lineage {lineage_row.lineage_id}: "
+                    f"{source_vid} → {target_vid} would create a cycle.  "
+                    f"Cycles are rejected at write time (Principle 11)."
+                )
             sess.add(lineage_row)
         if session is not None:
             await _save(session)

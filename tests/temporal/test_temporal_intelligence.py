@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock
-from apex_rag.ingestion.apex_storage import ApexStorage, NodeVersionRow, StateSnapshotRow, TimelineEventRow, ChangeHistoryRow
+from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow, NodeVersionRow, StateSnapshotRow, TimelineEventRow, ChangeHistoryRow
 from apex_rag.temporal.temporal_retriever import TemporalRetriever
 from apex_rag.temporal.state_reconstructor import StateReconstructor
 from apex_rag.temporal.analyzers import ChangeAnalyzer, TrendAnalyzer
@@ -23,6 +23,14 @@ class TestTemporalIntelligence:
         t2 = datetime(2025, 1, 10, tzinfo=timezone.utc)
         
         node_uuid = "4552c447-004f-420e-94cd-e55fc4bcf799"
+        # Must create the parent AST node first (FK: node_versions.node_id → apex_ast_nodes.node_id)
+        ast_node = ASTNodeRow(
+            node_id=node_uuid,
+            content="Stock data",
+            node_type="PARAGRAPH",
+            doc_id="doc-x",
+            tenant_id="tenant-1",
+        )
         row1 = NodeVersionRow(
             version_id="v1",
             node_id=node_uuid,
@@ -47,6 +55,7 @@ class TestTemporalIntelligence:
         )
         
         async with storage.session() as session:
+            session.add(ast_node)
             session.add(row1)
             session.add(row2)
 

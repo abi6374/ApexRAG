@@ -12,6 +12,9 @@ class StrictLeafVerifier(VerificationEngine):
 
     Uses :class:`VerificationCache` to avoid redundant LLM calls for the same
     (query, leaf_id) combination.  Cache hits skip the LLM entirely.
+
+    All cache keys are tenant-aware (Principle 19) when ``tenant_context``
+    is provided.
     """
 
     def __init__(self, llm: AsyncLLM):
@@ -24,10 +27,22 @@ class StrictLeafVerifier(VerificationEngine):
             "Do not explain your reasoning. Do not hallucinate external knowledge."
         )
 
-    async def verify(self, query: str, node: ASTNode) -> bool:
-        # Check VerificationCache first
+    async def verify(self, query: str, node: ASTNode, tenant_context: str | None = None) -> bool:
+        """Verify whether a node contains the answer to a query.
+
+        Args:
+            query:           The user's query.
+            node:            The AST node to verify.
+            tenant_context:  Optional tenant ID for tenant-aware caching.
+
+        Returns:
+            True if the node contains the answer.
+        """
         leaf_id = getattr(node, "node_id", "") or str(id(node))
-        cached = await self._verify_cache.get(query, leaf_id)
+        verify_tenant_id = tenant_context or "default"
+
+        # Check VerificationCache first (tenant-aware key — Principle 19)
+        cached = await self._verify_cache.get(query, leaf_id, tenant_id=verify_tenant_id)
         if cached is not None:
             metrics_service.record_cache_hit()
             return cached
@@ -49,6 +64,6 @@ class StrictLeafVerifier(VerificationEngine):
         clean_resp = response.strip().upper()
         result = "TRUE" in clean_resp
 
-        # Cache the result
-        await self._verify_cache.set(query, leaf_id, result)
+        # Cache the result (tenant-aware key — Principle 19)
+        await self._verify_cache.set(query, leaf_id, result, tenant_id=verify_tenant_id)
         return result
