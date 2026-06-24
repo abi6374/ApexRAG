@@ -18,13 +18,11 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from sqlalchemy import select
 
 from apex_rag.enterprise.auth.access_control import MissingTenantContextError
 from apex_rag.ingestion.apex_storage import (
-    ApexBase,
     ApexStorage,
     ASTNodeRow,
     NodeVersionRow,

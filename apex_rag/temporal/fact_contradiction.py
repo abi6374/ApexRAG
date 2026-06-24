@@ -388,7 +388,7 @@ class FactContradictionDetector:
     @staticmethod
     def _make_cross_tenant_issue(
         link_field: str,
-        link_val: str,
+        _link_val: str,
         source_fact: TemporalFact,
         target_fact: TemporalFact,
     ) -> FactContradiction:

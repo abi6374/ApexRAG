@@ -42,7 +42,12 @@ from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.critic.agent import EvaluationCriticAgent
 from apex_rag.agents.planner.agent import QueryPlannerAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
+from apex_rag.enterprise.auth.access_control import AccessControlAgent
 from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.enterprise.auth.role_aware_retriever import RoleAwareRetriever
+from apex_rag.enterprise.auth.role_aware_synthesis import (
+    RoleAwareSynthesis,
+)
 
 # Exceptions & Utilities
 from apex_rag.exceptions import DocumentNotFoundError
@@ -52,6 +57,9 @@ from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 from apex_rag.ingestion.apex_parser import ApexParser
 from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.ingestion.embedding_engine import EmbeddingEngine
+
+# Fact pipeline
+from apex_rag.ingestion.fact_pipeline import FactPipeline
 
 # Legacy / To be deprecated & re-exported models
 from apex_rag.ingestion.legacy import IngestionEngine  # noqa: F401
@@ -79,23 +87,13 @@ from apex_rag.providers import (
 from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
 from apex_rag.search import EmbeddingsEngine, HybridSearch  # noqa: F401
 from apex_rag.storage import StorageEngine  # noqa: F401
-from apex_rag.utils import logger
-
+from apex_rag.temporal.fact_extractor import FactExtractor
+from apex_rag.temporal.fact_store import FactStore
+from apex_rag.temporal.reasoning_service import TemporalReasoningService
 
 # New enterprise service imports
 from apex_rag.temporal.version_resolver import VersionResolver
-from apex_rag.temporal.reasoning_service import TemporalReasoningService
-from apex_rag.enterprise.auth.role_aware_retriever import RoleAwareRetriever
-from apex_rag.enterprise.auth.role_aware_synthesis import (
-    RoleAwareFilter,
-    RoleAwareSynthesis,
-)
-from apex_rag.enterprise.auth.access_control import AccessControlAgent
-
-# Fact pipeline
-from apex_rag.ingestion.fact_pipeline import FactPipeline
-from apex_rag.temporal.fact_store import FactStore
-from apex_rag.temporal.fact_extractor import FactExtractor
+from apex_rag.utils import logger
 
 
 class ApexIndex:

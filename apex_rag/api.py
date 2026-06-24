@@ -887,7 +887,7 @@ async def llm_generate(req: LLMGenerateRequest) -> dict[str, Any]:
         return {"content": content}
     except Exception as exc:
         logger.error("LLM generation error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

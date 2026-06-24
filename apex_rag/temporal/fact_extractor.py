@@ -28,7 +28,6 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from apex_rag.core.metrics.parser import MetricValueParser, UnitType
 from apex_rag.models.unified_models import ASTNode, NodeType

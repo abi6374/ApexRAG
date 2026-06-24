@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 from apex_rag.temporal.fact_store import FactStore, TemporalFact
 

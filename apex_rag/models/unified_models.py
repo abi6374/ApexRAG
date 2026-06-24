@@ -104,8 +104,8 @@ class ASTNode(BaseModel):
         """Ensure node_id is a valid UUID4 string."""
         try:
             uuid.UUID(v, version=4)
-        except ValueError:
-            raise ValueError(f"node_id must be a valid UUID4 string, got {v!r}")
+        except ValueError as err:
+            raise ValueError(f"node_id must be a valid UUID4 string, got {v!r}") from err
         return v
 
     @field_validator("depth")
@@ -176,8 +176,8 @@ class TemporalMetadata(BaseModel):
     def _validate_node_id(cls, v: str) -> str:
         try:
             uuid.UUID(v, version=4)
-        except ValueError:
-            raise ValueError(f"node_id must be a valid UUID4 string, got {v!r}")
+        except ValueError as err:
+            raise ValueError(f"node_id must be a valid UUID4 string, got {v!r}") from err
         return v
 
     @field_validator("decay_rate")
@@ -232,8 +232,8 @@ class CausalEdge(BaseModel):
     def _validate_edge_id(cls, v: str) -> str:
         try:
             uuid.UUID(v, version=4)
-        except ValueError:
-            raise ValueError(f"edge_id must be a valid UUID4 string, got {v!r}")
+        except ValueError as err:
+            raise ValueError(f"edge_id must be a valid UUID4 string, got {v!r}") from err
         return v
 
     @field_validator("source_node_id", "target_node_id")
@@ -241,8 +241,8 @@ class CausalEdge(BaseModel):
     def _validate_node_id_ref(cls, v: str) -> str:
         try:
             uuid.UUID(v, version=4)
-        except ValueError:
-            raise ValueError(f"Node reference must be a valid UUID4 string, got {v!r}")
+        except ValueError as err:
+            raise ValueError(f"Node reference must be a valid UUID4 string, got {v!r}") from err
         return v
 
     model_config = ConfigDict(use_enum_values=True)

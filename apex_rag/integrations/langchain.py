@@ -1,10 +1,10 @@
-from pydantic import ConfigDict
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
 )
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
+from pydantic import ConfigDict
 
 from apex_rag.client import ApexIndex
 
@@ -35,13 +35,13 @@ class ApexRAGRetriever(BaseRetriever):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def _get_relevant_documents(
-        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+        self, query: str, *, _run_manager: CallbackManagerForRetrieverRun
     ) -> list[Document]:
         """Sync version of retrieval. Not recommended for ApexRAG."""
         raise NotImplementedError("ApexRAG is natively async. Use ainvoke() or ._aget_relevant_documents()")
 
     async def _aget_relevant_documents(
-        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
+        self, query: str, *, _run_manager: AsyncCallbackManagerForRetrieverRun
     ) -> list[Document]:
         """
         Uses ApexRAG's agentic loop to find verified EvidencePackets and

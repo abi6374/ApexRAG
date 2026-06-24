@@ -18,7 +18,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -126,6 +125,7 @@ class FTS5Search:
 
             # Fetch all nodes
             from sqlalchemy import select
+
             from apex_rag.ingestion.apex_storage import ASTNodeRow
 
             result = await session.execute(select(ASTNodeRow))
@@ -163,7 +163,6 @@ class FTS5Search:
             return
 
         async with self._storage.session() as session:
-            from sqlalchemy import select
             from apex_rag.ingestion.apex_storage import ASTNodeRow
 
             row = await session.get(ASTNodeRow, node_id)
@@ -198,6 +197,7 @@ class FTS5Search:
 
         async with self._storage.session() as session:
             from sqlalchemy import select
+
             from apex_rag.ingestion.apex_storage import ASTNodeRow
 
             result = await session.execute(

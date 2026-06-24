@@ -36,11 +36,13 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import logging
-from typing import Any
 import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import select
 
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
@@ -48,8 +50,6 @@ from apex_rag.ingestion.apex_storage import (
 )
 from apex_rag.temporal.fact_store import FactStore
 from apex_rag.temporal.historical_state import HistoricalStateEngine
-from sqlalchemy import select
-
 from apex_rag.temporal.snapshot_models import SnapshotDelta, SnapshotManifest, StatePatch
 
 logger = logging.getLogger("apex_rag.temporal.snapshot_engine")

@@ -26,6 +26,7 @@ import logging
 import math
 import re
 
+from apex_rag.core.protocols.interfaces import LLMProvider  # noqa: TC001
 from apex_rag.models.unified_models import ASTNode, CausalEdge, EdgeType
 
 logger = logging.getLogger("apex_rag.temporal.contradiction")
@@ -52,9 +53,7 @@ _NEGATION_PHRASES: list[re.Pattern[str]] = [
 ]
 
 
-# ── LLMProvider import ────────────────────────────────────────────────
 
-from apex_rag.core.protocols.interfaces import LLMProvider  # noqa: TC001
 
 # ═══════════════════════════════════════════════════════════════
 # TemporalContradictionDetector

@@ -21,7 +21,7 @@ import asyncio
 import logging
 import math
 import random
-from typing import Protocol
+from typing import Any, Protocol
 
 from apex_rag.core.protocols.interfaces import LLMProvider
 from apex_rag.graph.edges.models import GraphEdge, RelationType
@@ -116,21 +116,20 @@ class CausalGraphBuilder:
                              to a different tenant.
         """
         # Tenant isolation: validate all nodes belong to the same tenant
-        if tenant_id and self._storage is not None:
-            if hasattr(self._storage, "session"):
-                from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
-                try:
-                    validator = TenantIsolationValidator(self._storage)
-                    node_ids = [n.node_id for n in nodes]
-                    await validator.assert_tenant_graph_traversal(tenant_id, node_ids)
-                except Exception:
-                    # If validation fails (e.g. storage not fully wired),
-                    # log and defer to persistence-layer enforcement
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "Tenant validation skipped in CausalGraphBuilder: %s",
-                        exc_info=True,
-                    )
+        if tenant_id and self._storage is not None and hasattr(self._storage, "session"):
+            from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
+            try:
+                validator = TenantIsolationValidator(self._storage)
+                node_ids = [n.node_id for n in nodes]
+                await validator.assert_tenant_graph_traversal(tenant_id, node_ids)
+            except Exception:
+                # If validation fails (e.g. storage not fully wired),
+                # log and defer to persistence-layer enforcement
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Tenant validation skipped in CausalGraphBuilder: %s",
+                    exc_info=True,
+                )
         coros: list[asyncio.Task[list[GraphEdge]]] = []
 
         if include_structural:

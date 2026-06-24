@@ -17,17 +17,19 @@ Key design:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import logging
-from typing import Any
 import uuid
+from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select, update
 
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
     NodeVersionRow,
+)
+from apex_rag.ingestion.apex_storage import (
     TemporalMetadataRow as TMRow,
 )
 from apex_rag.models.unified_models import TemporalMetadata

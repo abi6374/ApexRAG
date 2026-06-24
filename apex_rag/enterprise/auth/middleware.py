@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 
-from fastapi import Depends, HTTPException, Security
+from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 
 from apex_rag.config import settings

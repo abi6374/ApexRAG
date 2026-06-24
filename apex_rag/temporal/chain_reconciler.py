@@ -48,7 +48,6 @@ from typing import Any
 
 from sqlalchemy import select as sa_select
 
-from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.temporal.fact_lineage import FactLineageEngine
 from apex_rag.temporal.fact_store import FactRow, FactStore, TemporalFact
 from apex_rag.temporal.version_service import TemporalVersionService
@@ -335,7 +334,7 @@ class ChainGapDetector:
         self,
         facts: list[TemporalFact],
         *,
-        tenant_context: str | None = None,
+        _tenant_context: str | None = None,
     ) -> list[ChainAnomaly]:
         """Detect missing version numbers in the chain."""
         anomalies: list[ChainAnomaly] = []
@@ -498,23 +497,22 @@ class ChainGapDetector:
 
         for fact in facts:
             valid_to = _ensure_aware(fact.valid_to) if fact.valid_to is not None else None
-            if valid_to is not None and valid_to < now:
-                if fact.superseded_by is None:
-                    anomalies.append(ChainAnomaly(
-                        anomaly_type=AnomalyType.EXPIRED_ACTIVE,
-                        description=(
-                            f"Fact {fact.fact_id} (subject='{fact.subject}') "
-                            f"expired at {fact.valid_to.isoformat()} but has no "
-                            f"superseder. It is expired but still 'active'."
-                        ),
-                        fact_id=fact.fact_id,
-                        severity="warning",
-                        metadata={
-                            "subject": fact.subject,
-                            "valid_to": fact.valid_to.isoformat(),
-                            "now": now.isoformat(),
-                        },
-                    ))
+            if valid_to is not None and valid_to < now and fact.superseded_by is None:
+                anomalies.append(ChainAnomaly(
+                    anomaly_type=AnomalyType.EXPIRED_ACTIVE,
+                    description=(
+                        f"Fact {fact.fact_id} (subject='{fact.subject}') "
+                        f"expired at {fact.valid_to.isoformat()} but has no "
+                        f"superseder. It is expired but still 'active'."
+                    ),
+                    fact_id=fact.fact_id,
+                    severity="warning",
+                    metadata={
+                        "subject": fact.subject,
+                        "valid_to": fact.valid_to.isoformat(),
+                        "now": now.isoformat(),
+                    },
+                ))
 
         return anomalies
 
@@ -531,7 +529,7 @@ class ChainGapDetector:
             if fact.parent_fact_id:
                 children_of[fact.parent_fact_id].append(fact)
 
-        fact_ids = {f.fact_id for f in facts}
+
         # A fact is orphaned if:
         #   1. It has no parent_fact_id (root), AND
         #   2. It has no children (no fact references it as parent), AND

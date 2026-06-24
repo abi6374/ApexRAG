@@ -386,7 +386,7 @@ _OPTIONAL_PACKAGES = {
 }
 
 
-def _check_package(name: str, pip_name: str | None = None) -> bool:
+def _check_package(name: str, _pip_name: str | None = None) -> bool:
     """Return True if *name* can be imported."""
     try:
         importlib.import_module(name)

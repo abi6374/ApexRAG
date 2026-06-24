@@ -6,7 +6,7 @@ from opentelemetry.trace import Tracer
 _tracer = trace.get_tracer("apex_rag.enterprise")
 
 
-def get_tracer(name: str = "apex_rag.enterprise") -> Tracer:
+def get_tracer(_name: str = "apex_rag.enterprise") -> Tracer:
     """
     Returns the OpenTelemetry tracer for the enterprise module.
 
