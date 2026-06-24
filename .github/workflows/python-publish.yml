@@ -1,0 +1,176 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  release:
+    types:
+      - published
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run Ruff linter
+        run: ruff check apex_rag/
+
+      - name: Verify formatting
+        run: ruff format --check apex_rag/
+
+      - name: Run mypy type checker
+        run: mypy apex_rag/ --ignore-missing-imports --python-version=3.11
+        continue-on-error: true
+
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install all dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,web,telemetry]"
+
+      - name: Run Pytest
+        run: |
+          pytest -v tests/ --tb=short --cov=apex_rag --cov-report=term-missing
+
+      - name: Quick import check
+        run: |
+          python -c "from apex_rag.api import app; print('Web extras import OK')"
+          python -c "from apex_rag.search import EmbeddingsEngine; print('Vectors import OK')"
+          python -c "from apex_rag.telemetry import setup_telemetry, query_metrics; print('Telemetry import OK')"
+          python -c "from apex_rag.exceptions import ApexRAGError, DocumentNotFoundError; print('Exceptions import OK')"
+
+  changelog:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check CHANGELOG was updated
+        shell: bash
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+
+          if [ -z "$BASE" ]; then
+            echo "Could not determine base SHA; skipping CHANGELOG check."
+            exit 0
+          fi
+
+          if ! git diff --name-only "$BASE"...HEAD | grep -q '^CHANGELOG\.md$'; then
+            echo "CHANGELOG.md was not updated in this PR."
+            exit 1
+          fi
+
+          echo "CHANGELOG.md was updated."
+
+  release-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build release distributions
+        run: python -m build
+
+      - name: Verify sdist installs cleanly
+        run: |
+          SDIST=$(ls dist/*.tar.gz 2>/dev/null | head -1)
+
+          if [ -z "$SDIST" ]; then
+            echo "No sdist found"
+            exit 1
+          fi
+
+          pip install "$SDIST"
+          python -c "import apex_rag; print(f'apex-rag v{apex_rag.__version__} installed successfully')"
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+  pypi-publish:
+    if: github.event_name == 'release'
+
+    runs-on: ubuntu-latest
+
+    needs:
+      - lint
+      - test
+      - release-build
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/apex-rag
+
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+
+    steps:
+      - name: Retrieve release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dists
+          path: dist/
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
