@@ -62,7 +62,7 @@ jobs:
       - name: Install all dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,web,telemetry]"
+          pip install -e ".[dev,web,telemetry,anthropic,groq,ollama]"
 
       - name: Run Pytest
         run: |

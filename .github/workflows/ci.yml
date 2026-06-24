@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   lint:
@@ -68,7 +68,7 @@ jobs:
       - name: Install all dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,web,telemetry]"
+          pip install -e ".[dev,web,telemetry,anthropic,groq,ollama]"
 
       - name: Run Pytest
         run: |
