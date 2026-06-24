@@ -173,31 +173,44 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump Version
-        id: bump
+      - name: Check if Version is New
+        id: check_version
         run: |
-          python scripts/bump_version.py
-
-      - name: Commit and Push Version Bump
-        run: |
-          NEW_VERSION="${{ steps.bump.outputs.new_version }}"
-          if [ -n "$NEW_VERSION" ]; then
-            git add pyproject.toml
-            git commit -m "Bump version to v$NEW_VERSION [skip ci]"
-            git tag "v$NEW_VERSION"
-            git push origin main --follow-tags
-          else
-            echo "No version bump detected or script failed to output version."
+          # Extract version from pyproject.toml
+          VERSION=$(python -c "import re; content = open('pyproject.toml').read(); m = re.search(r'^version\s*=\s*\"([^\"]+)\"', content, re.MULTILINE); print(m.group(1) if m else '')")
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not find version in pyproject.toml"
             exit 1
+          fi
+          
+          echo "Current package version: $VERSION"
+          
+          # Check if tag already exists on remote
+          git fetch --tags
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "Version v$VERSION already exists as a tag. Skipping deployment."
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "Version v$VERSION is new. Proceeding to publish."
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            
+            # Tag the current commit and push the tag
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
           fi
 
       - name: Install build tools
+        if: steps.check_version.outputs.should_publish == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install build
 
       - name: Build package
+        if: steps.check_version.outputs.should_publish == 'true'
         run: python -m build
 
       - name: Publish to PyPI
+        if: steps.check_version.outputs.should_publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
