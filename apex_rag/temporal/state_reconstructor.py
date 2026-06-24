@@ -17,6 +17,7 @@ from apex_rag.ingestion.apex_storage import (
 
 logger = logging.getLogger("apex_rag.temporal.reconstructor")
 
+
 class StateReconstructor:
     """
     StateReconstructor rebuilds the state of documents, graphs, or business records
@@ -47,9 +48,7 @@ class StateReconstructor:
             return []
         try:
             async with self.storage.session() as session:
-                stmt = select(CausalEdgeRow).where(
-                    CausalEdgeRow.discovered_at <= as_of
-                )
+                stmt = select(CausalEdgeRow).where(CausalEdgeRow.discovered_at <= as_of)
                 result = await session.execute(stmt)
                 return result.scalars().all()
         except Exception:
@@ -61,10 +60,15 @@ class StateReconstructor:
         try:
             async with self.storage.session() as session:
                 from apex_rag.ingestion.apex_storage import ChangeHistoryRow
-                stmt = select(ChangeHistoryRow).where(
-                    ChangeHistoryRow.entity_id == entity_id,
-                    ChangeHistoryRow.changed_at <= as_of
-                ).order_by(ChangeHistoryRow.changed_at.asc())
+
+                stmt = (
+                    select(ChangeHistoryRow)
+                    .where(
+                        ChangeHistoryRow.entity_id == entity_id,
+                        ChangeHistoryRow.changed_at <= as_of,
+                    )
+                    .order_by(ChangeHistoryRow.changed_at.asc())
+                )
                 result = await session.execute(stmt)
                 return result.scalars().all()
         except Exception:
@@ -85,11 +89,13 @@ class StateReconstructor:
 
         # Sort by tree position: version_number first, then created_at as tiebreaker
         # This preserves document structure better than string-sorting node_id
-        nodes.sort(key=lambda n: (getattr(n, "version_number", 0) or 0, getattr(n, "created_at", datetime.min) or datetime.min))
-        return "\n\n".join(
-            getattr(node, "content", "") or ""
-            for node in nodes
+        nodes.sort(
+            key=lambda n: (
+                getattr(n, "version_number", 0) or 0,
+                getattr(n, "created_at", datetime.min) or datetime.min,
+            )
         )
+        return "\n\n".join(getattr(node, "content", "") or "" for node in nodes)
 
     async def reconstruct_graph_state(self, doc_id: str, as_of: datetime) -> dict[str, Any]:
         """
@@ -106,20 +112,22 @@ class StateReconstructor:
         active_edges = []
         for er in edge_rows:
             if er.source_node_id in node_ids and er.target_node_id in node_ids:
-                active_edges.append({
-                    "edge_id": er.edge_id,
-                    "source_node_id": er.source_node_id,
-                    "target_node_id": er.target_node_id,
-                    "edge_type": er.edge_type,
-                    "strength": er.strength,
-                    "evidence": er.evidence,
-                    "discovered_at": er.discovered_at.isoformat()
-                })
+                active_edges.append(
+                    {
+                        "edge_id": er.edge_id,
+                        "source_node_id": er.source_node_id,
+                        "target_node_id": er.target_node_id,
+                        "edge_type": er.edge_type,
+                        "strength": er.strength,
+                        "evidence": er.evidence,
+                        "discovered_at": er.discovered_at.isoformat(),
+                    }
+                )
 
         return {
             "as_of": as_of.isoformat(),
             "nodes": [{"node_id": n.node_id, "version_number": n.version_number} for n in nodes],
-            "edges": active_edges
+            "edges": active_edges,
         }
 
     async def reconstruct_metrics(self, entity_id: str, as_of: datetime) -> dict[str, float]:
@@ -155,7 +163,9 @@ class StateReconstructor:
                 metrics[change.field_name] = 0.0
         return metrics
 
-    async def reconstruct_business_records(self, doc_id: str, as_of: datetime) -> list[dict[str, Any]]:
+    async def reconstruct_business_records(
+        self, doc_id: str, as_of: datetime
+    ) -> list[dict[str, Any]]:
         """
         Reconstructs business records contained within a document at a target point in time.
         """
@@ -171,9 +181,11 @@ class StateReconstructor:
                         records.append(json.loads(content))
                 else:
                     # Add content as a general record
-                    records.append({
-                        "node_id": node.node_id,
-                        "content": content,
-                        "version_number": getattr(node, "version_number", 0),
-                    })
+                    records.append(
+                        {
+                            "node_id": node.node_id,
+                            "content": content,
+                            "version_number": getattr(node, "version_number", 0),
+                        }
+                    )
         return records

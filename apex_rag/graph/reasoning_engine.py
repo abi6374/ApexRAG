@@ -22,11 +22,9 @@ class ReasoningChain(BaseModel):
 class StorageInterface(Protocol):
     """Protocol for DB querying during graph reasoning."""
 
-    async def get_edges_for_node(self, node_id: str) -> list[CausalEdge]:
-        ...
+    async def get_edges_for_node(self, node_id: str) -> list[CausalEdge]: ...
 
-    async def get_node(self, node_id: str) -> ASTNode | None:
-        ...
+    async def get_node(self, node_id: str) -> ASTNode | None: ...
 
 
 class GraphReasoningEngine:
@@ -44,6 +42,7 @@ class GraphReasoningEngine:
 
     async def _get_edges(self, node_id: str) -> list[CausalEdge]:
         import inspect
+
         if not hasattr(self.storage, "get_edges_for_node"):
             return []
         res = self.storage.get_edges_for_node(node_id)
@@ -53,6 +52,7 @@ class GraphReasoningEngine:
 
     async def _get_node(self, node_id: str) -> ASTNode | None:
         import inspect
+
         if not hasattr(self.storage, "get_node"):
             return None
         res = self.storage.get_node(node_id)
@@ -95,6 +95,7 @@ class GraphReasoningEngine:
             storage = getattr(self, "storage", None)
             if storage is not None and hasattr(storage, "session"):
                 from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
+
                 validator = TenantIsolationValidator(storage)
                 node_ids = [n.node_id for n in seed_nodes]
                 await validator.assert_tenant_graph_traversal(tenant_id, node_ids)
@@ -121,7 +122,9 @@ class GraphReasoningEngine:
                     continue
 
                 # Identify target neighbor
-                neighbor_id = edge.target_node_id if edge.source_node_id == node_id else edge.source_node_id
+                neighbor_id = (
+                    edge.target_node_id if edge.source_node_id == node_id else edge.source_node_id
+                )
 
                 # Check for contradictions
                 if edge.edge_type in (EdgeType.CONTRADICTS, EdgeType.OVERRIDES):
@@ -149,9 +152,7 @@ class GraphReasoningEngine:
 
         # Calculate final chain score as average of edge strengths (fallback to 1.0 if empty)
         final_score = (
-            sum(e.strength for e in chain_edges) / len(chain_edges)
-            if chain_edges
-            else 1.0
+            sum(e.strength for e in chain_edges) / len(chain_edges) if chain_edges else 1.0
         )
 
         return ReasoningChain(
@@ -177,7 +178,11 @@ class GraphReasoningEngine:
             edges = await self._get_edges(curr_id)
             for edge in edges:
                 # We follow DEPENDS_ON and IMPORTS strictly forward from source to target
-                if edge.source_node_id == curr_id and edge.edge_type in (EdgeType.DEPENDS_ON, EdgeType.IMPORTS, EdgeType.REFERENCES):
+                if edge.source_node_id == curr_id and edge.edge_type in (
+                    EdgeType.DEPENDS_ON,
+                    EdgeType.IMPORTS,
+                    EdgeType.REFERENCES,
+                ):
                     target = edge.target_node_id
                     if target not in visited:
                         visited.add(target)

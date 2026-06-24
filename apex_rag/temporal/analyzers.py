@@ -7,6 +7,7 @@ from typing import Any
 
 logger = logging.getLogger("apex_rag.temporal.analyzers")
 
+
 class ChangeAnalyzer:
     """
     ChangeAnalyzer performs comparisons between two distinct versions of content, metrics, or policies.
@@ -22,7 +23,7 @@ class ChangeAnalyzer:
             "after": after_val,
             "difference": round(diff, 4),
             "percentage_change": round(pct_change, 2),
-            "direction": direction
+            "direction": direction,
         }
 
     def compare_versions(self, before_text: str, after_text: str) -> dict[str, Any]:
@@ -46,10 +47,12 @@ class ChangeAnalyzer:
         return {
             "added_lines": added,
             "removed_lines": removed,
-            "changes_count": len(added) + len(removed)
+            "changes_count": len(added) + len(removed),
         }
 
-    def compare_policies(self, before_policy: dict[str, Any], after_policy: dict[str, Any]) -> dict[str, Any]:
+    def compare_policies(
+        self, before_policy: dict[str, Any], after_policy: dict[str, Any]
+    ) -> dict[str, Any]:
         """Compares two policy configurations to identify differences in rules or permissions."""
         diffs = {}
         all_keys = set(before_policy.keys()).union(after_policy.keys())
@@ -62,7 +65,7 @@ class ChangeAnalyzer:
                 diffs[key] = {
                     "type": "modified",
                     "old_value": before_policy[key],
-                    "new_value": after_policy[key]
+                    "new_value": after_policy[key],
                 }
         return diffs
 
@@ -95,24 +98,26 @@ class TrendAnalyzer:
         # 2. Moving Average (window=3)
         moving_averages = []
         for i in range(len(values)):
-            window = values[max(0, i-2):i+1]
+            window = values[max(0, i - 2) : i + 1]
             avg = sum(window) / len(window)
             moving_averages.append(avg)
 
         # 3. Anomaly Detection (Simple standard deviation threshold check)
         mean = sum(values) / len(values)
         variance = sum((x - mean) ** 2 for x in values) / len(values)
-        std_dev = variance ** 0.5
+        std_dev = variance**0.5
         anomalies = []
         # Threshold: > 2 standard deviations away from mean
         if std_dev > 0.0:
             for i, val in enumerate(values):
                 if abs(val - mean) > 1.5 * std_dev:
-                    anomalies.append({
-                        "date": sorted_points[i][0].isoformat(),
-                        "value": val,
-                        "deviation": round((val - mean) / std_dev, 2)
-                    })
+                    anomalies.append(
+                        {
+                            "date": sorted_points[i][0].isoformat(),
+                            "value": val,
+                            "deviation": round((val - mean) / std_dev, 2),
+                        }
+                    )
 
         # 4. Summary text
         summary = f"Values changed from {start_val} to {end_val}, indicating an overall {direction} of {round(overall_pct, 2)}%."
@@ -123,5 +128,5 @@ class TrendAnalyzer:
             "percentage_change": round(overall_pct, 2),
             "moving_averages": moving_averages,
             "anomalies": anomalies,
-            "summary": summary
+            "summary": summary,
         }

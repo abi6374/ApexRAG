@@ -39,6 +39,7 @@ class StateTransition(BaseModel):
 
 class StateTimeoutError(Exception):
     """Raised when a state execution exceeds its defined timeout limit."""
+
     pass
 
 

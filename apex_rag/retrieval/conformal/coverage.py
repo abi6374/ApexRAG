@@ -163,8 +163,7 @@ class CoverageVerifier:
 
         if passed:
             logger.info(
-                "Coverage verification PASSED: empirical=%.4f (claimed=%.4f, "
-                "tol=%.4f, n=%d)",
+                "Coverage verification PASSED: empirical=%.4f (claimed=%.4f, tol=%.4f, n=%d)",
                 empirical_coverage,
                 claimed,
                 self.tolerance,

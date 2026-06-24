@@ -53,8 +53,6 @@ _NEGATION_PHRASES: list[re.Pattern[str]] = [
 ]
 
 
-
-
 # ═══════════════════════════════════════════════════════════════
 # TemporalContradictionDetector
 # ═══════════════════════════════════════════════════════════════
@@ -319,9 +317,7 @@ Passage B:
                         continue
                     # Check similarity to any node already in the cluster
                     for cn in cluster:
-                        sim = self._cosine_similarity(
-                            cn.embedding, embed_nodes[j].embedding
-                        )
+                        sim = self._cosine_similarity(cn.embedding, embed_nodes[j].embedding)
                         if sim > _SIMILARITY_THRESHOLD:
                             cluster.append(embed_nodes[j])
                             assigned[j] = True

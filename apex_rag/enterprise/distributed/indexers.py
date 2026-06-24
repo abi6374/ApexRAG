@@ -113,7 +113,7 @@ class CeleryIndexer:
         self._task_name = task_name
         self._fallback_to_memory = fallback_to_memory
         self._celery_app: Any = None  # Lazy import
-        self._redis: Any = None       # Lazy import for status tracking
+        self._redis: Any = None  # Lazy import for status tracking
 
     def _get_app(self) -> Any:
         """Lazy-import and cache the Celery app."""
@@ -137,6 +137,7 @@ class CeleryIndexer:
             return self._redis
         try:
             import redis.asyncio as aioredis
+
             r = aioredis.from_url(self._broker_url, decode_responses=True)
             await r.ping()
             self._redis = r
@@ -285,6 +286,7 @@ class RedisQueueIndexer:
             return self._redis
         try:
             import redis.asyncio as aioredis
+
             r = aioredis.from_url(self._redis_url, decode_responses=True)
             await r.ping()
             self._redis = r
@@ -318,13 +320,15 @@ class RedisQueueIndexer:
             )
 
             # 2. Push to Queue
-            payload = json.dumps({
-                "job_id": job_id,
-                "tenant_id": context.tenant_id,
-                "filename": filename,
-                "content_base64": file_bytes.hex(),
-                "queued_at": time.time(),
-            })
+            payload = json.dumps(
+                {
+                    "job_id": job_id,
+                    "tenant_id": context.tenant_id,
+                    "filename": filename,
+                    "content_base64": file_bytes.hex(),
+                    "queued_at": time.time(),
+                }
+            )
             await r.lpush(self.QUEUE_KEY, payload)
             logger.info("[REDIS] Queued job %s", job_id)
         else:

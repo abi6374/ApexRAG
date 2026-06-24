@@ -295,7 +295,9 @@ class ChainGapDetector:
 
         # Fetch the chain facts
         facts = await self._get_chain_facts(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
         if not facts:
             return ChainDiagnosticReport(
@@ -314,7 +316,9 @@ class ChainGapDetector:
         anomalies.extend(self._check_orphans(facts))
         anomalies.extend(self._check_forks(facts))
         anomalies.extend(self._check_duplicate_versions(facts))
-        anomalies.extend(await self._check_unexpected_superseders(facts, tenant_context=tenant_context))
+        anomalies.extend(
+            await self._check_unexpected_superseders(facts, tenant_context=tenant_context)
+        )
 
         has_forks = any(a.anomaly_type == AnomalyType.FORK_DETECTED for a in anomalies)
         has_gaps = any(a.anomaly_type == AnomalyType.MISSING_VERSION for a in anomalies)
@@ -352,21 +356,23 @@ class ChainGapDetector:
                 version = fact.metadata.get("version_number")
                 if version is not None:
                     if version != expected_version:
-                        anomalies.append(ChainAnomaly(
-                            anomaly_type=AnomalyType.MISSING_VERSION,
-                            description=(
-                                f"Version gap in subject '{subject}': "
-                                f"expected version {expected_version}, "
-                                f"found version {version} (fact {fact.fact_id})"
-                            ),
-                            fact_id=fact.fact_id,
-                            severity="warning",
-                            metadata={
-                                "subject": subject,
-                                "expected_version": expected_version,
-                                "found_version": version,
-                            },
-                        ))
+                        anomalies.append(
+                            ChainAnomaly(
+                                anomaly_type=AnomalyType.MISSING_VERSION,
+                                description=(
+                                    f"Version gap in subject '{subject}': "
+                                    f"expected version {expected_version}, "
+                                    f"found version {version} (fact {fact.fact_id})"
+                                ),
+                                fact_id=fact.fact_id,
+                                severity="warning",
+                                metadata={
+                                    "subject": subject,
+                                    "expected_version": expected_version,
+                                    "found_version": version,
+                                },
+                            )
+                        )
                     expected_version = version + 1
 
             # If parent_fact_id chain is broken, also flag
@@ -408,35 +414,40 @@ class ChainGapDetector:
         # Check each external reference against the fact store
         for ref_id in external_ids:
             ref_fact = await self._fact_store.get_fact(
-                ref_id, tenant_context=tenant_context,
+                ref_id,
+                tenant_context=tenant_context,
             )
             if ref_fact is None:
                 # Find which fact referenced this broken ID
                 for fact in facts:
                     if fact.superseded_by == ref_id:
-                        anomalies.append(ChainAnomaly(
-                            anomaly_type=AnomalyType.BROKEN_SUPERSEDES_LINK,
-                            description=(
-                                f"Fact {fact.fact_id} has superseded_by={ref_id}, "
-                                f"but no fact with that ID exists in tenant context."
-                            ),
-                            fact_id=fact.fact_id,
-                            related_fact_id=ref_id,
-                            severity="error",
-                            metadata={"field": "superseded_by"},
-                        ))
+                        anomalies.append(
+                            ChainAnomaly(
+                                anomaly_type=AnomalyType.BROKEN_SUPERSEDES_LINK,
+                                description=(
+                                    f"Fact {fact.fact_id} has superseded_by={ref_id}, "
+                                    f"but no fact with that ID exists in tenant context."
+                                ),
+                                fact_id=fact.fact_id,
+                                related_fact_id=ref_id,
+                                severity="error",
+                                metadata={"field": "superseded_by"},
+                            )
+                        )
                     if fact.parent_fact_id == ref_id:
-                        anomalies.append(ChainAnomaly(
-                            anomaly_type=AnomalyType.BROKEN_PARENT_LINK,
-                            description=(
-                                f"Fact {fact.fact_id} has parent_fact_id={ref_id}, "
-                                f"but no fact with that ID exists in tenant context."
-                            ),
-                            fact_id=fact.fact_id,
-                            related_fact_id=ref_id,
-                            severity="error",
-                            metadata={"field": "parent_fact_id"},
-                        ))
+                        anomalies.append(
+                            ChainAnomaly(
+                                anomaly_type=AnomalyType.BROKEN_PARENT_LINK,
+                                description=(
+                                    f"Fact {fact.fact_id} has parent_fact_id={ref_id}, "
+                                    f"but no fact with that ID exists in tenant context."
+                                ),
+                                fact_id=fact.fact_id,
+                                related_fact_id=ref_id,
+                                severity="error",
+                                metadata={"field": "parent_fact_id"},
+                            )
+                        )
 
         return anomalies
 
@@ -468,22 +479,26 @@ class ChainGapDetector:
                             continue
                         if a.parent_fact_id == b.fact_id or b.parent_fact_id == a.fact_id:
                             continue
-                        anomalies.append(ChainAnomaly(
-                            anomaly_type=AnomalyType.OVERLAPPING_VALIDITY,
-                            description=(
-                                f"Validity window overlap for subject '{subject}': "
-                                f"fact {a.fact_id} (valid_to={a.valid_to}) overlaps "
-                                f"with fact {b.fact_id} (valid_from={b.valid_from})"
-                            ),
-                            fact_id=a.fact_id,
-                            related_fact_id=b.fact_id,
-                            severity="warning",
-                            metadata={
-                                "subject": subject,
-                                "a_valid_to": a.valid_to.isoformat() if a.valid_to else "infinity",
-                                "b_valid_from": b.valid_from.isoformat(),
-                            },
-                        ))
+                        anomalies.append(
+                            ChainAnomaly(
+                                anomaly_type=AnomalyType.OVERLAPPING_VALIDITY,
+                                description=(
+                                    f"Validity window overlap for subject '{subject}': "
+                                    f"fact {a.fact_id} (valid_to={a.valid_to}) overlaps "
+                                    f"with fact {b.fact_id} (valid_from={b.valid_from})"
+                                ),
+                                fact_id=a.fact_id,
+                                related_fact_id=b.fact_id,
+                                severity="warning",
+                                metadata={
+                                    "subject": subject,
+                                    "a_valid_to": a.valid_to.isoformat()
+                                    if a.valid_to
+                                    else "infinity",
+                                    "b_valid_from": b.valid_from.isoformat(),
+                                },
+                            )
+                        )
 
         return anomalies
 
@@ -498,21 +513,23 @@ class ChainGapDetector:
         for fact in facts:
             valid_to = _ensure_aware(fact.valid_to) if fact.valid_to is not None else None
             if valid_to is not None and valid_to < now and fact.superseded_by is None:
-                anomalies.append(ChainAnomaly(
-                    anomaly_type=AnomalyType.EXPIRED_ACTIVE,
-                    description=(
-                        f"Fact {fact.fact_id} (subject='{fact.subject}') "
-                        f"expired at {fact.valid_to.isoformat()} but has no "
-                        f"superseder. It is expired but still 'active'."
-                    ),
-                    fact_id=fact.fact_id,
-                    severity="warning",
-                    metadata={
-                        "subject": fact.subject,
-                        "valid_to": fact.valid_to.isoformat(),
-                        "now": now.isoformat(),
-                    },
-                ))
+                anomalies.append(
+                    ChainAnomaly(
+                        anomaly_type=AnomalyType.EXPIRED_ACTIVE,
+                        description=(
+                            f"Fact {fact.fact_id} (subject='{fact.subject}') "
+                            f"expired at {fact.valid_to.isoformat()} but has no "
+                            f"superseder. It is expired but still 'active'."
+                        ),
+                        fact_id=fact.fact_id,
+                        severity="warning",
+                        metadata={
+                            "subject": fact.subject,
+                            "valid_to": fact.valid_to.isoformat(),
+                            "now": now.isoformat(),
+                        },
+                    )
+                )
 
         return anomalies
 
@@ -529,7 +546,6 @@ class ChainGapDetector:
             if fact.parent_fact_id:
                 children_of[fact.parent_fact_id].append(fact)
 
-
         # A fact is orphaned if:
         #   1. It has no parent_fact_id (root), AND
         #   2. It has no children (no fact references it as parent), AND
@@ -542,23 +558,21 @@ class ChainGapDetector:
             has_parent = fact.parent_fact_id is not None
             has_children = len(children_of.get(fact.fact_id, [])) > 0
             is_superseded = fact.superseded_by is not None
-            roots_without_children = (
-                not has_parent
-                and not has_children
-                and not is_superseded
-            )
+            roots_without_children = not has_parent and not has_children and not is_superseded
             if roots_without_children:
-                anomalies.append(ChainAnomaly(
-                    anomaly_type=AnomalyType.ORPHANED_FACT,
-                    description=(
-                        f"Fact {fact.fact_id} (subject='{fact.subject}') "
-                        f"has no parent, no children, and is not superseded. "
-                        f"It is an orphan in the chain."
-                    ),
-                    fact_id=fact.fact_id,
-                    severity="info",
-                    metadata={"subject": fact.subject},
-                ))
+                anomalies.append(
+                    ChainAnomaly(
+                        anomaly_type=AnomalyType.ORPHANED_FACT,
+                        description=(
+                            f"Fact {fact.fact_id} (subject='{fact.subject}') "
+                            f"has no parent, no children, and is not superseded. "
+                            f"It is an orphan in the chain."
+                        ),
+                        fact_id=fact.fact_id,
+                        severity="info",
+                        metadata={"subject": fact.subject},
+                    )
+                )
 
         return anomalies
 
@@ -582,21 +596,23 @@ class ChainGapDetector:
         for parent_id, children in children_of.items():
             if len(children) > 1:
                 child_ids = [c.fact_id for c in children]
-                anomalies.append(ChainAnomaly(
-                    anomaly_type=AnomalyType.FORK_DETECTED,
-                    description=(
-                        f"Fork detected: fact {parent_id} has {len(children)} "
-                        f"direct descendants: {child_ids}. "
-                        f"This creates divergent version branches."
-                    ),
-                    fact_id=parent_id,
-                    related_fact_id=child_ids[0],
-                    severity="warning",
-                    metadata={
-                        "child_count": len(children),
-                        "child_ids": child_ids,
-                    },
-                ))
+                anomalies.append(
+                    ChainAnomaly(
+                        anomaly_type=AnomalyType.FORK_DETECTED,
+                        description=(
+                            f"Fork detected: fact {parent_id} has {len(children)} "
+                            f"direct descendants: {child_ids}. "
+                            f"This creates divergent version branches."
+                        ),
+                        fact_id=parent_id,
+                        related_fact_id=child_ids[0],
+                        severity="warning",
+                        metadata={
+                            "child_count": len(children),
+                            "child_ids": child_ids,
+                        },
+                    )
+                )
 
         return anomalies
 
@@ -616,20 +632,22 @@ class ChainGapDetector:
         for version_num, version_facts in version_map.items():
             if len(version_facts) > 1:
                 ids = [f.fact_id for f in version_facts]
-                anomalies.append(ChainAnomaly(
-                    anomaly_type=AnomalyType.DUPLICATE_VERSION,
-                    description=(
-                        f"Version number {version_num} is assigned to "
-                        f"{len(version_facts)} different facts: {ids}"
-                    ),
-                    fact_id=version_facts[0].fact_id,
-                    related_fact_id=version_facts[1].fact_id,
-                    severity="warning",
-                    metadata={
-                        "version_number": version_num,
-                        "fact_ids": ids,
-                    },
-                ))
+                anomalies.append(
+                    ChainAnomaly(
+                        anomaly_type=AnomalyType.DUPLICATE_VERSION,
+                        description=(
+                            f"Version number {version_num} is assigned to "
+                            f"{len(version_facts)} different facts: {ids}"
+                        ),
+                        fact_id=version_facts[0].fact_id,
+                        related_fact_id=version_facts[1].fact_id,
+                        severity="warning",
+                        metadata={
+                            "version_number": version_num,
+                            "fact_ids": ids,
+                        },
+                    )
+                )
 
         return anomalies
 
@@ -646,25 +664,28 @@ class ChainGapDetector:
             if fact.superseded_by and not fact.superseded_by.startswith("__DELETED__"):
                 # Fetch the superseder
                 superseder = await self._fact_store.get_fact(
-                    fact.superseded_by, tenant_context=tenant_context,
+                    fact.superseded_by,
+                    tenant_context=tenant_context,
                 )
                 if superseder and superseder.subject != fact.subject:
-                    anomalies.append(ChainAnomaly(
-                        anomaly_type=AnomalyType.UNEXPECTED_SUPERSEDER,
-                        description=(
-                            f"Fact {fact.fact_id} (subject='{fact.subject}') "
-                            f"is superseded by fact {fact.superseded_by} "
-                            f"(subject='{superseder.subject}'). "
-                            f"Subjects don't match."
-                        ),
-                        fact_id=fact.fact_id,
-                        related_fact_id=fact.superseded_by,
-                        severity="error",
-                        metadata={
-                            "source_subject": fact.subject,
-                            "target_subject": superseder.subject,
-                        },
-                    ))
+                    anomalies.append(
+                        ChainAnomaly(
+                            anomaly_type=AnomalyType.UNEXPECTED_SUPERSEDER,
+                            description=(
+                                f"Fact {fact.fact_id} (subject='{fact.subject}') "
+                                f"is superseded by fact {fact.superseded_by} "
+                                f"(subject='{superseder.subject}'). "
+                                f"Subjects don't match."
+                            ),
+                            fact_id=fact.fact_id,
+                            related_fact_id=fact.superseded_by,
+                            severity="error",
+                            metadata={
+                                "source_subject": fact.subject,
+                                "target_subject": superseder.subject,
+                            },
+                        )
+                    )
 
         return anomalies
 
@@ -680,7 +701,8 @@ class ChainGapDetector:
         """Fetch facts for a chain, by subject or by document."""
         if doc_id:
             facts = await self._fact_store.get_facts_by_document(
-                doc_id, tenant_context=tenant_context,
+                doc_id,
+                tenant_context=tenant_context,
             )
             # When doc_id is provided, filter by subject to scope the chain
             return [f for f in facts if f.subject == subject_or_node_id]
@@ -772,17 +794,23 @@ class VersionChainReconciler:
 
         # 1. Run anomaly detection
         report = await self._detector.detect_all(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         # 2. Fetch all facts in the chain
         facts = await self._detector._get_chain_facts(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         # 3. Resolve authoritative version
         authoritative = await self.resolve_authoritative(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         has_forks = report.has_forks
@@ -827,7 +855,9 @@ class VersionChainReconciler:
             return None
 
         facts = await self._detector._get_chain_facts(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
         if not facts:
             return None
@@ -863,21 +893,21 @@ class VersionChainReconciler:
                 while current_id and current_id not in visited:
                     visited.add(current_id)
                     ext_fact = await self._fact_store.get_fact(
-                        current_id, tenant_context=tenant_context,
+                        current_id,
+                        tenant_context=tenant_context,
                     )
                     if ext_fact is None:
                         break
-                    if ext_fact.superseded_by and not ext_fact.superseded_by.startswith("__DELETED__"):
+                    if ext_fact.superseded_by and not ext_fact.superseded_by.startswith(
+                        "__DELETED__"
+                    ):
                         current_id = ext_fact.superseded_by
                     else:
                         return ext_fact
 
         # Strategy 2: Find latest valid fact (non-expired)
         now = datetime.now(timezone.utc)
-        valid_facts = [
-            f for f in facts
-            if f.valid_to is None or _ensure_aware(f.valid_to) > now
-        ]
+        valid_facts = [f for f in facts if f.valid_to is None or _ensure_aware(f.valid_to) > now]
         if valid_facts:
             valid_facts.sort(key=lambda f: _ensure_aware(f.valid_from), reverse=True)
             return valid_facts[0]
@@ -908,11 +938,13 @@ class VersionChainReconciler:
         """
         if not tenant_context:
             return ChainReconciliationReport(
-                doc_id=doc_id, tenant_id="default",
+                doc_id=doc_id,
+                tenant_id="default",
             )
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         # Group by subject
@@ -926,7 +958,9 @@ class VersionChainReconciler:
 
         for subject in subjects:
             chain = await self.reconcile_chain(
-                subject, doc_id, tenant_context=tenant_context,
+                subject,
+                doc_id,
+                tenant_context=tenant_context,
             )
             chains[subject] = chain
             total_anomalies += chain.report.anomaly_count if chain.report else 0
@@ -961,7 +995,9 @@ class VersionChainReconciler:
             List of fork-related :class:`ChainAnomaly` objects.
         """
         facts = await self._detector._get_chain_facts(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
         return self._detector._check_forks(facts)
 
@@ -970,7 +1006,7 @@ class VersionChainReconciler:
         subject_or_node_id: str,
         doc_id: str | None = None,
         *,
-            tenant_context: str | None = None,
+        tenant_context: str | None = None,
     ) -> list[dict[str, Any]]:
         """Describe fork branches in detail.
 
@@ -986,7 +1022,9 @@ class VersionChainReconciler:
             List of fork descriptions as dicts.
         """
         facts = await self._detector._get_chain_facts(
-            subject_or_node_id, doc_id, tenant_context=tenant_context,
+            subject_or_node_id,
+            doc_id,
+            tenant_context=tenant_context,
         )
         children_of: dict[str, list[TemporalFact]] = defaultdict(list)
         for fact in facts:
@@ -997,25 +1035,28 @@ class VersionChainReconciler:
         for parent_id, children in children_of.items():
             if len(children) > 1:
                 parent_fact = next((f for f in facts if f.fact_id == parent_id), None)
-                fork_descriptions.append({
-                    "parent_fact_id": parent_id,
-                    "parent_subject": parent_fact.subject if parent_fact else "unknown",
-                    "child_count": len(children),
-                    "branches": [
-                        {
-                            "fact_id": c.fact_id,
-                            "value": c.object,
-                            "created_at": c.created_at.isoformat(),
-                            "valid_from": c.valid_from.isoformat(),
-                        }
-                        for c in sorted(children, key=lambda x: x.created_at)
-                    ],
-                    "suggested_merge": (
-                        "Latest branch (by created_at) is likely authoritative. "
-                        "Verify and set superseded_by on older branches."
-                        if len(children) > 1 else None
-                    ),
-                })
+                fork_descriptions.append(
+                    {
+                        "parent_fact_id": parent_id,
+                        "parent_subject": parent_fact.subject if parent_fact else "unknown",
+                        "child_count": len(children),
+                        "branches": [
+                            {
+                                "fact_id": c.fact_id,
+                                "value": c.object,
+                                "created_at": c.created_at.isoformat(),
+                                "valid_from": c.valid_from.isoformat(),
+                            }
+                            for c in sorted(children, key=lambda x: x.created_at)
+                        ],
+                        "suggested_merge": (
+                            "Latest branch (by created_at) is likely authoritative. "
+                            "Verify and set superseded_by on older branches."
+                            if len(children) > 1
+                            else None
+                        ),
+                    }
+                )
 
         return fork_descriptions
 
@@ -1078,7 +1119,8 @@ class CrossChainStateReconstructor:
 
         # Get document-level reconciliation report
         report = await self._reconciler.resolve_document_chains(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         state: dict[str, Any] = {}
@@ -1124,7 +1166,8 @@ class CrossChainStateReconstructor:
             return {}
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         # Filter by validity window and group by subject
@@ -1134,9 +1177,7 @@ class CrossChainStateReconstructor:
             vf = _ensure_aware(fact.valid_from)
             vt = _ensure_aware(fact.valid_to) if fact.valid_to is not None else None
             as_of_aware = _ensure_aware(as_of)
-            if vf <= as_of_aware and (
-                vt is None or vt > as_of_aware
-            ):
+            if vf <= as_of_aware and (vt is None or vt > as_of_aware):
                 subjects[fact.subject].append(fact)
 
         state: dict[str, Any] = {}
@@ -1178,10 +1219,14 @@ class CrossChainStateReconstructor:
             Dict with keys: state_a, state_b, changes, summary.
         """
         state_a = await self.reconstruct_state_at(
-            doc_id, time_a, tenant_context=tenant_context,
+            doc_id,
+            time_a,
+            tenant_context=tenant_context,
         )
         state_b = await self.reconstruct_state_at(
-            doc_id, time_b, tenant_context=tenant_context,
+            doc_id,
+            time_b,
+            tenant_context=tenant_context,
         )
 
         subjects_a = set(state_a.keys())
@@ -1243,27 +1288,30 @@ class CrossChainStateReconstructor:
             List of chain summaries.
         """
         report = await self._reconciler.resolve_document_chains(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
 
         summaries: list[dict[str, Any]] = []
         for subject, chain in report.chains.items():
-            summaries.append({
-                "subject": subject,
-                "chain_length": chain.chain_length,
-                "authoritative_value": (
-                    chain.authoritative.object if chain.authoritative else None
-                ),
-                "authoritative_fact_id": (
-                    chain.authoritative.fact_id if chain.authoritative else None
-                ),
-                "anomaly_count": chain.report.anomaly_count if chain.report else 0,
-                "error_count": chain.report.error_count if chain.report else 0,
-                "has_forks": chain.is_forked,
-                "has_gaps": chain.report.has_gaps if chain.report else False,
-                "is_healthy": chain.report.is_healthy if chain.report else True,
-                "tenant_id": chain.tenant_id,
-            })
+            summaries.append(
+                {
+                    "subject": subject,
+                    "chain_length": chain.chain_length,
+                    "authoritative_value": (
+                        chain.authoritative.object if chain.authoritative else None
+                    ),
+                    "authoritative_fact_id": (
+                        chain.authoritative.fact_id if chain.authoritative else None
+                    ),
+                    "anomaly_count": chain.report.anomaly_count if chain.report else 0,
+                    "error_count": chain.report.error_count if chain.report else 0,
+                    "has_forks": chain.is_forked,
+                    "has_gaps": chain.report.has_gaps if chain.report else False,
+                    "is_healthy": chain.report.is_healthy if chain.report else True,
+                    "tenant_id": chain.tenant_id,
+                }
+            )
 
         summaries.sort(key=lambda s: s["subject"])
         return summaries

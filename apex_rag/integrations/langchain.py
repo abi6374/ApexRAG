@@ -38,7 +38,9 @@ class ApexRAGRetriever(BaseRetriever):
         self, query: str, *, _run_manager: CallbackManagerForRetrieverRun
     ) -> list[Document]:
         """Sync version of retrieval. Not recommended for ApexRAG."""
-        raise NotImplementedError("ApexRAG is natively async. Use ainvoke() or ._aget_relevant_documents()")
+        raise NotImplementedError(
+            "ApexRAG is natively async. Use ainvoke() or ._aget_relevant_documents()"
+        )
 
     async def _aget_relevant_documents(
         self, query: str, *, _run_manager: AsyncCallbackManagerForRetrieverRun
@@ -48,9 +50,7 @@ class ApexRAGRetriever(BaseRetriever):
         convert them to LangChain Documents.
         """
         packets = await self.index.retrieve_verified_nodes(
-            question=query,
-            doc_id=self.doc_id,
-            tenant_id=self.tenant_id
+            question=query, doc_id=self.doc_id, tenant_id=self.tenant_id
         )
 
         if not packets:
@@ -67,7 +67,7 @@ class ApexRAGRetriever(BaseRetriever):
                         "page": packet.page_number,
                         "path": packet.section_path,
                         "confidence": packet.confidence_score,
-                    }
+                    },
                 )
             )
 

@@ -95,6 +95,7 @@ class ImageParser:
         self._tesseract_available = False
         try:
             import pytesseract  # noqa: F401
+
             self._tesseract_available = True
         except ImportError:
             pass
@@ -157,9 +158,7 @@ class ImageParser:
                 ocr_text = pytesseract.image_to_string(pil_image, lang=self._ocr_language)
                 ocr_text = ocr_text.strip()
                 if ocr_text:
-                    logger.info(
-                        "Local OCR extracted %d chars from %s", len(ocr_text), path.name
-                    )
+                    logger.info("Local OCR extracted %d chars from %s", len(ocr_text), path.name)
             except Exception as exc:
                 logger.warning("Local OCR failed for %s: %s", path.name, exc)
 

@@ -26,8 +26,7 @@ logger = logging.getLogger("apex_rag.embedding")
 class Embedder(Protocol):
     """Protocol for providers that can generate text embeddings."""
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        ...
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -106,10 +105,7 @@ class EmbeddingEngine:
 
     async def _batch_embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts in batches, returning a flat list of vectors."""
-        batches = [
-            texts[i : i + self._batch_size]
-            for i in range(0, len(texts), self._batch_size)
-        ]
+        batches = [texts[i : i + self._batch_size] for i in range(0, len(texts), self._batch_size)]
 
         # Run batches concurrently (but the embedder may have its own rate limit)
         coros = [self._embed_single_batch(batch) for batch in batches]

@@ -57,7 +57,6 @@ class EdgeType(str, Enum):
     HISTORICAL_PARENT = "HISTORICAL_PARENT"
 
 
-
 # ─────────────────────────────────────────────────────────────
 # Core AST Node
 # ─────────────────────────────────────────────────────────────
@@ -94,9 +93,13 @@ class ASTNode(BaseModel):
     doc_id: str
     source_date: datetime | None = None
     ingestion_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    page_number: int | None = Field(default=None, description="Page number in the source document (1-based)")
+    page_number: int | None = Field(
+        default=None, description="Page number in the source document (1-based)"
+    )
     embedding: list[float] = Field(default_factory=list)
-    image_data: str | None = Field(default=None, description="Base64-encoded image data URI for IMAGE nodes")
+    image_data: str | None = Field(
+        default=None, description="Base64-encoded image data URI for IMAGE nodes"
+    )
 
     @field_validator("node_id")
     @classmethod
@@ -165,11 +168,16 @@ class TemporalMetadata(BaseModel):
     version_number: int = 1
     revision_number: int = 0
     source_timestamp: datetime | None = None
-    approval_timestamp: datetime | None = Field(default=None, description="When this version was officially approved")
+    approval_timestamp: datetime | None = Field(
+        default=None, description="When this version was officially approved"
+    )
     is_current: bool = True
     superseded_by: str | None = None
     previous_version: str | None = None
-    validity_status: str = Field(default="ACTIVE", description="Validity status: ACTIVE, PENDING, EXPIRED, SUPERSEDED, DRAFT, ARCHIVED")
+    validity_status: str = Field(
+        default="ACTIVE",
+        description="Validity status: ACTIVE, PENDING, EXPIRED, SUPERSEDED, DRAFT, ARCHIVED",
+    )
 
     @field_validator("node_id")
     @classmethod
@@ -286,11 +294,21 @@ class EvidencePacket(BaseModel):
             # Extract fields from legacy node if present
             node = data.get("node")
             if node:
-                node_id = getattr(node, "node_id", None) or (node.get("node_id") if isinstance(node, dict) else None)
-                doc_id = getattr(node, "doc_id", None) or (node.get("doc_id") if isinstance(node, dict) else None)
-                content = getattr(node, "content", None) or (node.get("content") if isinstance(node, dict) else None)
-                page_number = getattr(node, "page_number", None) or (node.get("page_number") if isinstance(node, dict) else None)
-                path = getattr(node, "path", None) or (node.get("path") if isinstance(node, dict) else None)
+                node_id = getattr(node, "node_id", None) or (
+                    node.get("node_id") if isinstance(node, dict) else None
+                )
+                doc_id = getattr(node, "doc_id", None) or (
+                    node.get("doc_id") if isinstance(node, dict) else None
+                )
+                content = getattr(node, "content", None) or (
+                    node.get("content") if isinstance(node, dict) else None
+                )
+                page_number = getattr(node, "page_number", None) or (
+                    node.get("page_number") if isinstance(node, dict) else None
+                )
+                path = getattr(node, "path", None) or (
+                    node.get("path") if isinstance(node, dict) else None
+                )
 
                 if node_id and not data.get("node_id"):
                     data["node_id"] = node_id
@@ -306,7 +324,11 @@ class EvidencePacket(BaseModel):
             # Extract fields from legacy temporal_metadata if present
             temporal_meta = data.get("temporal_metadata")
             if temporal_meta:
-                freshness = getattr(temporal_meta, "freshness_score", None) or (temporal_meta.get("freshness_score") if isinstance(temporal_meta, dict) else None)
+                freshness = getattr(temporal_meta, "freshness_score", None) or (
+                    temporal_meta.get("freshness_score")
+                    if isinstance(temporal_meta, dict)
+                    else None
+                )
                 if freshness is not None and data.get("freshness_score") is None:
                     data["freshness_score"] = freshness
 
@@ -330,7 +352,6 @@ class EvidencePacket(BaseModel):
         return v
 
     model_config = ConfigDict()
-
 
 
 # ─────────────────────────────────────────────────────────────
@@ -530,4 +551,3 @@ class AccessAuditRecord(BaseModel):
     duration_ms: float = 0.0
 
     model_config = ConfigDict()
-

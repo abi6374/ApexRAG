@@ -114,9 +114,7 @@ class FactRow(ApexBase):
     )
     subject: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     predicate: Mapped[str] = mapped_column(String(128), nullable=False, default="")
-    object_: Mapped[str] = mapped_column(
-        "object", Text, nullable=False, default=""
-    )
+    object_: Mapped[str] = mapped_column("object", Text, nullable=False, default="")
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     source_document_id: Mapped[str] = mapped_column(
         String(255), nullable=False, index=True, default=""
@@ -127,12 +125,8 @@ class FactRow(ApexBase):
         nullable=True,
         index=True,
     )
-    valid_from: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    valid_to: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -148,12 +142,8 @@ class FactRow(ApexBase):
         ForeignKey("temporal_facts.fact_id", ondelete="SET NULL"),
         nullable=True,
     )
-    extraction_method: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="regex"
-    )
-    metadata_json: Mapped[str] = mapped_column(
-        Text, nullable=False, default="{}"
-    )
+    extraction_method: Mapped[str] = mapped_column(String(20), nullable=False, default="regex")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
 
     __table_args__ = (
         Index("ix_facts_tenant", "tenant_id"),
@@ -213,9 +203,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for save_fact."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for save_fact.")
 
         row = FactRow(
             fact_id=fact.fact_id,
@@ -257,9 +246,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for save_facts."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for save_facts.")
 
         async with self._storage.session() as session:
             for fact in facts:
@@ -303,9 +291,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for get_fact."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for get_fact.")
 
         async with self._storage.session() as session:
             stmt = select(FactRow).where(
@@ -337,9 +324,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for get_facts."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for get_facts.")
 
         async with self._storage.session() as session:
             stmt = (
@@ -369,9 +355,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for get_facts_by_document."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for get_facts_by_document.")
 
         async with self._storage.session() as session:
             stmt = (
@@ -407,9 +392,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for get_facts_at_time."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for get_facts_at_time.")
 
         async with self._storage.session() as session:
             stmt = (
@@ -442,7 +426,9 @@ class FactStore:
         """
         now = datetime.now(timezone.utc)
         return await self.get_facts_at_time(
-            doc_id, now, tenant_context=tenant_context,
+            doc_id,
+            now,
+            tenant_context=tenant_context,
         )
 
     # ── Delete Operations ──────────────────────────────────────────────
@@ -469,9 +455,8 @@ class FactStore:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for delete_fact."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for delete_fact.")
 
         async with self._storage.session() as session:
             # Fetch the existing fact row (read-only, never mutate)
@@ -506,7 +491,8 @@ class FactStore:
             session.add(tombstone)
             logger.info(
                 "Created tombstone fact %s to supersede %s (immutable delete)",
-                tombstone.fact_id, fact_id,
+                tombstone.fact_id,
+                fact_id,
             )
             return True
 
@@ -516,6 +502,7 @@ class FactStore:
     def _row_to_fact(row: FactRow) -> TemporalFact:
         """Convert a database row to a :class:`TemporalFact`."""
         import json
+
         try:
             meta = json.loads(row.metadata_json) if row.metadata_json else {}
         except (json.JSONDecodeError, TypeError):

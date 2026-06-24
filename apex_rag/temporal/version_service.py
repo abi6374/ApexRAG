@@ -93,16 +93,30 @@ class TemporalVersionService:
 
         if session is not None:
             return await self._create_version_in_session(
-                session, node_id, content, doc_id, tenant_id,
-                source_timestamp, approval_timestamp, validity_status,
-                content_hash, now,
+                session,
+                node_id,
+                content,
+                doc_id,
+                tenant_id,
+                source_timestamp,
+                approval_timestamp,
+                validity_status,
+                content_hash,
+                now,
             )
 
         async with self._storage.session() as sess:
             return await self._create_version_in_session(
-                sess, node_id, content, doc_id, tenant_id,
-                source_timestamp, approval_timestamp, validity_status,
-                content_hash, now,
+                sess,
+                node_id,
+                content,
+                doc_id,
+                tenant_id,
+                source_timestamp,
+                approval_timestamp,
+                validity_status,
+                content_hash,
+                now,
             )
 
     async def resolve_version_at_time(
@@ -127,12 +141,16 @@ class TemporalVersionService:
         """
         if session is not None:
             return await self._resolve_version_at_time_in_session(
-                session, node_id, as_of,
+                session,
+                node_id,
+                as_of,
             )
 
         async with self._storage.session() as sess:
             return await self._resolve_version_at_time_in_session(
-                sess, node_id, as_of,
+                sess,
+                node_id,
+                as_of,
             )
 
     async def get_version_chain(
@@ -277,7 +295,10 @@ class TemporalVersionService:
 
         logger.info(
             "Created version %d for node %s (doc=%s, tenant=%s)",
-            next_version_number, node_id, doc_id, tenant_id,
+            next_version_number,
+            node_id,
+            doc_id,
+            tenant_id,
         )
         return new_version
 
@@ -308,10 +329,7 @@ class TemporalVersionService:
             .where(
                 NodeVersionRow.node_id == node_id,
                 NodeVersionRow.effective_from <= as_of,
-                (
-                    NodeVersionRow.effective_to.is_(None)
-                    | (NodeVersionRow.effective_to > as_of)
-                ),
+                (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of)),
             )
             .order_by(NodeVersionRow.version_number.desc())
             .limit(1)

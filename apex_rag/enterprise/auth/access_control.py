@@ -19,6 +19,7 @@ from apex_rag.ingestion.apex_storage import ApexStorage, AuditLogRow
 
 logger = logging.getLogger("apex_rag.enterprise.auth.access_control")
 
+
 # Core RBAC Roles
 class Roles:
     SUPER_ADMIN = "SuperAdmin"
@@ -57,6 +58,7 @@ class AccessControlAgent:
     ) -> None:
         """Persist a role permission rule to the database."""
         from apex_rag.ingestion.apex_storage import RolePermissionRow
+
         row = RolePermissionRow(
             role=role, resource_type=resource_type, action=action, is_allowed=is_allowed
         )
@@ -70,6 +72,7 @@ class AccessControlAgent:
     ) -> None:
         """Persist a field-level permission rule to the database."""
         from apex_rag.ingestion.apex_storage import FieldPermissionRow
+
         row = FieldPermissionRow(
             role=role, resource_type=resource_type, field_name=field_name, is_allowed=is_allowed
         )
@@ -99,7 +102,8 @@ class AccessControlAgent:
         logger.warning(
             "define_custom_rule() with rule_type '%s' is deprecated. "
             "Use define_policy_rule() instead. Rule '%s' not stored.",
-            rule_type, name,
+            rule_type,
+            name,
         )
         return
 
@@ -303,7 +307,8 @@ class AccessControlAgent:
                 "Custom rule '%s' uses deprecated eval/exec type '%s'. "
                 "Access denied by default. Migrate to PolicyEngine with "
                 "define_policy_rule().",
-                rule_name, rule_type,
+                rule_name,
+                rule_type,
             )
             return False
 
@@ -455,9 +460,19 @@ class AccessControlAgent:
         for role in context.roles:
             if role == Roles.GUEST:
                 # Mask everything except allowed fields for Guest
-                sensitive_fields = ["Revenue", "Profit Margin", "Stock", "Salary",
-                                    "Profit", "Margin", "Revenue Growth", "EPS",
-                                    "EBITDA", "Operating Income", "Net Income"]
+                sensitive_fields = [
+                    "Revenue",
+                    "Profit Margin",
+                    "Stock",
+                    "Salary",
+                    "Profit",
+                    "Margin",
+                    "Revenue Growth",
+                    "EPS",
+                    "EBITDA",
+                    "Operating Income",
+                    "Net Income",
+                ]
                 for field in sensitive_fields:
                     pattern = rf"\b({field})\b\s*(?:=|\:|of|is)?\s*[\$\w\d\.\,\-%]+"
                     masked_content = re.sub(

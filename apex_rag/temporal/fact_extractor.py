@@ -71,9 +71,7 @@ _RE_ORGANIZATION = re.compile(
 )
 
 # People detection: "John Doe", "Dr. Jane Smith"
-_RE_PERSON = re.compile(
-    r"\b(?:Dr\.|Mr\.|Mrs\.|Ms\.|Prof\.)?\s*([A-Z][a-z]+)\s([A-Z][a-z]{1,20})\b"
-)
+_RE_PERSON = re.compile(r"\b(?:Dr\.|Mr\.|Mrs\.|Ms\.|Prof\.)?\s*([A-Z][a-z]+)\s([A-Z][a-z]{1,20})\b")
 
 # Product detection: "Product X", "SuperWidget 3000", "Analytics Platform"
 _RE_PRODUCT = re.compile(
@@ -169,31 +167,67 @@ class FactExtractor:
             return facts
 
         # 1. Extract metrics (revenue, financial values)
-        facts.extend(self._extract_metrics(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_metrics(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 2. Extract policies
-        facts.extend(self._extract_policies(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_policies(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 3. Extract organizations
-        facts.extend(self._extract_organizations(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_organizations(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 4. Extract people
-        facts.extend(self._extract_people(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_people(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 5. Extract products
-        facts.extend(self._extract_products(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_products(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 6. Extract events
-        facts.extend(self._extract_events(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_events(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 7. Extract contract terms
-        facts.extend(self._extract_contract_terms(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_contract_terms(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 8. Extract compliance/regulations
-        facts.extend(self._extract_regulations(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_regulations(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         # 9. Extract date ranges
-        facts.extend(self._extract_date_ranges(content, resolved_doc_id, node.node_id, tenant_id, source_date, now))
+        facts.extend(
+            self._extract_date_ranges(
+                content, resolved_doc_id, node.node_id, tenant_id, source_date, now
+            )
+        )
 
         logger.debug("Extracted %d facts from node %s", len(facts), node.node_id)
         return facts
@@ -227,7 +261,9 @@ class FactExtractor:
             source_date=source_date,
         )
         return await self.extract_from_node(
-            node, doc_id=doc_id, tenant_id=tenant_id,
+            node,
+            doc_id=doc_id,
+            tenant_id=tenant_id,
         )
 
     # ── Strategy: Metrics ──────────────────────────────────────────────
@@ -271,8 +307,9 @@ class FactExtractor:
                 fact = TemporalFact(
                     subject=metric_name,
                     predicate="was",
-                    object=str(parsed.numeric_value) if parsed.unit_type == UnitType.NUMERIC
-                           else f"{parsed.numeric_value} ({raw_value})",
+                    object=str(parsed.numeric_value)
+                    if parsed.unit_type == UnitType.NUMERIC
+                    else f"{parsed.numeric_value} ({raw_value})",
                     confidence=parsed.confidence,
                     source_document_id=doc_id,
                     source_node_id=node_id,
@@ -470,7 +507,7 @@ class FactExtractor:
         for match in _RE_CONTRACT_TERM.finditer(content):
             term_value = match.group(1).strip()
             # Determine term type from context
-            text_before = content[:match.start()]
+            text_before = content[: match.start()]
             term_type = "contract_term"
             if "term" in text_before.lower():
                 term_type = "term"

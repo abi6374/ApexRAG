@@ -33,8 +33,7 @@ class SignpostProvider(Protocol):
         temperature: float = 0.0,
         max_tokens: int = 150,
         images: list[str] | None = None,
-    ) -> str:
-        ...
+    ) -> str: ...
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,7 +98,8 @@ class SemanticModelBuilder:
             A dictionary mapping ``node_id → signpost text``.
         """
         non_leaf_nodes = [
-            n for n in nodes
+            n
+            for n in nodes
             if n.children and (force or n.node_type in {NodeType.HEADING, NodeType.LIST})
         ]
 

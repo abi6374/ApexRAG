@@ -59,7 +59,7 @@ class QueryPlannerAgent(QueryPlanner):
         fallback = {
             "query_type": "FACTUAL",
             "sub_queries": [query],
-            "reasoning": "Fallback query planning applied."
+            "reasoning": "Fallback query planning applied.",
         }
 
         try:
@@ -76,8 +76,15 @@ class QueryPlannerAgent(QueryPlanner):
 
             query_type = data.get("query_type", "FACTUAL").upper()
             valid_types = {
-                "FACTUAL", "COMPARATIVE", "TEMPORAL", "CAUSAL", "LEGAL",
-                "FINANCIAL", "TECHNICAL", "CODE", "MULTI_DOCUMENT"
+                "FACTUAL",
+                "COMPARATIVE",
+                "TEMPORAL",
+                "CAUSAL",
+                "LEGAL",
+                "FINANCIAL",
+                "TECHNICAL",
+                "CODE",
+                "MULTI_DOCUMENT",
             }
             if query_type not in valid_types:
                 data["query_type"] = "FACTUAL"

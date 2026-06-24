@@ -45,7 +45,9 @@ class TraceManager:
             if not self.active_listeners[trace_id]:
                 del self.active_listeners[trace_id]
 
-    def publish(self, trace_id: str, trace_type: str, event_name: str, data: dict[str, Any]) -> None:
+    def publish(
+        self, trace_id: str, trace_type: str, event_name: str, data: dict[str, Any]
+    ) -> None:
         """Publishes a trace event to all active queue listeners for a trace_id."""
         now = time.perf_counter()
         start = self.trace_start_times.get(trace_id, now)

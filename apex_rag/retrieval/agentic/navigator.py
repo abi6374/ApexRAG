@@ -184,7 +184,9 @@ class ASTNavigationAgent:
                 query, current_node.children, max_candidates=budget.max_candidates
             )
         else:
-            candidates = await self._retriever.retrieve(query, current_node, top_k=budget.max_candidates)
+            candidates = await self._retriever.retrieve(
+                query, current_node, top_k=budget.max_candidates
+            )
 
         if not candidates:
             logger.debug("[NAVIGATE] No candidates found for node %s", current_node.node_id)
@@ -208,7 +210,12 @@ class ASTNavigationAgent:
             metrics_service.record_cache_hit()
             chosen_id = cached_nav.get("chosen_id")
             fallback_id = cached_nav.get("fallback_id")
-            logger.debug("[NAVIGATE] Cache HIT for %s: %s (fallback: %s)", current_node.node_id, chosen_id, fallback_id)
+            logger.debug(
+                "[NAVIGATE] Cache HIT for %s: %s (fallback: %s)",
+                current_node.node_id,
+                chosen_id,
+                fallback_id,
+            )
         else:
             metrics_service.record_cache_miss()
             prompt = _NAVIGATE_PROMPT.format(query=query, children_text=candidate_texts)
@@ -221,7 +228,8 @@ class ASTNavigationAgent:
 
             # Cache the navigation decision (tenant-aware key — Principle 19)
             await self._nav_cache.set(
-                query, current_node.node_id,
+                query,
+                current_node.node_id,
                 {"chosen_id": chosen_id, "fallback_id": fallback_id},
                 tenant_id=nav_tenant_id,
             )

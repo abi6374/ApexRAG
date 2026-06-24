@@ -75,9 +75,7 @@ class VersionResolver:
                 return self._row_to_temporal_version(latest)
             return None
         # Return the highest-versioned current entry
-        return self._row_to_temporal_version(
-            max(current, key=lambda v: v.version_number)
-        )
+        return self._row_to_temporal_version(max(current, key=lambda v: v.version_number))
 
     async def resolve_for_date(
         self,
@@ -101,16 +99,14 @@ class VersionResolver:
         """
         versions = await self._get_versions_for_node(node_id)
         active = [
-            v for v in versions
-            if v.effective_from <= as_of
-            and (v.effective_to is None or v.effective_to > as_of)
+            v
+            for v in versions
+            if v.effective_from <= as_of and (v.effective_to is None or v.effective_to > as_of)
         ]
         if not active:
             return None
         # Return the highest version number among active entries
-        return self._row_to_temporal_version(
-            max(active, key=lambda v: v.version_number)
-        )
+        return self._row_to_temporal_version(max(active, key=lambda v: v.version_number))
 
     async def resolve_authoritative(
         self,
@@ -219,10 +215,7 @@ class VersionResolver:
         versions = await self._get_versions_for_node(node_id)
         if not versions:
             return False
-        return any(
-            v.superseded_by is not None and v.node_id == node_id
-            for v in versions
-        )
+        return any(v.superseded_by is not None and v.node_id == node_id for v in versions)
 
     async def filter_expired(
         self,
@@ -291,8 +284,10 @@ class VersionResolver:
             previous_version=row.previous_version,
             # Infer validity_status from is_current + effective_to
             validity_status=(
-                "EXPIRED" if row.effective_to is not None and row.effective_to < datetime.now(timezone.utc)
-                else "ACTIVE" if row.is_current
+                "EXPIRED"
+                if row.effective_to is not None and row.effective_to < datetime.now(timezone.utc)
+                else "ACTIVE"
+                if row.is_current
                 else "SUPERSEDED"
             ),
         )

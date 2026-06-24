@@ -67,7 +67,9 @@ INSTRUCTIONS:
 
         context_blocks = []
         for i, packet in enumerate(verified_packets):
-            context_blocks.append(f"[[SOURCE {i+1}]] (Node ID: {packet.node_id})\n{packet.content}")
+            context_blocks.append(
+                f"[[SOURCE {i + 1}]] (Node ID: {packet.node_id})\n{packet.content}"
+            )
 
         context_str = "\n\n".join(context_blocks)
 

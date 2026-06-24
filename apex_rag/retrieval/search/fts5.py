@@ -200,9 +200,7 @@ class FTS5Search:
 
             from apex_rag.ingestion.apex_storage import ASTNodeRow
 
-            result = await session.execute(
-                select(ASTNodeRow).where(ASTNodeRow.doc_id == doc_id)
-            )
+            result = await session.execute(select(ASTNodeRow).where(ASTNodeRow.doc_id == doc_id))
             rows = result.scalars().all()
 
             count = 0

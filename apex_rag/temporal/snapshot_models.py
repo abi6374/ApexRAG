@@ -137,9 +137,7 @@ class SnapshotDelta(BaseModel):
                 f"other.base_as_of={other.base_as_of}.  Deltas must be sequential."
             )
         if other.doc_id != self.doc_id:
-            raise ValueError(
-                f"Cannot merge: different doc_id ({self.doc_id} vs {other.doc_id})."
-            )
+            raise ValueError(f"Cannot merge: different doc_id ({self.doc_id} vs {other.doc_id}).")
         if other.tenant_id != self.tenant_id:
             raise ValueError(
                 f"Cannot merge: different tenant_id ({self.tenant_id} vs {other.tenant_id})."

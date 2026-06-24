@@ -20,7 +20,11 @@ class BaseVerifier:
         raise NotImplementedError()
 
     def _parse_llm_response(self, raw: str) -> dict[str, Any]:
-        fallback = {"verified": False, "confidence": 0.0, "reason": "Failed to parse verifier response."}
+        fallback = {
+            "verified": False,
+            "confidence": 0.0,
+            "reason": "Failed to parse verifier response.",
+        }
         try:
             match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
             data = json.loads(match.group(0)) if match else json.loads(raw.strip())
@@ -32,7 +36,7 @@ class BaseVerifier:
             return {
                 "verified": verified,
                 "confidence": min(max(confidence, 0.0), 1.0),
-                "reason": reason
+                "reason": reason,
             }
         except Exception:
             raw_upper = raw.strip().upper()
@@ -87,8 +91,16 @@ class TableVerifier(BaseVerifier):
     """Verifies tabulations, tables, columns and row alignments."""
 
     async def verify(self, query: str, node: ASTNode) -> dict[str, Any]:
-        if node.node_type != NodeType.TABLE and "||" not in node.content and "\t" not in node.content:
-            return {"verified": False, "confidence": 0.0, "reason": "Node is not a structured table."}
+        if (
+            node.node_type != NodeType.TABLE
+            and "||" not in node.content
+            and "\t" not in node.content
+        ):
+            return {
+                "verified": False,
+                "confidence": 0.0,
+                "reason": "Node is not a structured table.",
+            }
 
         prompt = f"""You are a specialized Table Verification Engine.
 Query: "{query}"

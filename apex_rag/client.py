@@ -336,7 +336,8 @@ class ApexIndex:
 
             logger.info(
                 "Ingested document %s: %d nodes (fact extraction enqueued)",
-                resolved_doc_id, len(nodes),
+                resolved_doc_id,
+                len(nodes),
             )
             return resolved_doc_id
 
@@ -420,7 +421,8 @@ class ApexIndex:
 
             logger.info(
                 "Ingested text %s: %d nodes (fact extraction enqueued)",
-                doc_id, len(nodes),
+                doc_id,
+                len(nodes),
             )
             return doc_id
 
@@ -809,7 +811,8 @@ class ApexIndex:
         """
         service = self.temporal_reasoning
         return await service.answer(
-            question, doc_id,
+            question,
+            doc_id,
             as_of=as_of,
             start_date=start_date,
             end_date=end_date,
@@ -883,14 +886,15 @@ class ApexIndex:
 
         # Run role-aware retrieval
         result = await rar.retrieve(
-            question, doc_id, tenant_context, as_of=as_of,
+            question,
+            doc_id,
+            tenant_context,
+            as_of=as_of,
         )
 
         if not result.allowed or not result.packets:
             return ApexAnswer(
-                answer_text=(
-                    "Access denied or no authorized evidence found for your query."
-                ),
+                answer_text=("Access denied or no authorized evidence found for your query."),
                 query=question,
                 evidence_packets=[],
             )
@@ -904,17 +908,14 @@ class ApexIndex:
         )
 
         answer_text = await rasynthesis.synthesize(
-            tenant_context, question, result.packets,
+            tenant_context,
+            question,
+            result.packets,
         )
 
         # Build temporal freshness
-        freshness_scores = [
-            p.freshness_score for p in result.packets
-        ]
-        mean_freshness = (
-            sum(freshness_scores) / len(freshness_scores)
-            if freshness_scores else 1.0
-        )
+        freshness_scores = [p.freshness_score for p in result.packets]
+        mean_freshness = sum(freshness_scores) / len(freshness_scores) if freshness_scores else 1.0
 
         return ApexAnswer(
             answer_text=answer_text,
@@ -933,7 +934,9 @@ class ApexIndex:
             self._fact_store = FactStore(self._storage)
             self._fact_extractor = FactExtractor()
             self._fact_pipeline = FactPipeline(
-                self._storage, self._fact_store, self._fact_extractor,
+                self._storage,
+                self._fact_store,
+                self._fact_extractor,
             )
         return self._fact_pipeline
 
@@ -956,5 +959,8 @@ class ApexIndex:
             A dict with before/after metrics, diffs, and change analysis.
         """
         return await self.temporal_reasoning.compare(
-            question, doc_id, date_a, date_b,
+            question,
+            doc_id,
+            date_a,
+            date_b,
         )

@@ -93,6 +93,7 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
     ) -> list[ASTNode]:
         """Evolved v3 filter method leveraging StructuralFilterEngine."""
         from apex_rag.retrieval.deterministic.filter_engine import StructuralFilterEngine
+
         engine = StructuralFilterEngine(stop_words=self.stop_words)
         return engine.filter_candidates(
             query=query,
@@ -100,4 +101,3 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
             page_index_map=page_index_map,
             max_candidates=max_candidates,
         )
-

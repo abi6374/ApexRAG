@@ -14,7 +14,22 @@ class StructuralFilterEngine:
 
     def __init__(self, stop_words: set[str] | None = None) -> None:
         self.stop_words = stop_words or {
-            "the", "is", "in", "and", "to", "a", "of", "for", "on", "with", "as", "by", "an", "at", "it", "this"
+            "the",
+            "is",
+            "in",
+            "and",
+            "to",
+            "a",
+            "of",
+            "for",
+            "on",
+            "with",
+            "as",
+            "by",
+            "an",
+            "at",
+            "it",
+            "this",
         }
 
     def _tokenize(self, text: str) -> list[str]:
@@ -73,7 +88,7 @@ class StructuralFilterEngine:
             # Assumed relative to current date (newer is slightly prioritized if equal matching)
             days = (datetime.now(node.source_date.tzinfo or None) - node.source_date).days
             decay = 1.0 / (1.0 + (0.0001 * max(0, days)))
-            score *= (0.8 + 0.2 * decay)
+            score *= 0.8 + 0.2 * decay
 
         return score
 

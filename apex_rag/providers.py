@@ -95,9 +95,7 @@ class LLMProvider(Protocol):
             List of embedding vectors, one per input text.
         """
         ...
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support embeddings"
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not support embeddings")
 
 
 AsyncLLM = LLMProvider
@@ -344,9 +342,7 @@ class GroqProvider:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Groq does not provide an embedding endpoint."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support embeddings"
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not support embeddings")
 
 
 class AnthropicProvider:
@@ -425,9 +421,7 @@ class AnthropicProvider:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Anthropic does not provide an embedding endpoint."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support embeddings"
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not support embeddings")
 
 
 class GeminiProvider:
@@ -466,14 +460,10 @@ class GeminiProvider:
             import base64
 
             for img in images:
-                content.append({
-                    "mime_type": "image/png",
-                    "data": base64.b64decode(img)
-                })
+                content.append({"mime_type": "image/png", "data": base64.b64decode(img)})
 
         response = await self._model.generate_content_async(
-            content,
-            generation_config={"temperature": temperature, "max_output_tokens": max_tokens}
+            content, generation_config={"temperature": temperature, "max_output_tokens": max_tokens}
         )
         return response.text
 
@@ -488,16 +478,14 @@ class GeminiProvider:
         content: list[Any] = [prompt]
         if images:
             import base64
+
             for img in images:
-                content.append({
-                    "mime_type": "image/png",
-                    "data": base64.b64decode(img)
-                })
+                content.append({"mime_type": "image/png", "data": base64.b64decode(img)})
 
         response = await self._model.generate_content_async(
             content,
             generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
-            stream=True
+            stream=True,
         )
         async for chunk in response:
             if chunk.text:
@@ -506,10 +494,9 @@ class GeminiProvider:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts using Google's embedding-004 model."""
         import google.generativeai as genai
+
         response = await genai.embed_content_async(
-            model="models/text-embedding-004",
-            content=texts,
-            task_type="retrieval_document"
+            model="models/text-embedding-004", content=texts, task_type="retrieval_document"
         )
         return response["embedding"]
 
@@ -530,11 +517,11 @@ class OpenRouterProvier:
         **kwargs: Any,  # noqa: ARG002
     ) -> None:
         import openai as openai_mod
+
         self.model = model
         # OpenRouter uses the OpenAI SDK but with a different base URL
         self._client = openai_mod.AsyncOpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
+            api_key=api_key, base_url="https://openrouter.ai/api/v1"
         )
 
     async def generate(
@@ -549,7 +536,7 @@ class OpenRouterProvier:
         messages = [{"role": "user", "content": prompt}]
         response = await self._client.chat.completions.create(
             model=self.model,
-            messages=messages, # type: ignore
+            messages=messages,  # type: ignore
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -566,12 +553,12 @@ class OpenRouterProvier:
         messages = [{"role": "user", "content": prompt}]
         stream = await self._client.chat.completions.create(
             model=self.model,
-            messages=messages, # type: ignore
+            messages=messages,  # type: ignore
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
         )
-        async for chunk in stream: # type: ignore
+        async for chunk in stream:  # type: ignore
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
                 yield delta.content

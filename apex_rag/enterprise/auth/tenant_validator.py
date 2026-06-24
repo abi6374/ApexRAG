@@ -101,7 +101,10 @@ class TenantIsolationValidator:
         if row_id and table_name in _TENANT_COLUMN_MAP:
             tenant_col = _TENANT_COLUMN_MAP[table_name]
             await self._assert_row_belongs_to_tenant(
-                table_name, tenant_col, row_id, tenant_id,
+                table_name,
+                tenant_col,
+                row_id,
+                tenant_id,
             )
 
     async def assert_tenant_write_access(
@@ -202,7 +205,9 @@ class TenantIsolationValidator:
         except Exception as exc:
             logger.warning(
                 "Tenant isolation check skipped for %s.%s: %s",
-                table_name, row_id, exc,
+                table_name,
+                row_id,
+                exc,
             )
 
     # ── Table schema helpers ──────────────────────────────────────────────

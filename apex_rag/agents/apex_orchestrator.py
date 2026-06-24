@@ -183,16 +183,13 @@ class ApexOrchestrator(Orchestrator):
                 node_id=str(uuid.uuid4()),
                 content=content_str or "Temporal reasoning results",
                 node_type=NodeType.PARAGRAPH,
-                doc_id=doc_id
+                doc_id=doc_id,
             )
             pkt = UnifiedEvidencePacket(
                 node=node,
-                temporal_metadata=TemporalMetadata(
-                    node_id=node.node_id,
-                    freshness_score=1.0
-                ),
+                temporal_metadata=TemporalMetadata(node_id=node.node_id, freshness_score=1.0),
                 retrieval_score=1.0,
-                content=node.content
+                content=node.content,
             )
             evidence_packets.append(pkt)
 
@@ -239,7 +236,8 @@ class ApexOrchestrator(Orchestrator):
         if not ablation_mode:
             # 3. Temporal audit
             audit_result = await self._temporal_auditor.audit(
-                unified_packets, doc_id=doc_id,
+                unified_packets,
+                doc_id=doc_id,
             )
             contradictions = audit_result.conflicts
             mean_freshness = audit_result.mean_freshness
@@ -330,7 +328,8 @@ class ApexOrchestrator(Orchestrator):
             token_count = 0
             if self.synthesizer is not None:
                 async for chunk in self.synthesizer.stream_synthesize(
-                    query, base_packets,
+                    query,
+                    base_packets,
                 ):
                     token_count += 1
                     yield chunk

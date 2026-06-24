@@ -85,4 +85,3 @@ class ReasoningMemoryCache:
 
     async def store_path(self, query: str, path: list[str]) -> None:
         self._cache.set(query, path)
-

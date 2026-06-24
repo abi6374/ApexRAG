@@ -84,7 +84,9 @@ class HistoricalStateEngine:
             most recently active one wins.
         """
         facts = await self._resolver.resolve_at_time(
-            doc_id, as_of, tenant_context=tenant_context,
+            doc_id,
+            as_of,
+            tenant_context=tenant_context,
         )
 
         # Build a subject→value map (latest wins for duplicates)
@@ -93,7 +95,9 @@ class HistoricalStateEngine:
             subject = fact.subject
             # If the subject already exists, prefer the fact with later created_at
             existing = state.get(subject)
-            if existing is None or fact.created_at > existing.get("_created_at", datetime.min.replace(tzinfo=timezone.utc)):
+            if existing is None or fact.created_at > existing.get(
+                "_created_at", datetime.min.replace(tzinfo=timezone.utc)
+            ):
                 state[subject] = {
                     "value": fact.object,
                     "fact_id": fact.fact_id,
@@ -105,9 +109,7 @@ class HistoricalStateEngine:
         # Strip internal keys for clean output
         result: dict[str, Any] = {}
         for subject, data in state.items():
-            result[subject] = {
-                k: v for k, v in data.items() if not k.startswith("_")
-            }
+            result[subject] = {k: v for k, v in data.items() if not k.startswith("_")}
 
         return result
 
@@ -129,7 +131,9 @@ class HistoricalStateEngine:
             List of facts valid at the given time.
         """
         return await self._resolver.resolve_at_time(
-            doc_id, as_of, tenant_context=tenant_context,
+            doc_id,
+            as_of,
+            tenant_context=tenant_context,
         )
 
     # ── Delta Computation ──────────────────────────────────────────────
@@ -158,16 +162,19 @@ class HistoricalStateEngine:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for compute_delta."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for compute_delta.")
 
         # Fetch facts at both points
         base_facts = await self._resolver.resolve_at_time(
-            doc_id, from_time, tenant_context=tenant_context,
+            doc_id,
+            from_time,
+            tenant_context=tenant_context,
         )
         target_facts = await self._resolver.resolve_at_time(
-            doc_id, to_time, tenant_context=tenant_context,
+            doc_id,
+            to_time,
+            tenant_context=tenant_context,
         )
 
         # Index by fact_id
@@ -248,7 +255,10 @@ class HistoricalStateEngine:
             t1 = from_time + (interval_step * i) if i > 0 else from_time
             t2 = from_time + (interval_step * (i + 1))
             delta = await self.compute_delta(
-                doc_id, t1, t2, tenant_context=tenant_context,
+                doc_id,
+                t1,
+                t2,
+                tenant_context=tenant_context,
             )
             deltas.append(delta)
 
@@ -280,7 +290,10 @@ class HistoricalStateEngine:
             target state.
         """
         delta = await self.compute_delta(
-            doc_id, from_time, to_time, tenant_context=tenant_context,
+            doc_id,
+            from_time,
+            to_time,
+            tenant_context=tenant_context,
         )
         return StatePatch(
             doc_id=doc_id,
@@ -316,12 +329,12 @@ class HistoricalStateEngine:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for get_fact_history."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for get_fact_history.")
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
         subject_facts = [f for f in facts if f.subject == subject]
         subject_facts.sort(key=lambda f: f.valid_from)
@@ -361,17 +374,19 @@ class HistoricalStateEngine:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for list_subjects."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for list_subjects.")
 
         if as_of is not None:
             facts = await self._resolver.resolve_at_time(
-                doc_id, as_of, tenant_context=tenant_context,
+                doc_id,
+                as_of,
+                tenant_context=tenant_context,
             )
         else:
             facts = await self._fact_store.get_facts_by_document(
-                doc_id, tenant_context=tenant_context,
+                doc_id,
+                tenant_context=tenant_context,
             )
 
         subjects = sorted({f.subject for f in facts})
@@ -400,13 +415,20 @@ class HistoricalStateEngine:
             Dict with keys: state_a, state_b, delta, summary.
         """
         state_a = await self.get_state_at(
-            doc_id, time_a, tenant_context=tenant_context,
+            doc_id,
+            time_a,
+            tenant_context=tenant_context,
         )
         state_b = await self.get_state_at(
-            doc_id, time_b, tenant_context=tenant_context,
+            doc_id,
+            time_b,
+            tenant_context=tenant_context,
         )
         delta = await self.compute_delta(
-            doc_id, time_a, time_b, tenant_context=tenant_context,
+            doc_id,
+            time_a,
+            time_b,
+            tenant_context=tenant_context,
         )
 
         # Summary

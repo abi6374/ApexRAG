@@ -70,11 +70,11 @@ class FactJobRow(ApexBase):
 
     job_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True, default="default")
-    dedup_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="PENDING"
+    tenant_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True, default="default"
     )
+    dedup_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -175,7 +175,8 @@ class FactPipeline:
                 # Return existing job_id regardless of status (idempotency)
                 logger.debug(
                     "Job %s already exists with status %s, skipping.",
-                    existing_job.job_id, existing_job.status,
+                    existing_job.job_id,
+                    existing_job.status,
                 )
                 return existing_job.job_id
 
@@ -201,7 +202,9 @@ class FactPipeline:
 
             logger.info(
                 "Enqueued fact extraction job %s for doc %s (%d nodes)",
-                job_id, doc_id, len(nodes),
+                job_id,
+                doc_id,
+                len(nodes),
             )
             return job_id
 
@@ -290,7 +293,8 @@ class FactPipeline:
 
             # Fetch document nodes
             nodes = await self._storage.get_nodes_by_doc(
-                doc_id, tenant_context=tenant_id,
+                doc_id,
+                tenant_context=tenant_id,
             )
             if not nodes:
                 logger.warning("No nodes found for doc %s in tenant %s", doc_id, tenant_id)
@@ -307,14 +311,17 @@ class FactPipeline:
             all_facts: list[TemporalFact] = []
             for node in nodes:
                 node_facts = await self._extractor.extract_from_node(
-                    node, doc_id=doc_id, tenant_id=tenant_id,
+                    node,
+                    doc_id=doc_id,
+                    tenant_id=tenant_id,
                 )
                 all_facts.extend(node_facts)
 
             # Save facts via FactStore
             if all_facts:
                 await self._fact_store.save_facts(
-                    all_facts, tenant_context=tenant_id,
+                    all_facts,
+                    tenant_context=tenant_id,
                 )
 
             # Mark as COMPLETED
@@ -328,7 +335,9 @@ class FactPipeline:
 
             logger.info(
                 "Fact extraction job %s completed: %d facts from %d nodes",
-                job_id, len(all_facts), len(nodes),
+                job_id,
+                len(all_facts),
+                len(nodes),
             )
             return {
                 "job_id": job_id,
@@ -338,7 +347,10 @@ class FactPipeline:
 
         except Exception as exc:
             logger.error(
-                "Fact extraction job %s failed: %s", job_id, exc, exc_info=True,
+                "Fact extraction job %s failed: %s",
+                job_id,
+                exc,
+                exc_info=True,
             )
             async with self._storage.session() as session:
                 db_job = await session.get(FactJobRow, job_id)
@@ -350,7 +362,8 @@ class FactPipeline:
                         db_job.status = "DEAD_LETTER"
                         logger.warning(
                             "Job %s moved to DEAD_LETTER after %d retries",
-                            job_id, db_job.retry_count,
+                            job_id,
+                            db_job.retry_count,
                         )
                     else:
                         db_job.status = "FAILED"
@@ -440,9 +453,13 @@ class FactPipeline:
             Number of jobs removed.
         """
         cutoff = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
         )
         from datetime import timedelta
+
         cutoff = cutoff - timedelta(days=older_than_days)
 
         async with self._storage.session() as session:

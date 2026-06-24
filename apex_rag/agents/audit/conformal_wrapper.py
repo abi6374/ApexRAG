@@ -137,25 +137,20 @@ class ConformalWrapperAgent:
         scored_packets: list[tuple[EvidencePacket, float]] = [
             (pkt, s) for pkt, s in zip(packets, scores, strict=False)
         ]
-        filtered = [
-            pkt for pkt, s in scored_packets if s <= threshold
-        ]
+        filtered = [pkt for pkt, s in scored_packets if s <= threshold]
 
         # If threshold is 0.0 (no calibration), keep all packets but
         # still report the nonconformity scores as metadata
         if threshold == 0.0 and not filtered:
             filtered = list(packets)
             logger.info(
-                "ConformalWrapper: threshold=0.0 (uncalibrated), "
-                "keeping all %d packets",
+                "ConformalWrapper: threshold=0.0 (uncalibrated), keeping all %d packets",
                 len(packets),
             )
 
         return ConformalResult(
             filtered_packets=filtered,
-            coverage_guarantee=self._calibrator.coverage_level
-            if threshold > 0.0
-            else 0.0,
+            coverage_guarantee=self._calibrator.coverage_level if threshold > 0.0 else 0.0,
             prediction_set_size=len(filtered),
             nonconformity_scores=scored_packets,
         )

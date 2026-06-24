@@ -37,18 +37,46 @@ _DATE_PATTERNS_B: list[tuple[str, re.Pattern[str], str | None]] = [
     # ISO: 2024-06-01
     ("iso", re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), "%Y-%m-%d"),
     # US long: June 1, 2024  or  June 01, 2024
-    ("us_long", re.compile(r"\b(January|February|March|April|May|June|July|"
-                            r"August|September|October|November|December)\s+"
-                            r"(\d{1,2}),\s*(\d{4})\b", re.IGNORECASE), None),
+    (
+        "us_long",
+        re.compile(
+            r"\b(January|February|March|April|May|June|July|"
+            r"August|September|October|November|December)\s+"
+            r"(\d{1,2}),\s*(\d{4})\b",
+            re.IGNORECASE,
+        ),
+        None,
+    ),
     # Short US: Jun 1, 2024  or  Jun 01, 2024
-    ("us_short", re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
-                            r"(\d{1,2}),\s*(\d{4})\b", re.IGNORECASE), None),
+    (
+        "us_short",
+        re.compile(
+            r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
+            r"(\d{1,2}),\s*(\d{4})\b",
+            re.IGNORECASE,
+        ),
+        None,
+    ),
     # DD Month YYYY: 01 June 2024
-    ("dd_month_yyyy", re.compile(r"\b(\d{1,2})\s+(January|February|March|April|May|June|July|"
-                                  r"August|September|October|November|December)\s+(\d{4})\b", re.IGNORECASE), None),
+    (
+        "dd_month_yyyy",
+        re.compile(
+            r"\b(\d{1,2})\s+(January|February|March|April|May|June|July|"
+            r"August|September|October|November|December)\s+(\d{4})\b",
+            re.IGNORECASE,
+        ),
+        None,
+    ),
     # Month YYYY: June 2024
-    ("month_yyyy", re.compile(r"\b(January|February|March|April|May|June|July|"
-                               r"August|September|October|November|December)\s+(\d{4})\b", re.IGNORECASE), None),
+    (
+        "month_yyyy",
+        re.compile(
+            r"\b(January|February|March|April|May|June|July|"
+            r"August|September|October|November|December)\s+(\d{4})\b",
+            re.IGNORECASE,
+        ),
+        None,
+    ),
     # Quarter: Q3 2024, Q1 2024, Q4 FY2024
     ("quarter", re.compile(r"\bQ([1-4])\s*(?:FY)?(\d{4})\b", re.IGNORECASE), None),
     # Year only: 2024 (4-digit year, 1900-2099)
@@ -58,14 +86,30 @@ _DATE_PATTERNS_B: list[tuple[str, re.Pattern[str], str | None]] = [
 ]
 
 _MONTH_NAMES = {
-    "january": 1, "february": 2, "march": 3, "april": 4,
-    "may": 5, "june": 6, "july": 7, "august": 8,
-    "september": 9, "october": 10, "november": 11, "december": 12,
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
-
-
 
 
 # ═══════════════════════════════════════════════════════════════

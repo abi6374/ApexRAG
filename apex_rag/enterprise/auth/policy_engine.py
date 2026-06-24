@@ -126,9 +126,7 @@ class PolicyEvaluator:
             return False
 
     @classmethod
-    def evaluate_condition(
-        cls, condition: PolicyCondition, context: dict[str, Any]
-    ) -> bool:
+    def evaluate_condition(cls, condition: PolicyCondition, context: dict[str, Any]) -> bool:
         """Evaluate a compound condition (ALL = AND, ANY = OR).
 
         Args:
@@ -141,9 +139,7 @@ class PolicyEvaluator:
         if not condition.rules:
             return True
 
-        results = [
-            cls.evaluate_rule(rule, context) for rule in condition.rules
-        ]
+        results = [cls.evaluate_rule(rule, context) for rule in condition.rules]
 
         if condition.match == "ALL":
             return all(results)
@@ -187,9 +183,7 @@ class PolicyEngine:
         """Retrieve a policy condition by name."""
         return self._rules.get(name)
 
-    def assign_policy_to_role(
-        self, rule_name: str, role: str, is_allowed: bool = True
-    ) -> None:
+    def assign_policy_to_role(self, rule_name: str, role: str, is_allowed: bool = True) -> None:
         """Assign a policy to a role.
 
         Args:
@@ -199,9 +193,7 @@ class PolicyEngine:
         """
         self._assignments.append((rule_name, f"role:{role}", is_allowed))
 
-    def assign_policy_to_user(
-        self, rule_name: str, user_id: str, is_allowed: bool = True
-    ) -> None:
+    def assign_policy_to_user(self, rule_name: str, user_id: str, is_allowed: bool = True) -> None:
         """Assign a policy directly to a user.
 
         User assignments take precedence over role assignments.
@@ -258,7 +250,7 @@ class PolicyEngine:
             return True, False  # No policies applied — caller should fall through
 
         # Sort: user assignments first (higher priority)
-        applicable.sort(key=lambda a: (0 if a[2] == "user" else 1))
+        applicable.sort(key=lambda a: 0 if a[2] == "user" else 1)
 
         has_allow = False
         for rule_name, is_allowed, _target_type in applicable:

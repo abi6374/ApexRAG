@@ -193,63 +193,67 @@ class FactContradictionDetector:
 
         same_predicate = fact_a.predicate == fact_b.predicate
         windows_overlap_bool = windows_overlap(
-            fact_a.valid_from, fact_a.valid_to,
-            fact_b.valid_from, fact_b.valid_to,
+            fact_a.valid_from,
+            fact_a.valid_to,
+            fact_b.valid_from,
+            fact_b.valid_to,
         )
 
         # 1. VALUE_CONFLICT: same subject+predicate, overlapping windows, different objects
         if same_predicate and windows_overlap_bool and fact_a.object != fact_b.object:
-            contradictions.append(FactContradiction(
-                contradiction_type=ContradictionType.VALUE_CONFLICT,
-                fact_ids=frozenset({fact_a.fact_id, fact_b.fact_id}),
-                subject=fact_a.subject,
-                details=(
-                    f"'{fact_a.subject}' has conflicting values: "
-                    f"'{fact_a.object}' vs '{fact_b.object}' "
-                    f"with overlapping validity windows."
-                ),
-                severity=Severity.HIGH,
-                resolution_suggestion=(
-                    "One fact should supersede the other. "
-                    "Set superseded_by on the older fact."
-                ),
-                metadata={
-                    "fact_a_value": fact_a.object,
-                    "fact_b_value": fact_b.object,
-                    "fact_a_window": {
-                        "from": fact_a.valid_from.isoformat() if fact_a.valid_from else None,
-                        "to": fact_a.valid_to.isoformat() if fact_a.valid_to else None,
+            contradictions.append(
+                FactContradiction(
+                    contradiction_type=ContradictionType.VALUE_CONFLICT,
+                    fact_ids=frozenset({fact_a.fact_id, fact_b.fact_id}),
+                    subject=fact_a.subject,
+                    details=(
+                        f"'{fact_a.subject}' has conflicting values: "
+                        f"'{fact_a.object}' vs '{fact_b.object}' "
+                        f"with overlapping validity windows."
+                    ),
+                    severity=Severity.HIGH,
+                    resolution_suggestion=(
+                        "One fact should supersede the other. Set superseded_by on the older fact."
+                    ),
+                    metadata={
+                        "fact_a_value": fact_a.object,
+                        "fact_b_value": fact_b.object,
+                        "fact_a_window": {
+                            "from": fact_a.valid_from.isoformat() if fact_a.valid_from else None,
+                            "to": fact_a.valid_to.isoformat() if fact_a.valid_to else None,
+                        },
+                        "fact_b_window": {
+                            "from": fact_b.valid_from.isoformat() if fact_b.valid_from else None,
+                            "to": fact_b.valid_to.isoformat() if fact_b.valid_to else None,
+                        },
+                        "same_predicate": same_predicate,
                     },
-                    "fact_b_window": {
-                        "from": fact_b.valid_from.isoformat() if fact_b.valid_from else None,
-                        "to": fact_b.valid_to.isoformat() if fact_b.valid_to else None,
-                    },
-                    "same_predicate": same_predicate,
-                },
-            ))
+                )
+            )
 
         # 2. WINDOW_OVERLAP: same subject, overlapping windows, no supersession
         if windows_overlap_bool and not same_predicate:
-            contradictions.append(FactContradiction(
-                contradiction_type=ContradictionType.WINDOW_OVERLAP,
-                fact_ids=frozenset({fact_a.fact_id, fact_b.fact_id}),
-                subject=fact_a.subject,
-                details=(
-                    f"'{fact_a.subject}' has facts with overlapping validity "
-                    f"windows but different predicates: "
-                    f"'{fact_a.predicate}: {fact_a.object}' vs "
-                    f"'{fact_b.predicate}: {fact_b.object}'."
-                ),
-                severity=Severity.LOW,
-                resolution_suggestion=(
-                    "Review if these facts are compatible or if one should "
-                    "supersede the other."
-                ),
-                metadata={
-                    "fact_a": {"predicate": fact_a.predicate, "object": fact_a.object},
-                    "fact_b": {"predicate": fact_b.predicate, "object": fact_b.object},
-                },
-            ))
+            contradictions.append(
+                FactContradiction(
+                    contradiction_type=ContradictionType.WINDOW_OVERLAP,
+                    fact_ids=frozenset({fact_a.fact_id, fact_b.fact_id}),
+                    subject=fact_a.subject,
+                    details=(
+                        f"'{fact_a.subject}' has facts with overlapping validity "
+                        f"windows but different predicates: "
+                        f"'{fact_a.predicate}: {fact_a.object}' vs "
+                        f"'{fact_b.predicate}: {fact_b.object}'."
+                    ),
+                    severity=Severity.LOW,
+                    resolution_suggestion=(
+                        "Review if these facts are compatible or if one should supersede the other."
+                    ),
+                    metadata={
+                        "fact_a": {"predicate": fact_a.predicate, "object": fact_a.object},
+                        "fact_b": {"predicate": fact_b.predicate, "object": fact_b.object},
+                    },
+                )
+            )
 
         # 3. CROSS_TENANT_LINK: parent/superseded_by crosses tenants
         # Check fact_a's links against fact_b
@@ -258,18 +262,28 @@ class FactContradictionDetector:
             ("superseded_by", fact_a.superseded_by),
         ]:
             if link_val == fact_b.fact_id and fact_a.tenant_id != fact_b.tenant_id:
-                contradictions.append(self._make_cross_tenant_issue(
-                    link_field, link_val, fact_a, fact_b,
-                ))
+                contradictions.append(
+                    self._make_cross_tenant_issue(
+                        link_field,
+                        link_val,
+                        fact_a,
+                        fact_b,
+                    )
+                )
         # Also check fact_b's links against fact_a
         for link_field, link_val in [
             ("parent_fact_id", fact_b.parent_fact_id),
             ("superseded_by", fact_b.superseded_by),
         ]:
             if link_val == fact_a.fact_id and fact_b.tenant_id != fact_a.tenant_id:
-                contradictions.append(self._make_cross_tenant_issue(
-                    link_field, link_val, fact_b, fact_a,
-                ))
+                contradictions.append(
+                    self._make_cross_tenant_issue(
+                        link_field,
+                        link_val,
+                        fact_b,
+                        fact_a,
+                    )
+                )
 
         return contradictions
 
@@ -295,22 +309,24 @@ class FactContradictionDetector:
         for fact in facts:
             # TEMPORAL_ANOMALY: valid_from > valid_to
             if fact.valid_from and fact.valid_to and fact.valid_from > fact.valid_to:
-                contradictions.append(FactContradiction(
-                    contradiction_type=ContradictionType.TEMPORAL_ANOMALY,
-                    fact_ids=frozenset({fact.fact_id}),
-                    subject=fact.subject,
-                    details=(
-                        f"Fact '{fact.subject}' has valid_from "
-                        f"({fact.valid_from.isoformat()}) after valid_to "
-                        f"({fact.valid_to.isoformat()})."
-                    ),
-                    severity=Severity.CRITICAL,
-                    resolution_suggestion="Swap or correct the valid_from/valid_to values.",
-                    metadata={
-                        "valid_from": fact.valid_from.isoformat(),
-                        "valid_to": fact.valid_to.isoformat(),
-                    },
-                ))
+                contradictions.append(
+                    FactContradiction(
+                        contradiction_type=ContradictionType.TEMPORAL_ANOMALY,
+                        fact_ids=frozenset({fact.fact_id}),
+                        subject=fact.subject,
+                        details=(
+                            f"Fact '{fact.subject}' has valid_from "
+                            f"({fact.valid_from.isoformat()}) after valid_to "
+                            f"({fact.valid_to.isoformat()})."
+                        ),
+                        severity=Severity.CRITICAL,
+                        resolution_suggestion="Swap or correct the valid_from/valid_to values.",
+                        metadata={
+                            "valid_from": fact.valid_from.isoformat(),
+                            "valid_to": fact.valid_to.isoformat(),
+                        },
+                    )
+                )
 
             # SUPERSESSION_BREAK: check cross-fact references
             for link_name, link_val in [
@@ -318,24 +334,26 @@ class FactContradictionDetector:
                 ("parent_fact_id", fact.parent_fact_id),
             ]:
                 if link_val and link_val not in fact_ids and not link_val.startswith("__DELETED__"):
-                    contradictions.append(FactContradiction(
-                        contradiction_type=ContradictionType.SUPERSESSION_BREAK,
-                        fact_ids=frozenset({fact.fact_id}),
-                        subject=fact.subject,
-                        details=(
-                            f"'{link_name}' of fact {fact.fact_id[:8]} points to "
-                            f"{link_val[:8]} which does not exist in the fact set."
-                        ),
-                        severity=Severity.HIGH,
-                        resolution_suggestion=(
-                            f"Ensure fact {link_val[:8]} exists or remove the {link_name} link."
-                        ),
-                        metadata={
-                            "link_field": link_name,
-                            "target_fact_id": link_val,
-                            "source_fact_id": fact.fact_id,
-                        },
-                    ))
+                    contradictions.append(
+                        FactContradiction(
+                            contradiction_type=ContradictionType.SUPERSESSION_BREAK,
+                            fact_ids=frozenset({fact.fact_id}),
+                            subject=fact.subject,
+                            details=(
+                                f"'{link_name}' of fact {fact.fact_id[:8]} points to "
+                                f"{link_val[:8]} which does not exist in the fact set."
+                            ),
+                            severity=Severity.HIGH,
+                            resolution_suggestion=(
+                                f"Ensure fact {link_val[:8]} exists or remove the {link_name} link."
+                            ),
+                            metadata={
+                                "link_field": link_name,
+                                "target_fact_id": link_val,
+                                "source_fact_id": fact.fact_id,
+                            },
+                        )
+                    )
 
         # Pairwise checks
         for i in range(len(facts)):
@@ -367,12 +385,12 @@ class FactContradictionDetector:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for detect_document."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for detect_document.")
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
         contradictions = await self.detect_all(facts)
 
@@ -411,5 +429,3 @@ class FactContradictionDetector:
                 "link_field": link_field,
             },
         )
-
-

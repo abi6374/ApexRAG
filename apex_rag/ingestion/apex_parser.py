@@ -134,10 +134,12 @@ class ApexParser:
 
         # Remove code fences first to prevent heading/table detection inside them
         code_regions: dict[str, str] = {}
+
         def _save_code(m: re.Match[str]) -> str:
             placeholder = f"__CODE_BLOCK_{len(code_regions)}__"
             code_regions[placeholder] = m.group(3)
             return placeholder
+
         text_no_fences = _CODE_FENCE_RE.sub(_save_code, text)
 
         nodes: list[ASTNode] = []
@@ -294,7 +296,9 @@ class ApexParser:
             root.children = [n.node_id for n in nodes[1:] if n.parent_id == root.node_id]
 
         # Post-processing: chunk large leaf nodes for industry readiness
-        return _chunk_large_sections(nodes, resolved_doc_id, source_date, ingestion_dt, current_page)
+        return _chunk_large_sections(
+            nodes, resolved_doc_id, source_date, ingestion_dt, current_page
+        )
 
     # ── PDF ────────────────────────────────────────────────────────────────
 
@@ -315,6 +319,7 @@ class ApexParser:
             # Fallback: try pymupdf
             try:
                 import fitz  # PyMuPDF
+
                 doc = fitz.open(str(path))
                 markdown_text_parts: list[str] = []
                 for page in doc:
@@ -331,6 +336,7 @@ class ApexParser:
         if source_date is None:
             try:
                 import fitz
+
                 pdf_doc = fitz.open(str(path))
                 meta = pdf_doc.metadata
                 pdf_doc.close()
@@ -340,9 +346,9 @@ class ApexParser:
                         # PDF date format: D:YYYYMMDDHHMMSS
                         if pdf_date_str.startswith("D:"):
                             pdf_date_str = pdf_date_str[2:]
-                        source_date = datetime.strptime(
-                            pdf_date_str[:8], "%Y%m%d"
-                        ).replace(tzinfo=timezone.utc)
+                        source_date = datetime.strptime(pdf_date_str[:8], "%Y%m%d").replace(
+                            tzinfo=timezone.utc
+                        )
                     except (ValueError, IndexError):
                         pass
             except ImportError:
@@ -373,7 +379,11 @@ class ApexParser:
             try:
                 props = doc.core_properties
                 if props.created:
-                    source_date = props.created.replace(tzinfo=timezone.utc) if props.created.tzinfo is None else props.created
+                    source_date = (
+                        props.created.replace(tzinfo=timezone.utc)
+                        if props.created.tzinfo is None
+                        else props.created
+                    )
             except Exception:
                 pass
 
@@ -516,7 +526,7 @@ def _python_ast_to_nodes(
                     doc_value = first_stmt.value.value
                     if isinstance(doc_value, bytes):
                         doc_value = doc_value.decode("utf-8")
-                    class_content = f"class {node.name}:\n    \"\"\"{doc_value}\"\"\""
+                    class_content = f'class {node.name}:\n    """{doc_value}"""'
 
             class_node = ASTNode(
                 content=class_content,
@@ -560,7 +570,7 @@ def _python_ast_to_nodes(
                     doc_value = first_stmt.value.value
                     if isinstance(doc_value, bytes):
                         doc_value = doc_value.decode("utf-8")
-                    func_content = f"{kind}def {func_name}({args_str}):\n    \"\"\"{doc_value}\"\"\""
+                    func_content = f'{kind}def {func_name}({args_str}):\n    """{doc_value}"""'
 
             func_node = ASTNode(
                 content=func_content,
@@ -637,7 +647,9 @@ def _chunk_large_sections(
                         doc_id=doc_id,
                         source_date=source_date,
                         ingestion_date=ingestion_date,
-                        page_number=current_page if current_page is not None and current_page > 0 else None,
+                        page_number=current_page
+                        if current_page is not None and current_page > 0
+                        else None,
                     )
                     new_nodes.append(chunk_node)
                     chunk_children.append(chunk_node.node_id)

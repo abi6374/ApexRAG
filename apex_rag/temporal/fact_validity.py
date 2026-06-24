@@ -79,7 +79,9 @@ class FactValidityResolver:
             Facts valid at the given time.
         """
         return await self._fact_store.get_facts_at_time(
-            doc_id, as_of, tenant_context=tenant_context,
+            doc_id,
+            as_of,
+            tenant_context=tenant_context,
         )
 
     async def resolve_latest(
@@ -103,12 +105,12 @@ class FactValidityResolver:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for resolve_latest."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for resolve_latest.")
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
         if subject:
             facts = [f for f in facts if f.subject == subject]
@@ -143,19 +145,16 @@ class FactValidityResolver:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for resolve_between."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for resolve_between.")
 
         # Fetch all facts for the document, then filter by window overlap
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
         result = [
-            f
-            for f in facts
-            if f.valid_from <= end
-            and (f.valid_to is None or f.valid_to > start)
+            f for f in facts if f.valid_from <= end and (f.valid_to is None or f.valid_to > start)
         ]
         result.sort(key=lambda f: f.valid_from)
         return result
@@ -188,18 +187,14 @@ class FactValidityResolver:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for resolve_before."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for resolve_before.")
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
-        result = [
-            f
-            for f in facts
-            if f.valid_to is not None and f.valid_to <= before
-        ]
+        result = [f for f in facts if f.valid_to is not None and f.valid_to <= before]
         if subject:
             result = [f for f in result if f.subject == subject]
         result.sort(key=lambda f: f.valid_to)
@@ -231,12 +226,12 @@ class FactValidityResolver:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for resolve_after."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for resolve_after.")
 
         facts = await self._fact_store.get_facts_by_document(
-            doc_id, tenant_context=tenant_context,
+            doc_id,
+            tenant_context=tenant_context,
         )
         result = [f for f in facts if f.valid_from >= after]
         if subject:
@@ -267,7 +262,9 @@ class FactValidityResolver:
         """
         now = datetime.now(timezone.utc)
         facts = await self.resolve_at_time(
-            doc_id, now, tenant_context=tenant_context,
+            doc_id,
+            now,
+            tenant_context=tenant_context,
         )
         if subject:
             facts = [f for f in facts if f.subject == subject]
@@ -294,7 +291,9 @@ class FactValidityResolver:
             Dict mapping ``subject`` → list of facts valid at the given time.
         """
         facts = await self.resolve_at_time(
-            doc_id, as_of, tenant_context=tenant_context,
+            doc_id,
+            as_of,
+            tenant_context=tenant_context,
         )
         snapshot: dict[str, list[TemporalFact]] = {}
         for fact in facts:

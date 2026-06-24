@@ -127,7 +127,8 @@ class TemporalReasoningService:
         else:
             # Let the reasoning agent classify and handle
             temp_result = await self._reasoning_agent.solve_temporal_query(
-                query, doc_id,
+                query,
+                doc_id,
             )
             result = temp_result
 
@@ -157,7 +158,8 @@ class TemporalReasoningService:
 
         # Delegate to the reasoning agent's change detection
         result = await self._reasoning_agent.solve_temporal_query(
-            f"{query} compare", doc_id,
+            f"{query} compare",
+            doc_id,
         )
         return result
 
@@ -261,19 +263,23 @@ class TemporalReasoningService:
         change_analyzer = ChangeAnalyzer()
         state_reconstructor = StateReconstructor(self._storage)
         text_start = await state_reconstructor.reconstruct_document_state(
-            doc_id, start_date,
+            doc_id,
+            start_date,
         )
         text_end = await state_reconstructor.reconstruct_document_state(
-            doc_id, end_date,
+            doc_id,
+            end_date,
         )
         text_diff = change_analyzer.compare_versions(text_start, text_end)
 
         # Metric comparison
         metrics_start = await state_reconstructor.reconstruct_metrics(
-            doc_id, start_date,
+            doc_id,
+            start_date,
         )
         metrics_end = await state_reconstructor.reconstruct_metrics(
-            doc_id, end_date,
+            doc_id,
+            end_date,
         )
         metric_comparisons = {}
         for key in set(metrics_start.keys()) | set(metrics_end.keys()):
@@ -281,7 +287,8 @@ class TemporalReasoningService:
             v2 = metrics_end.get(key, 0.0)
             if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
                 metric_comparisons[key] = change_analyzer.compare_metrics(
-                    float(v1), float(v2),
+                    float(v1),
+                    float(v2),
                 )
 
         return {

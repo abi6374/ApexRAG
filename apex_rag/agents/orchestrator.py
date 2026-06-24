@@ -143,7 +143,8 @@ class Orchestrator:
     ) -> None:
         """Cache a query result for future identical queries."""
         await self._query_cache.set(
-            query, doc_id,
+            query,
+            doc_id,
             {
                 "answer_text": answer.answer_text,
                 "coverage": answer.coverage_guarantee,
@@ -183,12 +184,16 @@ class Orchestrator:
         """
         if tenant_context is not None:
             ac_agent = AccessControlAgent(self.navigator._storage)
-            has_access = await ac_agent.check_access(tenant_context, "read", "document", doc_tenant_id=doc_id)
+            has_access = await ac_agent.check_access(
+                tenant_context, "read", "document", doc_tenant_id=doc_id
+            )
             if not has_access:
                 logger.warning("Access Denied for user context on document %s", doc_id)
                 await ac_agent.log_audit_trail(tenant_context, "ACCESS_DENIED_READ", doc_id)
                 return None
-            await ac_agent.log_audit_trail(tenant_context, "QUERY_INITIATED", doc_id, before_state={"query": query})
+            await ac_agent.log_audit_trail(
+                tenant_context, "QUERY_INITIATED", doc_id, before_state={"query": query}
+            )
 
         iters = max_iterations if max_iterations is not None else self.max_iterations
         missing_context: str = ""
@@ -212,13 +217,12 @@ class Orchestrator:
             # 1. Plan (with missing context if applicable)
             enriched_query = query
             if missing_context:
-                enriched_query = (
-                    f"{query}\n\n[Previous attempt missing: {missing_context}]"
-                )
+                enriched_query = f"{query}\n\n[Previous attempt missing: {missing_context}]"
 
             # Use plan_query if available to support classification
             query_type = "FACTUAL"
             from apex_rag.agents.planner.agent import QueryPlannerAgent
+
             if isinstance(self.planner, QueryPlannerAgent) and hasattr(self.planner, "plan_query"):
                 planner_data = await self.planner.plan_query(enriched_query)
                 query_type = planner_data.get("query_type", "FACTUAL")
@@ -228,26 +232,31 @@ class Orchestrator:
 
             state_machine.transition_to(
                 RetrievalState.PLAN_GENERATED,
-                {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type}
+                {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type},
             )
-            trace_manager.publish(trace_id, "reasoning", "PLAN_GENERATED", {
-                "sub_queries": sub_queries,
-                "iteration": iteration,
-                "query_type": query_type
-            })
+            trace_manager.publish(
+                trace_id,
+                "reasoning",
+                "PLAN_GENERATED",
+                {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type},
+            )
 
             # 2. Navigate
             state_machine.transition_to(RetrievalState.NAVIGATION_RUNNING)
-            trace_manager.publish(trace_id, "navigation", "NAVIGATION_RUNNING", {"iteration": iteration})
+            trace_manager.publish(
+                trace_id, "navigation", "NAVIGATION_RUNNING", {"iteration": iteration}
+            )
 
             packets, resolved_sqs = await self._navigate_all(sub_queries, doc_id)
 
             # Transition to VERIFICATION_RUNNING
             state_machine.transition_to(RetrievalState.VERIFICATION_RUNNING)
-            trace_manager.publish(trace_id, "verification", "VERIFICATION_RUNNING", {
-                "iteration": iteration,
-                "packets_count": len(packets) if packets else 0
-            })
+            trace_manager.publish(
+                trace_id,
+                "verification",
+                "VERIFICATION_RUNNING",
+                {"iteration": iteration, "packets_count": len(packets) if packets else 0},
+            )
 
             # Save best effort so far
             if packets:
@@ -255,7 +264,9 @@ class Orchestrator:
 
             if not packets:
                 logger.info("[ORCHESTRATOR] No evidence retrieved — aborting.")
-                state_machine.transition_to(RetrievalState.FAILED, {"reason": "No evidence retrieved"})
+                state_machine.transition_to(
+                    RetrievalState.FAILED, {"reason": "No evidence retrieved"}
+                )
                 trace_manager.publish(trace_id, "navigation", "NAVIGATION_FAILED", {})
                 return None
 
@@ -271,7 +282,9 @@ class Orchestrator:
                     iteration,
                 )
                 state_machine.transition_to(RetrievalState.COMPLETED, {"iterations": iteration})
-                trace_manager.publish(trace_id, "critic", "CRITIC_APPROVED", {"iterations": iteration})
+                trace_manager.publish(
+                    trace_id, "critic", "CRITIC_APPROVED", {"iterations": iteration}
+                )
                 if tenant_context is not None:
                     ac_agent = AccessControlAgent(self.navigator._storage)
                     for pkt in packets:
@@ -288,7 +301,9 @@ class Orchestrator:
             )
 
             state_machine.record_retry(RetrievalState.PLAN_GENERATED)
-            state_machine.rollback_to(RetrievalState.PLAN_GENERATED, reason=f"Critic rejected, missing: {missing_context}")
+            state_machine.rollback_to(
+                RetrievalState.PLAN_GENERATED, reason=f"Critic rejected, missing: {missing_context}"
+            )
 
         logger.warning(
             "[ORCHESTRATOR] Exceeded max iterations (%d) — returning best effort.",
@@ -386,16 +401,13 @@ class Orchestrator:
                 node_id=str(uuid.uuid4()),
                 content=content_str or "Temporal reasoning results",
                 node_type=NodeType.PARAGRAPH,
-                doc_id=doc_id
+                doc_id=doc_id,
             )
             pkt = UnifiedEvidencePacket(
                 node=node,
-                temporal_metadata=TemporalMetadata(
-                    node_id=node.node_id,
-                    freshness_score=1.0
-                ),
+                temporal_metadata=TemporalMetadata(node_id=node.node_id, freshness_score=1.0),
                 retrieval_score=1.0,
-                content=node.content
+                content=node.content,
             )
             evidence_packets.append(pkt)
 
@@ -417,7 +429,7 @@ class Orchestrator:
                 prediction_set_size=len(evidence_packets),
                 causal_chain=[],
                 query=query,
-                latency_ms=round(elapsed_ms, 1)
+                latency_ms=round(elapsed_ms, 1),
             )
         trace_id = getattr(self, "trace_id", None) or f"trace-{int(time.time() * 1000)}"
         self.trace_id = trace_id
@@ -425,9 +437,13 @@ class Orchestrator:
         state_machine = RetrievalStateMachine(query_id=trace_id)
 
         # 1. Iterative retrieval (Plan → Navigate → Critic)
-        packets = await self.execute_query(query, doc_id, max_iterations=max_iterations, tenant_context=tenant_context)
+        packets = await self.execute_query(
+            query, doc_id, max_iterations=max_iterations, tenant_context=tenant_context
+        )
         if not packets:
-            state_machine.transition_to(RetrievalState.FAILED, {"reason": "No evidence retrieved in integrated run"})
+            state_machine.transition_to(
+                RetrievalState.FAILED, {"reason": "No evidence retrieved in integrated run"}
+            )
             return None
 
         # 2. Temporal scoring & enrichment
@@ -451,11 +467,16 @@ class Orchestrator:
             reasoning_chain = await reasoning_engine.build_reasoning_chain(seed_nodes)
             causal_chain.extend(reasoning_chain.edges)
             contradictions.extend(reasoning_chain.contradictions)
-            trace_manager.publish(trace_id, "graph", "REASONING_CHAIN_BUILT", {
-                "edges_count": len(reasoning_chain.edges),
-                "score": reasoning_chain.score,
-                "contradictions_count": len(reasoning_chain.contradictions)
-            })
+            trace_manager.publish(
+                trace_id,
+                "graph",
+                "REASONING_CHAIN_BUILT",
+                {
+                    "edges_count": len(reasoning_chain.edges),
+                    "score": reasoning_chain.score,
+                    "contradictions_count": len(reasoning_chain.contradictions),
+                },
+            )
 
         # 3. Temporal audit / Lineage and contradiction resolution
         state_machine.transition_to(RetrievalState.TEMPORAL_AUDIT)
@@ -467,7 +488,11 @@ class Orchestrator:
         if seed_nodes:
             active_nodes = lineage_engine.filter_obsolete_nodes(seed_nodes)
             active_ids = {n.node_id for n in active_nodes}
-            packets = [p for p in packets if p.node_id in active_ids or (p.node and p.node.node_id in active_ids)]
+            packets = [
+                p
+                for p in packets
+                if p.node_id in active_ids or (p.node and p.node.node_id in active_ids)
+            ]
 
         # Run contradiction resolver to handle conflicts
         resolver = ContradictionResolver(lineage_engine=lineage_engine)
@@ -482,16 +507,23 @@ class Orchestrator:
 
         # Call contradiction_detector if configured for mock compatibility
         if self.contradiction_detector is not None and len(packets) >= 2:
-            detected_contradictions = await self.contradiction_detector.detect_all([p.node for p in packets if p.node])
+            detected_contradictions = await self.contradiction_detector.detect_all(
+                [p.node for p in packets if p.node]
+            )
             for dc in detected_contradictions:
                 if dc not in contradictions:
                     contradictions.append(dc)
 
-        trace_manager.publish(trace_id, "temporal", "LINEAGE_AUDIT_COMPLETE", {
-            "has_conflicts": contradiction_report.has_conflicts or (len(contradictions) > 0),
-            "conflicts_count": len(contradictions),
-            "authoritative_count": len(packets)
-        })
+        trace_manager.publish(
+            trace_id,
+            "temporal",
+            "LINEAGE_AUDIT_COMPLETE",
+            {
+                "has_conflicts": contradiction_report.has_conflicts or (len(contradictions) > 0),
+                "conflicts_count": len(contradictions),
+                "authoritative_count": len(packets),
+            },
+        )
 
         mean_freshness = sum(p.freshness_score for p in packets) / len(packets) if packets else 1.0
 
@@ -533,7 +565,11 @@ class Orchestrator:
 
             calibrator = self.conformal_predictor.calibrator
             if calibrator is not None:
-                threshold = calibrator.calibrate(conformal_scores) if len(conformal_scores) >= calibrator.min_calibration_size else 0.0
+                threshold = (
+                    calibrator.calibrate(conformal_scores)
+                    if len(conformal_scores) >= calibrator.min_calibration_size
+                    else 0.0
+                )
                 if threshold > 0.0:
                     filtered, guarantee, set_size = self.conformal_predictor.predict(
                         packets, threshold
@@ -544,10 +580,12 @@ class Orchestrator:
                 else:
                     coverage_guarantee = calibrator.coverage_level
 
-        trace_manager.publish(trace_id, "conformal", "CONFORMAL_COMPLETE", {
-            "coverage_guarantee": coverage_guarantee,
-            "prediction_set_size": prediction_set_size
-        })
+        trace_manager.publish(
+            trace_id,
+            "conformal",
+            "CONFORMAL_COMPLETE",
+            {"coverage_guarantee": coverage_guarantee, "prediction_set_size": prediction_set_size},
+        )
 
         # 7. Synthesis
         state_machine.transition_to(RetrievalState.SYNTHESIS)
@@ -664,9 +702,7 @@ class Orchestrator:
         return [sq for sq in sub_queries if sq not in resolved]
 
     @staticmethod
-    def _fallback_synthesis(
-        query: str, packets: list[UnifiedEvidencePacket]
-    ) -> str:
+    def _fallback_synthesis(query: str, packets: list[UnifiedEvidencePacket]) -> str:
         """Fallback when no synthesizer is configured."""
         parts = [f"**Answer for:** {query}", ""]
         for i, pkt in enumerate(packets, 1):

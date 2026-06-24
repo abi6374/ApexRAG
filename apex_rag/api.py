@@ -405,6 +405,7 @@ class QueryResponse(BaseModel):
 
 class OrchestrateStreamRequest(BaseModel):
     """Request for the new multi-agent orchestrator streaming endpoint."""
+
     doc_id: str
     question: str
     tenant_id: str = "default"
@@ -413,6 +414,7 @@ class OrchestrateStreamRequest(BaseModel):
 
 class LLMStreamRequest(BaseModel):
     """Request for direct LLM streaming (bypasses retrieval)."""
+
     prompt: str
     temperature: float = 0.0
     max_tokens: int = 150
@@ -421,6 +423,7 @@ class LLMStreamRequest(BaseModel):
 
 class LLMGenerateRequest(BaseModel):
     """Request for non-streaming LLM generation."""
+
     prompt: str
     temperature: float = 0.0
     max_tokens: int = 150
@@ -853,7 +856,9 @@ async def llm_stream(req: LLMStreamRequest) -> StreamingResponse:
     Images can be passed as base64-encoded strings for vision-capable models.
     """
     return StreamingResponse(
-        _stream_llm_sse(req.prompt, temperature=req.temperature, max_tokens=req.max_tokens, images=req.images),
+        _stream_llm_sse(
+            req.prompt, temperature=req.temperature, max_tokens=req.max_tokens, images=req.images
+        ),
         media_type="text/event-stream",
     )
 

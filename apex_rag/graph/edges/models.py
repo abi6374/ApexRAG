@@ -63,9 +63,7 @@ class GraphEdge(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     source_id: str = Field(..., description="ID of the origin ASTNode")
     target_id: str = Field(..., description="ID of the destination ASTNode")
-    relation_type: RelationType = Field(
-        ..., description="Semantic relationship type"
-    )
+    relation_type: RelationType = Field(..., description="Semantic relationship type")
     strength: float = Field(default=0.5, ge=0.0, le=1.0)
     evidence: str = Field(default="", description="Human-readable reasoning")
     metadata: dict[str, Any] = Field(default_factory=dict)

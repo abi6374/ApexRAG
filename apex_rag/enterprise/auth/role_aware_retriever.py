@@ -138,7 +138,9 @@ class RoleAwareRetriever:
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
             await self._access_control.log_audit_trail(
-                tenant_context, "ACCESS_DENIED_READ", doc_id,
+                tenant_context,
+                "ACCESS_DENIED_READ",
+                doc_id,
             )
             return RoleAwareResult(
                 packets=[],
@@ -151,14 +153,13 @@ class RoleAwareRetriever:
         effective_doc_id = doc_id
         if as_of is not None:
             # Resolve version state at as_of — navigator handles date filtering
-            logger.info(
-                "Temporal retrieval: doc=%s as_of=%s", doc_id, as_of.isoformat()
-            )
+            logger.info("Temporal retrieval: doc=%s as_of=%s", doc_id, as_of.isoformat())
             # VersionResolver could be used here for precise version targeting
 
         # ── Step 3: Retrieval via AST Navigator ────────────────────────
         nav_result = await self._navigator.find(
-            query=query, doc_id=effective_doc_id,
+            query=query,
+            doc_id=effective_doc_id,
         )
 
         packets: list[EvidencePacket] = []
@@ -169,7 +170,8 @@ class RoleAwareRetriever:
             # ── Step 4: Role-Aware Field Filtering ─────────────────────
             # Check field-level access for sensitive fields
             masked_content = await self._access_control.mask_content(
-                tenant_context, node.content,
+                tenant_context,
+                node.content,
             )
 
             # Check node-level access
@@ -192,8 +194,7 @@ class RoleAwareRetriever:
                     tenant_id=tenant_context.tenant_id,
                     retrieval_score=nav_result.confidence,
                     verification_score=1.0 if nav_result.verified else 0.0,
-                    freshness_score=temporal_meta.freshness_score
-                    if temporal_meta else 1.0,
+                    freshness_score=temporal_meta.freshness_score if temporal_meta else 1.0,
                     temporal_metadata=temporal_meta,
                     confidence=nav_result.confidence,
                 )
@@ -219,7 +220,9 @@ class RoleAwareRetriever:
         )
 
         await self._access_control.log_audit_trail(
-            tenant_context, "QUERY_COMPLETED", doc_id,
+            tenant_context,
+            "QUERY_COMPLETED",
+            doc_id,
         )
 
         return RoleAwareResult(
@@ -252,7 +255,10 @@ class RoleAwareRetriever:
 
         for doc_id in all_docs:
             result = await self.retrieve(
-                query, doc_id, tenant_context, as_of=as_of,
+                query,
+                doc_id,
+                tenant_context,
+                as_of=as_of,
             )
             combined_packets.extend(result.packets)
             total_blocked += result.blocked_count

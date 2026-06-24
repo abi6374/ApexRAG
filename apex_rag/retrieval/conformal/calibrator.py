@@ -94,13 +94,9 @@ class ConformalCalibrator:
         min_calibration_size: int = 10,
     ) -> None:
         if not 0.0 < coverage_level < 1.0:
-            raise ValueError(
-                f"coverage_level must be in (0, 1), got {coverage_level}"
-            )
+            raise ValueError(f"coverage_level must be in (0, 1), got {coverage_level}")
         if min_calibration_size < 1:
-            raise ValueError(
-                f"min_calibration_size must be >= 1, got {min_calibration_size}"
-            )
+            raise ValueError(f"min_calibration_size must be >= 1, got {min_calibration_size}")
         self.coverage_level = coverage_level
         self.min_calibration_size = min_calibration_size
         self._last_threshold: float = 0.0
@@ -139,9 +135,7 @@ class ConformalCalibrator:
         self._last_threshold = result
         return result
 
-    def estimate_coverage(
-        self, scores: list[float], threshold: float
-    ) -> float:
+    def estimate_coverage(self, scores: list[float], threshold: float) -> float:
         """What fraction of the given scores fall ≤ threshold?
 
         This is useful for post-hoc evaluation on a test set.
@@ -175,11 +169,7 @@ class ConformalCalibrator:
         5. Synthesis Confidence
         """
         global_score = (
-            retrieval_conf
-            * verification_conf
-            * temporal_conf
-            * graph_conf
-            * synthesis_conf
+            retrieval_conf * verification_conf * temporal_conf * graph_conf * synthesis_conf
         )
         return round(global_score, 4)
 
@@ -189,7 +179,6 @@ class ConformalCalibrator:
             f"(coverage_level={self.coverage_level}, "
             f"min_calibration_size={self.min_calibration_size})"
         )
-
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -238,13 +227,9 @@ class MondorianConformalCalibrator:
         min_calibration_size: int = 10,
     ) -> None:
         if not 0.0 < coverage_level < 1.0:
-            raise ValueError(
-                f"coverage_level must be in (0, 1), got {coverage_level}"
-            )
+            raise ValueError(f"coverage_level must be in (0, 1), got {coverage_level}")
         if min_calibration_size < 1:
-            raise ValueError(
-                f"min_calibration_size must be >= 1, got {min_calibration_size}"
-            )
+            raise ValueError(f"min_calibration_size must be >= 1, got {min_calibration_size}")
         self.coverage_level = coverage_level
         self.min_calibration_size = min_calibration_size
         self._domain_scores: dict[str, list[float]] = defaultdict(list)
@@ -271,9 +256,7 @@ class MondorianConformalCalibrator:
         """
         domain_upper = domain.upper()
         if domain_upper not in VALID_DOMAINS:
-            raise ValueError(
-                f"Unknown domain '{domain}'. Valid domains: {sorted(VALID_DOMAINS)}"
-            )
+            raise ValueError(f"Unknown domain '{domain}'. Valid domains: {sorted(VALID_DOMAINS)}")
         self._domain_scores[domain_upper].extend(nonconformity_scores)
         self._fitted = False
 

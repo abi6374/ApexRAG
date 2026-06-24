@@ -97,18 +97,16 @@ _UNKNOWN_VALUES: frozenset[str] = frozenset(
 
 # Regex patterns
 _RE_CURRENCY = re.compile(
-    r"^\s*"                          # leading whitespace
-    r"([₹$€£¥])?"                    # optional currency symbol (group 1)
-    r"\s*"                           # optional whitespace
-    r"(-?\d+(?:\.\d+)?)"            # numeric value (group 2)
-    r"\s*"                           # optional whitespace
+    r"^\s*"  # leading whitespace
+    r"([₹$€£¥])?"  # optional currency symbol (group 1)
+    r"\s*"  # optional whitespace
+    r"(-?\d+(?:\.\d+)?)"  # numeric value (group 2)
+    r"\s*"  # optional whitespace
     r"([kKmMbBtTlLcCrR]|Cr|cr|CR)?"  # optional multiplier suffix (group 3)
-    r"\s*$"                          # trailing whitespace
+    r"\s*$"  # trailing whitespace
 )
 
-_RE_PERCENTAGE = re.compile(
-    r"^\s*(-?\d+(?:\.\d+)?)\s*%\s*$"
-)
+_RE_PERCENTAGE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*%\s*$")
 
 _RE_TEXT_MULTIPLIER = re.compile(
     r"^\s*(-?\d+(?:\.\d+)?)\s+("
@@ -173,9 +171,7 @@ class MetricValueParser:
             num = float(m.group(2))
             suffix = m.group(3)
 
-            multiplier = MetricValueParser._resolve_multiplier(
-                suffix, symbol == "₹"
-            )
+            multiplier = MetricValueParser._resolve_multiplier(suffix, symbol == "₹")
             return ParsedMetric(
                 numeric_value=num * multiplier,
                 original_value=value,

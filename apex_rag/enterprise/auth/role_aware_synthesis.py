@@ -92,7 +92,8 @@ class RoleAwareFilter:
 
             # 3. Apply field-level masking to content
             masked_content = await self._access_control.mask_content(
-                context, pkt.content,
+                context,
+                pkt.content,
             )
             if pkt.node is not None:
                 pkt.node.content = masked_content

@@ -43,9 +43,7 @@ class ConformalPredictor:
         scorer: NonconformityScorer | None = None,
         calibrator: ConformalCalibrator | None = None,
     ) -> None:
-        self.scorer = scorer or NonconformityScorer(
-            strategy=NonconformityStrategy.ENSEMBLE
-        )
+        self.scorer = scorer or NonconformityScorer(strategy=NonconformityStrategy.ENSEMBLE)
         self.calibrator = calibrator or ConformalCalibrator(coverage_level=0.90)
 
     # ── Phase 1: Calibration ──────────────────────────────────────────
@@ -98,7 +96,9 @@ class ConformalPredictor:
 
         # Filter by threshold
         filtered: list[CoreEvidencePacket | UnifiedEvidencePacket] = [
-            pkt for pkt, s in zip(packets, scores, strict=False) if s <= threshold  # type: ignore[misc]
+            pkt
+            for pkt, s in zip(packets, scores, strict=False)
+            if s <= threshold  # type: ignore[misc]
         ]
 
         return (
@@ -131,8 +131,4 @@ class ConformalPredictor:
         return self.predict(packets, threshold)
 
     def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}"
-            f"(scorer={self.scorer!r}, "
-            f"calibrator={self.calibrator!r})"
-        )
+        return f"{type(self).__name__}(scorer={self.scorer!r}, calibrator={self.calibrator!r})"

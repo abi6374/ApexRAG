@@ -12,6 +12,7 @@ Components:
     - HistoricalStateEngine:      Delta computation and state traversal over time
     - SnapshotEngine:             Lazy snapshot construction and caching
 """
+
 from apex_rag.temporal.analyzers import ChangeAnalyzer, TrendAnalyzer
 
 # Sprint 6 — Chain Reconciliation

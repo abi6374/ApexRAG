@@ -11,6 +11,7 @@ from apex_rag.models.unified_models import ASTNode, NodeType
 
 logger = logging.getLogger("apex_rag.temporal.retriever")
 
+
 class TemporalRetriever:
     """
     TemporalRetriever handles querying nodes and document states across time dimensions.
@@ -32,8 +33,7 @@ class TemporalRetriever:
         try:
             async with self.storage.session() as session:
                 stmt = select(NodeVersionRow).where(
-                    NodeVersionRow.doc_id == doc_id,
-                    NodeVersionRow.is_current
+                    NodeVersionRow.doc_id == doc_id, NodeVersionRow.is_current
                 )
                 result = await session.execute(stmt)
                 return result.scalars().all()
@@ -50,7 +50,7 @@ class TemporalRetriever:
                 stmt = select(NodeVersionRow).where(
                     NodeVersionRow.doc_id == doc_id,
                     NodeVersionRow.effective_from <= as_of,
-                    (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of))
+                    (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of)),
                 )
                 result = await session.execute(stmt)
                 return result.scalars().all()
@@ -59,6 +59,7 @@ class TemporalRetriever:
 
     async def _get_node_version_as_of(self, node_id: str, as_of: datetime) -> Any:
         import inspect
+
         if not hasattr(self.storage, "get_node_version_as_of"):
             return None
         res = self.storage.get_node_version_as_of(node_id, as_of)
@@ -70,6 +71,7 @@ class TemporalRetriever:
 
     async def _get_node_versions(self, node_id: str) -> list:
         import inspect
+
         if not hasattr(self.storage, "get_node_versions"):
             return []
         res = self.storage.get_node_versions(node_id)
@@ -79,7 +81,9 @@ class TemporalRetriever:
             return []
         return res or []
 
-    async def _get_nodes_in_range_rows(self, doc_id: str, start_date: datetime, end_date: datetime) -> list:
+    async def _get_nodes_in_range_rows(
+        self, doc_id: str, start_date: datetime, end_date: datetime
+    ) -> list:
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -89,7 +93,10 @@ class TemporalRetriever:
                 stmt = select(NodeVersionRow).where(
                     NodeVersionRow.doc_id == doc_id,
                     NodeVersionRow.effective_from <= end_date,
-                    (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to >= start_date))
+                    (
+                        NodeVersionRow.effective_to.is_(None)
+                        | (NodeVersionRow.effective_to >= start_date)
+                    ),
                 )
                 result = await session.execute(stmt)
                 return result.scalars().all()
@@ -104,8 +111,7 @@ class TemporalRetriever:
         try:
             async with self.storage.session() as session:
                 stmt = select(NodeVersionRow).where(
-                    NodeVersionRow.doc_id == doc_id,
-                    NodeVersionRow.effective_from < before_date
+                    NodeVersionRow.doc_id == doc_id, NodeVersionRow.effective_from < before_date
                 )
                 result = await session.execute(stmt)
                 return result.scalars().all()
@@ -120,8 +126,7 @@ class TemporalRetriever:
         try:
             async with self.storage.session() as session:
                 stmt = select(NodeVersionRow).where(
-                    NodeVersionRow.doc_id == doc_id,
-                    NodeVersionRow.effective_from > after_date
+                    NodeVersionRow.doc_id == doc_id, NodeVersionRow.effective_from > after_date
                 )
                 result = await session.execute(stmt)
                 return result.scalars().all()

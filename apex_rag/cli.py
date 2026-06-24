@@ -125,7 +125,7 @@ def format_table(rows: list[list[str]], *, headers: list[str] | None = None) -> 
         for h in headers:
             table.add_column(h, style="bold cyan", no_wrap=True)
     else:
-        for _ in (rows[0] if rows else []):
+        for _ in rows[0] if rows else []:
             table.add_column(no_wrap=True)
     for row in rows:
         table.add_row(*row)
@@ -328,7 +328,9 @@ async def repl_loop(index: Any) -> None:
                         current_doc = name
                         format_success(f"Switched to doc_id={name}")
                     else:
-                        format_warning(f"Document '{name}' not found.  Use !list to see available docs.")
+                        format_warning(
+                            f"Document '{name}' not found.  Use !list to see available docs."
+                        )
                 except Exception as exc:
                     format_error(exc)
 
@@ -473,12 +475,14 @@ def doctor_check() -> None:
     if not issues:
         format_success("All checks passed — your environment is ready!")
     else:
-        console.print(Panel(
-            "\n".join(f"  • {issue}" for issue in issues),
-            title="[bold yellow]Issues Found[/]",
-            border_style="yellow",
-            box=box.ROUNDED,
-        ))
+        console.print(
+            Panel(
+                "\n".join(f"  • {issue}" for issue in issues),
+                title="[bold yellow]Issues Found[/]",
+                border_style="yellow",
+                box=box.ROUNDED,
+            )
+        )
         console.print()
         if issues:
             format_info("Run:  pip install apex-rag[all]  to install all recommended packages.")

@@ -118,9 +118,8 @@ class SnapshotEngine:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for get_snapshot."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for get_snapshot.")
 
         cache_key = as_of.isoformat()
 
@@ -140,10 +139,13 @@ class SnapshotEngine:
         # 3. Compute lazy snapshot from scratch (Principle 5)
         logger.debug(
             "No cached/persisted snapshot for %s @ %s, building lazily...",
-            doc_id, cache_key,
+            doc_id,
+            cache_key,
         )
         state = await self._historical.get_state_at(
-            doc_id, as_of, tenant_context=tenant_context,
+            doc_id,
+            as_of,
+            tenant_context=tenant_context,
         )
 
         # Cache in memory
@@ -187,7 +189,10 @@ class SnapshotEngine:
         if baseline is not None:
             # Compute delta and apply to baseline
             delta = await self._historical.compute_delta(
-                doc_id, start, end, tenant_context=tenant_context,
+                doc_id,
+                start,
+                end,
+                tenant_context=tenant_context,
             )
             patch = StatePatch(
                 doc_id=doc_id,
@@ -230,15 +235,16 @@ class SnapshotEngine:
         """
         if not tenant_context:
             from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-            raise MissingTenantContextError(
-                "tenant_context is required for create_snapshot."
-            )
+
+            raise MissingTenantContextError("tenant_context is required for create_snapshot.")
 
         as_of = as_of or datetime.now(timezone.utc)
 
         # Build state
         state = await self._historical.get_state_at(
-            doc_id, as_of, tenant_context=tenant_context,
+            doc_id,
+            as_of,
+            tenant_context=tenant_context,
         )
 
         # Update in-memory cache
@@ -286,7 +292,9 @@ class SnapshotEngine:
         """
         # Get baseline state
         baseline = await self.get_snapshot(
-            delta.doc_id, delta.base_as_of, tenant_context=tenant_context,
+            delta.doc_id,
+            delta.base_as_of,
+            tenant_context=tenant_context,
         )
 
         # Apply delta
@@ -454,7 +462,9 @@ class SnapshotEngine:
                 session.add(row)
                 logger.debug(
                     "Persisted snapshot for %s @ %s (%d facts)",
-                    doc_id, as_of.isoformat(), len(state),
+                    doc_id,
+                    as_of.isoformat(),
+                    len(state),
                 )
         except Exception as exc:
             logger.warning("Failed to persist snapshot: %s", exc)

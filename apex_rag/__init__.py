@@ -10,6 +10,7 @@ Basic usage:
     >>>     doc_id = await index.ingest("report.pdf")
     >>>     answer = await index.orchestrate_query("What is Q3 revenue?", doc_id)
 """
+
 # ruff: noqa: E402
 import logging
 from importlib.metadata import PackageNotFoundError, version

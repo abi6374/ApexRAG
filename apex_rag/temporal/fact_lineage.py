@@ -111,8 +111,7 @@ class LineageValidator:
         """
         if await self.detect_cycle(fact_id, max_depth):
             raise ValueError(
-                f"Fact {fact_id} participates in a cycle.  "
-                f"Lineage must be a DAG (Principle 3)."
+                f"Fact {fact_id} participates in a cycle.  Lineage must be a DAG (Principle 3)."
             )
 
     async def _would_create_cycle(
@@ -275,7 +274,8 @@ class FactLineageEngine:
         while current_id and current_id not in visited:
             visited.add(current_id)
             fact = await self._fact_store.get_fact(
-                current_id, tenant_context=tenant_context,
+                current_id,
+                tenant_context=tenant_context,
             )
             if fact is None:
                 return None
@@ -360,7 +360,8 @@ class FactLineageEngine:
         while current_id and current_id not in visited:
             visited.add(current_id)
             fact = await self._fact_store.get_fact(
-                current_id, tenant_context=tenant_context,
+                current_id,
+                tenant_context=tenant_context,
             )
             if fact is None:
                 break
@@ -369,7 +370,8 @@ class FactLineageEngine:
 
         # Walk forward to descendants
         descendants = await self.find_descendants(
-            fact_id, tenant_context=tenant_context,
+            fact_id,
+            tenant_context=tenant_context,
         )
         for d in descendants:
             all_facts[d.fact_id] = d
@@ -405,7 +407,8 @@ class FactLineageEngine:
         while current_id and current_id not in visited:
             visited.add(current_id)
             fact = await self._fact_store.get_fact(
-                current_id, tenant_context=tenant_context,
+                current_id,
+                tenant_context=tenant_context,
             )
             if fact is None:
                 break
@@ -437,7 +440,8 @@ class FactLineageEngine:
             return []
 
         source = await self._fact_store.get_fact(
-            fact_id, tenant_context=tenant_context,
+            fact_id,
+            tenant_context=tenant_context,
         )
         if source is None:
             return []
@@ -446,7 +450,8 @@ class FactLineageEngine:
 
         # Same document
         doc_facts = await self._fact_store.get_facts_by_document(
-            source.source_document_id, tenant_context=tenant_context,
+            source.source_document_id,
+            tenant_context=tenant_context,
         )
         for f in doc_facts:
             related[f.fact_id] = f

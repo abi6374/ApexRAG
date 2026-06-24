@@ -62,8 +62,7 @@ class LLMProvider(Protocol):
         temperature: float = 0.0,
         max_tokens: int = 150,
         images: list[str] | None = None,
-    ) -> str:
-        ...
+    ) -> str: ...
 
     async def stream_generate(
         self,
@@ -80,6 +79,4 @@ class LLMProvider(Protocol):
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         ...
-        raise NotImplementedError(
-            f"{type(self).__name__} does not support embeddings"
-        )
+        raise NotImplementedError(f"{type(self).__name__} does not support embeddings")

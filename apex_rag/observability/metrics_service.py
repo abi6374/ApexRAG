@@ -199,9 +199,7 @@ class MetricsService:
         lines.append("# HELP apex_rag_tenant_queries_total Total queries per tenant")
         lines.append("# TYPE apex_rag_tenant_queries_total counter")
         for tenant_id, count in stats["tenant_queries"].items():
-            lines.append(
-                f'apex_rag_tenant_queries_total{{tenant="{tenant_id}"}} {count}'
-            )
+            lines.append(f'apex_rag_tenant_queries_total{{tenant="{tenant_id}"}} {count}')
 
         return "\n".join(lines) + "\n"
 
@@ -250,7 +248,16 @@ class MetricsService:
     def _histogram_stats(values: list[float]) -> dict[str, float]:
         """Compute histogram statistics from a list of values."""
         if not values:
-            return {"count": 0, "sum": 0.0, "avg": 0.0, "min": 0.0, "max": 0.0, "p50": 0.0, "p95": 0.0, "p99": 0.0}
+            return {
+                "count": 0,
+                "sum": 0.0,
+                "avg": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+                "p99": 0.0,
+            }
         sorted_vals = sorted(values)
         n = len(sorted_vals)
         return {

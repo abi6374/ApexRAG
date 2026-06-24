@@ -96,10 +96,7 @@ async def _cmd_serve(args: argparse.Namespace) -> None:
         import uvicorn
     except ImportError:
         format_error(
-            ImportError(
-                "'serve' requires extra dependencies.\n"
-                "Install:  pip install apex-rag[web]"
-            )
+            ImportError("'serve' requires extra dependencies.\nInstall:  pip install apex-rag[web]")
         )
         sys.exit(1)
 
@@ -131,6 +128,7 @@ async def _cmd_ingest(args: argparse.Namespace) -> None:
     file_path = Path(args.file)
     if not file_path.exists():
         from apex_rag.exceptions import FileValidationError
+
         format_error(
             FileValidationError(
                 message=f"File not found: {file_path}",
@@ -256,12 +254,14 @@ async def _cmd_list(_args: argparse.Namespace | None = None) -> None:
         for doc_id in docs:
             try:
                 stats = await index.get_stats(doc_id)
-                rows.append([
-                    doc_id,
-                    str(stats["total_nodes"]),
-                    str(stats["leaf_count"]),
-                    str(stats["max_depth"]),
-                ])
+                rows.append(
+                    [
+                        doc_id,
+                        str(stats["total_nodes"]),
+                        str(stats["leaf_count"]),
+                        str(stats["max_depth"]),
+                    ]
+                )
             except Exception:
                 rows.append([doc_id, "—", "—", "—"])
 
@@ -271,6 +271,7 @@ async def _cmd_list(_args: argparse.Namespace | None = None) -> None:
 async def _cmd_info(_args: argparse.Namespace | None = None) -> None:
     """Show system information."""
     from apex_rag.cli import _print_system_info
+
     _print_system_info()
 
 

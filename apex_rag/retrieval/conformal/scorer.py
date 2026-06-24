@@ -89,9 +89,7 @@ class NonconformityScorer:
             return self._ensemble(packet, max_rank)
         raise ValueError(f"Unknown strategy: {self.strategy}")
 
-    def score_many(
-        self, packets: list[CoreEvidencePacket]
-    ) -> list[float]:
+    def score_many(self, packets: list[CoreEvidencePacket]) -> list[float]:
         """Compute nonconformity scores for a batch of packets.
 
         Args:
@@ -166,15 +164,12 @@ class NonconformityScorer:
     ) -> float:
         """Weighted sum of all three base strategies."""
         raw = (
-            self._inverse_retrieval(packet) * self.weights.get(
-                NonconformityStrategy.INVERSE_RETRIEVAL.value, 0.4
-            )
-            + self._verification_gap(packet) * self.weights.get(
-                NonconformityStrategy.VERIFICATION_GAP.value, 0.35
-            )
-            + self._rank_based(packet, max_rank) * self.weights.get(
-                NonconformityStrategy.RANK_BASED.value, 0.25
-            )
+            self._inverse_retrieval(packet)
+            * self.weights.get(NonconformityStrategy.INVERSE_RETRIEVAL.value, 0.4)
+            + self._verification_gap(packet)
+            * self.weights.get(NonconformityStrategy.VERIFICATION_GAP.value, 0.35)
+            + self._rank_based(packet, max_rank)
+            * self.weights.get(NonconformityStrategy.RANK_BASED.value, 0.25)
         )
         return max(0.0, raw)
 

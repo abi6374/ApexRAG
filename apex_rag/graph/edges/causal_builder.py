@@ -36,8 +36,7 @@ logger = logging.getLogger("apex_rag.graph.causal_builder")
 class Embedder(Protocol):
     """Minimal embedder interface used by the semantic strategy."""
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        ...
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -118,6 +117,7 @@ class CausalGraphBuilder:
         # Tenant isolation: validate all nodes belong to the same tenant
         if tenant_id and self._storage is not None and hasattr(self._storage, "session"):
             from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
+
             try:
                 validator = TenantIsolationValidator(self._storage)
                 node_ids = [n.node_id for n in nodes]
@@ -126,6 +126,7 @@ class CausalGraphBuilder:
                 # If validation fails (e.g. storage not fully wired),
                 # log and defer to persistence-layer enforcement
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "Tenant validation skipped in CausalGraphBuilder: %s",
                     exc_info=True,
@@ -133,21 +134,13 @@ class CausalGraphBuilder:
         coros: list[asyncio.Task[list[GraphEdge]]] = []
 
         if include_structural:
-            coros.append(
-                asyncio.ensure_future(self._run("structural", nodes))
-            )
+            coros.append(asyncio.ensure_future(self._run("structural", nodes)))
         if include_temporal and self._temporal_llm is not None:
-            coros.append(
-                asyncio.ensure_future(self._run("temporal", nodes))
-            )
+            coros.append(asyncio.ensure_future(self._run("temporal", nodes)))
         if include_semantic and self._embedder is not None:
-            coros.append(
-                asyncio.ensure_future(self._run("semantic", nodes))
-            )
+            coros.append(asyncio.ensure_future(self._run("semantic", nodes)))
         if include_llm and self._llm is not None:
-            coros.append(
-                asyncio.ensure_future(self._run("llm", nodes))
-            )
+            coros.append(asyncio.ensure_future(self._run("llm", nodes)))
 
         if not coros:
             logger.warning("No strategies enabled — no edges discovered.")
@@ -221,9 +214,7 @@ class CausalGraphBuilder:
 
     # ── Strategy: Temporal ─────────────────────────────────────────────
 
-    async def build_temporal(
-        self, nodes: list[ASTNode]
-    ) -> list[GraphEdge]:
+    async def build_temporal(self, nodes: list[ASTNode]) -> list[GraphEdge]:
         """Discover temporal-override edges.
 
         For nodes with a known ``source_date``, pairs that are topically
@@ -345,9 +336,7 @@ class CausalGraphBuilder:
         candidates: list[tuple[ASTNode, ASTNode]] = []
         for i in range(len(embed_nodes)):
             for j in range(i + 1, len(embed_nodes)):
-                sim = self._cosine_similarity(
-                    embed_nodes[i].embedding, embed_nodes[j].embedding
-                )
+                sim = self._cosine_similarity(embed_nodes[i].embedding, embed_nodes[j].embedding)
                 if sim > 0.65:
                     candidates.append((embed_nodes[i], embed_nodes[j]))
 

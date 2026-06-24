@@ -120,11 +120,7 @@ class TemporalAuditAgent:
             if score < 0.1:
                 stale.append((pkt, score))
 
-        mean_freshness = (
-            sum(freshness_scores) / len(freshness_scores)
-            if freshness_scores
-            else 1.0
-        )
+        mean_freshness = sum(freshness_scores) / len(freshness_scores) if freshness_scores else 1.0
 
         logger.info(
             "TemporalAudit: mean_freshness=%.4f, stale=%d/%d",
