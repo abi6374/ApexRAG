@@ -35,11 +35,22 @@ async def storage() -> AsyncGenerator[ApexStorage, None]:
     Uses ``ApexStorage.create()`` which has production-grade schema
     creation that gracefully handles SQLite's lack of INDEX IF NOT EXISTS.
     """
+    import os
     import tempfile
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
-    yield storage
+    try:
+        yield storage
+    finally:
+        try:
+            await storage.engine.dispose()
+        except Exception:
+            pass
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
 
 
 @pytest_asyncio.fixture

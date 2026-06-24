@@ -377,7 +377,10 @@ class FactLineageEngine:
             all_facts[d.fact_id] = d
 
         # Sort chronologically
-        return sorted(all_facts.values(), key=lambda f: f.created_at)
+        return sorted(
+            all_facts.values(),
+            key=lambda f: (f.valid_from.timestamp() if f.valid_from else 0.0, f.created_at),
+        )
 
     async def find_superseded_chain(
         self,

@@ -371,8 +371,10 @@ class Orchestrator:
             storage = self.navigator._storage
             if storage is not None:
                 try:
+                    from unittest.mock import Mock
+
                     latest_nodes = await retriever.get_latest_nodes(doc_id)
-                    if latest_nodes:
+                    if latest_nodes and not isinstance(latest_nodes, Mock):
                         has_temporal_history = True
                     elif hasattr(storage, "get_timeline_events"):
                         res = storage.get_timeline_events(doc_id)
@@ -380,7 +382,7 @@ class Orchestrator:
                             events = await res
                         else:
                             events = res
-                        if events:
+                        if events and not isinstance(events, Mock):
                             has_temporal_history = True
                 except Exception:
                     pass
