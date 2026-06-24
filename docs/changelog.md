@@ -1,6 +1,6 @@
 # Changelog
 
-See the full [`CHANGELOG.md`](https://github.com/abinivas-17/apex-rag/blob/main/CHANGELOG.md)
+See the full [`CHANGELOG.md`](https://github.com/abi6374/apexrag/blob/main/CHANGELOG.md)
 on GitHub for the complete changelog.
 
 ## Latest Release — [0.1.8]
@@ -22,4 +22,4 @@ on GitHub for the complete changelog.
 - Increased default `max_concurrent_summaries` to 10
 - Enhanced CI with matrix testing and linting
 
-[Full changelog on GitHub](https://github.com/abinivas-17/apex-rag/blob/main/CHANGELOG.md)
+[Full changelog on GitHub](https://github.com/abi6374/apexrag/blob/main/CHANGELOG.md)

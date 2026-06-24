@@ -1,8 +1,8 @@
 site_name: ApexRAG
 site_description: Production-grade, local-first Agentic RAG library using structural document navigation.
-site_url: https://abinivas-17.github.io/apex-rag
-repo_url: https://github.com/abinivas-17/apex-rag
-repo_name: abinivas-17/apex-rag
+site_url: https://abi6374.github.io/apexrag
+repo_url: https://github.com/abi6374/apexrag
+repo_name: abi6374/apexrag
 edit_uri: edit/main/docs/
 
 theme:
@@ -83,12 +83,12 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/abinivas-17/apex-rag
+      link: https://github.com/abi6374/apexrag
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/apex-rag/
 
 copyright: |
-  &copy; 2025 <a href="https://github.com/abinivas-17">G S Abinivas</a>
+  &copy; 2025 <a href="https://github.com/abi6374">G S Abinivas</a>
 
 nav:
   - Home: index.md

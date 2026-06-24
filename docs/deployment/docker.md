@@ -6,7 +6,7 @@ Deploy ApexRAG in production using Docker Compose.
 
 ```bash
 # Clone and deploy
-git clone https://github.com/abinivas-17/apex-rag.git
+git clone https://github.com/abi6374/apexrag.git
 cd apex-rag
 docker compose up -d
 

@@ -22,7 +22,7 @@ This installs only 5 lightweight dependencies: sqlalchemy, aiosqlite, markitdown
 ## Development Install
 
 ```bash
-git clone https://github.com/abinivas-17/apex-rag.git
+git clone https://github.com/abi6374/apexrag.git
 cd apex-rag
 
 # Option A: use the Makefile (recommended)
@@ -33,7 +33,7 @@ make install-all        # Installs with ALL extras (postgres, docling, etc.)
 pip install -e ".[dev,web]"
 ```
 
-A full reference of Makefile commands is available in the [Contributing Guide](../contributing.md) and on GitHub as [`CONTRIBUTING.md`](https://github.com/abinivas-17/apex-rag/blob/main/CONTRIBUTING.md).
+A full reference of Makefile commands is available in the [Contributing Guide](../contributing.md) and on GitHub as [`CONTRIBUTING.md`](https://github.com/abi6374/apexrag/blob/main/CONTRIBUTING.md).
 
 ## Docker (Production)
 

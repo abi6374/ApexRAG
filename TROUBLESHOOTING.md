@@ -279,5 +279,5 @@ For unsupported formats:
 If you're still stuck:
 
 - 📖 Read the full [README](README.md) and [User Manual](USER_MANUAL.md)
-- 🐛 Open an issue on [GitHub](https://github.com/abinivas-17/apex-rag/issues)
+- 🐛 Open an issue on [GitHub](https://github.com/abi6374/apexrag/issues)
 - 📧 Check the [CHANGELOG](CHANGELOG.md) for recent changes

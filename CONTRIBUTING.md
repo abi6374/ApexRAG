@@ -6,7 +6,7 @@ Thank you for considering contributing! We welcome bug reports, feature suggesti
 
 ```bash
 # Clone the repository
-git clone https://github.com/abinivas-17/apex-rag.git
+git clone https://github.com/abi6374/apexrag.git
 cd apex-rag
 
 # Install in dev mode with all extras (or use `make install-all`)

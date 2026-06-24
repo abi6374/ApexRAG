@@ -59,7 +59,7 @@ pip install apex-rag[telemetry]        # + OpenTelemetry tracing
 pip install apex-rag[all]              # Everything
 
 > **Development:** Clone the repo, then run `make install` for a full dev setup
-> (see [`CONTRIBUTING.md`](https://github.com/abinivas-17/apex-rag/blob/main/CONTRIBUTING.md)).
+> (see [`CONTRIBUTING.md`](https://github.com/abi6374/apexrag/blob/main/CONTRIBUTING.md)).
 ```
 
 ## Key Features

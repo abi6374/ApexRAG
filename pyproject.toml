@@ -96,9 +96,9 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/abinivas-17/apex-rag"
-Repository = "https://github.com/abinivas-17/apex-rag"
-Issues = "https://github.com/abinivas-17/apex-rag/issues"
+Homepage = "https://github.com/abi6374/apexrag"
+Repository = "https://github.com/abi6374/apexrag"
+Issues = "https://github.com/abi6374/apexrag/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["apex_rag"]
