@@ -186,9 +186,8 @@ jobs:
           
           echo "Current package version: $VERSION"
           
-          # Check if tag already exists on remote
-          git fetch --tags
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+          # Check if tag already exists on remote using git ls-remote
+          if [ -n "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]; then
             echo "Version v$VERSION already exists as a tag. Skipping deployment."
             echo "should_publish=false" >> $GITHUB_OUTPUT
           else
