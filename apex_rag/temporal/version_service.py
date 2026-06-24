@@ -17,11 +17,11 @@ Key design:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import logging
-import uuid
-from datetime import datetime, timezone
 from typing import Any
+import uuid
 
 from sqlalchemy import select, update
 
@@ -192,7 +192,7 @@ class TemporalVersionService:
         doc_id: str,
         tenant_id: str,
         source_timestamp: datetime | None,
-        approval_timestamp: datetime | None,
+        _approval_timestamp: datetime | None,
         validity_status: str,
         content_hash: str,
         now: datetime,

@@ -202,22 +202,22 @@ class TemporalReasoningService:
         chain = await self._version_resolver.get_lineage_chain(node_id)
         return [
             {
-                "lineage_id": l.lineage_id,
-                "source_version_id": l.source_version_id,
-                "target_version_id": l.target_version_id,
-                "lineage_type": l.lineage_type,
-                "strength": l.strength,
-                "evidence": l.evidence,
-                "created_at": l.created_at.isoformat() if l.created_at else None,
+                "lineage_id": entry.lineage_id,
+                "source_version_id": entry.source_version_id,
+                "target_version_id": entry.target_version_id,
+                "lineage_type": entry.lineage_type,
+                "strength": entry.strength,
+                "evidence": entry.evidence,
+                "created_at": entry.created_at.isoformat() if entry.created_at else None,
             }
-            for l in chain
+            for entry in chain
         ]
 
     # ── Internal methods ───────────────────────────────────────────────
 
     async def _answer_as_of(
         self,
-        query: str,
+        _query: str,
         doc_id: str,
         as_of: datetime,
     ) -> dict[str, Any]:
@@ -245,7 +245,7 @@ class TemporalReasoningService:
 
     async def _answer_range(
         self,
-        query: str,
+        _query: str,
         doc_id: str,
         start_date: datetime,
         end_date: datetime,

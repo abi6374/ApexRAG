@@ -35,9 +35,9 @@ Usage:
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 from typing import Any
+import uuid
 
 from pydantic import BaseModel, Field
 
@@ -155,7 +155,7 @@ class SnapshotDelta(BaseModel):
         merged_subjects.update(self.modified_subjects)
         merged_subjects.update(other.modified_subjects)
         # Remove subjects that were removed in the combined range
-        for subj in list(merged_subjects):
+        for _subj in list(merged_subjects):
             # Check if any fact with this subject was removed and not re-added
             pass  # Too complex for simple merge; leave for caller
 

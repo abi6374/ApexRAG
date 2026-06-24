@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
@@ -25,7 +24,6 @@ from apex_rag.ingestion.apex_storage import (
 )
 from apex_rag.models.unified_models import (
     ASTNode,
-    NodeType,
     TemporalNodeVersion,
     VersionLineage,
 )
@@ -56,7 +54,7 @@ class VersionResolver:
         self,
         node_id: str,
         *,
-        tenant_id: str = "default",
+        _tenant_id: str = "default",
     ) -> TemporalNodeVersion | None:
         """Resolve the latest current version of a node.
 
@@ -86,7 +84,7 @@ class VersionResolver:
         node_id: str,
         as_of: datetime,
         *,
-        tenant_id: str = "default",
+        _tenant_id: str = "default",
     ) -> TemporalNodeVersion | None:
         """Resolve the node version that was active at a specific datetime.
 
