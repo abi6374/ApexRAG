@@ -1,149 +1,188 @@
 name: CI/CD Pipeline
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  release:
-    types: [published]
+push:
+branches: ["main"]
+pull_request:
+branches: ["main"]
+release:
+types: [published]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+group: ${{ github.workflow }}-${{ github.ref }}
+cancel-in-progress: true
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: "pip"
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install ruff mypy
-    - name: Run Ruff linter
-      run: ruff check --output-format=github apex_rag/
-    - name: Check formatting with Ruff
-      run: ruff format --check apex_rag/
-    - name: Run mypy type checker
-      run: mypy apex_rag/ --ignore-missing-imports --python-version=3.10
-      continue-on-error: true  # Non-blocking for now; aim to make it strict
+lint:
+runs-on: ubuntu-latest
 
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: "pip"
-    - name: Install all dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev,web,telemetry]"
-    - name: Run Pytest (core + API + edge cases + benchmarks)
-      run: |
-        pytest -v tests/ --tb=short --cov=apex_rag --cov-report=term-missing
-    - name: Quick import check (all extras)
-      run: |
-        python -c "from apex_rag.api import app; print('✅ Web extras import OK')"
-        python -c "from apex_rag.search import EmbeddingsEngine; print('✅ Vectors import OK')"
-        python -c "from apex_rag.telemetry import setup_telemetry, query_metrics; print('✅ Telemetry import OK')"
-        python -c "from apex_rag.exceptions import ApexRAGError, DocumentNotFoundError; print('✅ Exceptions import OK')"
+```
+steps:
+  - uses: actions/checkout@v4
 
-  changelog:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    - name: Check CHANGELOG was updated
-      shell: bash
-      run: |
-        BASE="${{ github.event.pull_request.base.sha }}"
-        if [ -z "$BASE" ]; then
-          echo "⚠️ Could not determine base SHA; skipping CHANGELOG check."
-          exit 0
-        fi
-        if ! git diff --name-only "$BASE"...HEAD | grep -q '^CHANGELOG\.md$'; then
-          echo "❌ CHANGELOG.md was not updated in this PR."
-          echo "Please add an entry describing your changes."
-          exit 1
-        fi
-        echo "✅ CHANGELOG.md was updated."
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+      cache: "pip"
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: "pip"
-    - name: Install build tools
-      run: python -m pip install build
-    - name: Build sdist and wheel
-      run: python -m build
-    - name: Verify sdist installs cleanly
-      run: |
-        SDIST=$(ls dist/*.tar.gz 2>/dev/null | head -1)
-        if [ -z "$SDIST" ]; then echo "No sdist found"; exit 1; fi
-        pip install "$SDIST"
-        python -c "import apex_rag; print(f'✅ apex-rag v{apex_rag.__version__} installed from sdist')"
+  - name: Install dependencies
+    run: |
+      python -m pip install --upgrade pip
+      pip install -e ".[dev]"
 
-  publish:
-    needs: [lint, test, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/apex-rag
-    permissions:
-      id-token: write
-      contents: write
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-    - name: Configure Git
-      run: |
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-    - name: Bump Version
-      id: bump
-      run: |
-        python scripts/bump_version.py
-    - name: Commit and Push Version Bump
-      run: |
-        NEW_VERSION="${{ steps.bump.outputs.new_version }}"
-        if [ -n "$NEW_VERSION" ]; then
-          git add pyproject.toml
-          git commit -m "Bump version to v$NEW_VERSION [skip ci]"
-          git tag "v$NEW_VERSION"
-          git push origin main --follow-tags
-        else
-          echo "No version bump detected or script failed to output version."
-          exit 1
-        fi
-    - name: Install build tools
-      run: python -m pip install build
-    - name: Build package
-      run: python -m build
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+  - name: Auto-format code
+    run: |
+      ruff format apex_rag/
+
+  - name: Run Ruff linter
+    run: |
+      ruff check apex_rag/
+
+  - name: Verify formatting
+    run: |
+      ruff format --check apex_rag/
+
+  - name: Run mypy type checker
+    run: |
+      mypy apex_rag/ --ignore-missing-imports --python-version=3.11
+    continue-on-error: true
+```
+
+test:
+runs-on: ubuntu-latest
+
+```
+strategy:
+  matrix:
+    python-version: ["3.10", "3.11", "3.12"]
+
+steps:
+  - uses: actions/checkout@v4
+
+  - name: Set up Python ${{ matrix.python-version }}
+    uses: actions/setup-python@v5
+    with:
+      python-version: ${{ matrix.python-version }}
+      cache: "pip"
+
+  - name: Install dependencies
+    run: |
+      python -m pip install --upgrade pip
+      pip install -e ".[dev,web,telemetry]"
+
+  - name: Run Pytest
+    run: |
+      pytest -v tests/ \
+        --tb=short \
+        --cov=apex_rag \
+        --cov-report=term-missing
+
+  - name: Quick import check
+    run: |
+      python -c "from apex_rag.api import app; print('Web extras import OK')"
+      python -c "from apex_rag.search import EmbeddingsEngine; print('Vectors import OK')"
+      python -c "from apex_rag.telemetry import setup_telemetry, query_metrics; print('Telemetry import OK')"
+      python -c "from apex_rag.exceptions import ApexRAGError, DocumentNotFoundError; print('Exceptions import OK')"
+```
+
+changelog:
+runs-on: ubuntu-latest
+if: github.event_name == 'pull_request'
+
+```
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+
+  - name: Check CHANGELOG was updated
+    shell: bash
+    run: |
+      BASE="${{ github.event.pull_request.base.sha }}"
+
+      if [ -z "$BASE" ]; then
+        echo "Could not determine base SHA. Skipping."
+        exit 0
+      fi
+
+      if ! git diff --name-only "$BASE"...HEAD | grep -q '^CHANGELOG\.md$'; then
+        echo "CHANGELOG.md was not updated."
+        exit 1
+      fi
+
+      echo "CHANGELOG.md updated."
+```
+
+build:
+runs-on: ubuntu-latest
+
+```
+steps:
+  - uses: actions/checkout@v4
+
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+      cache: "pip"
+
+  - name: Install build tools
+    run: |
+      python -m pip install --upgrade pip
+      pip install build
+
+  - name: Build package
+    run: |
+      python -m build
+
+  - name: Verify sdist installs cleanly
+    run: |
+      SDIST=$(ls dist/*.tar.gz | head -1)
+
+      if [ -z "$SDIST" ]; then
+        echo "No sdist found"
+        exit 1
+      fi
+
+      pip install "$SDIST"
+
+      python -c "import apex_rag; print(f'apex-rag v{apex_rag.__version__} installed successfully')"
+```
+
+publish:
+needs: [lint, test, build]
+
+```
+if: github.event_name == 'release'
+
+runs-on: ubuntu-latest
+
+environment:
+  name: pypi
+  url: https://pypi.org/p/apex-rag
+
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - uses: actions/checkout@v4
+
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+
+  - name: Install build tools
+    run: |
+      python -m pip install --upgrade pip
+      pip install build
+
+  - name: Build package
+    run: |
+      python -m build
+
+  - name: Publish to PyPI
+    uses: pypa/gh-action-pypi-publish@release/v1
+```
