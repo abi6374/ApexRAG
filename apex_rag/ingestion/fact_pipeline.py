@@ -31,24 +31,19 @@ Usage:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
-    Float,
-    ForeignKey,
     Index,
     Integer,
     String,
     Text,
     select,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage

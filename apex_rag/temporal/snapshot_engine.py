@@ -42,14 +42,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
+
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
     StateSnapshotRow,
 )
 from apex_rag.temporal.fact_store import FactStore
 from apex_rag.temporal.historical_state import HistoricalStateEngine
-from sqlalchemy import select
-
 from apex_rag.temporal.snapshot_models import SnapshotDelta, SnapshotManifest, StatePatch
 
 logger = logging.getLogger("apex_rag.temporal.snapshot_engine")

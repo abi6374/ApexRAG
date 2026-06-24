@@ -24,6 +24,8 @@ import logging
 import re
 from datetime import datetime, timezone
 
+from apex_rag.core.protocols.interfaces import LLMProvider  # noqa: TC001
+
 logger = logging.getLogger("apex_rag.temporal.extractor")
 
 
@@ -64,9 +66,7 @@ _MONTH_NAMES = {
 }
 
 
-# ── LLMProvider import ────────────────────────────────────────────────
 
-from apex_rag.core.protocols.interfaces import LLMProvider  # noqa: TC001
 
 # ═══════════════════════════════════════════════════════════════
 # TemporalExtractor

@@ -35,18 +35,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
-    Column,
     DateTime,
     Float,
     ForeignKey,
     Index,
-    Integer,
     String,
     Text,
-    delete,
     select,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage

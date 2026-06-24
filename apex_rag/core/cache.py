@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -134,7 +133,7 @@ class InMemoryCacheBackend(CacheBackend[T]):
 
     async def size(self) -> int:
         # Prune expired entries first
-        now = time.monotonic()
+        time.monotonic()
         expired = [k for k, v in self._store.items() if v.is_expired]
         for k in expired:
             self._store.pop(k, None)

@@ -116,7 +116,7 @@ class OllamaProvider:
         host: str = "http://localhost:11434",
         timeout: float = 120.0,
         embed_model: str | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> None:
         # Lazy import — ollama is a core dependency always available
         self._ollama = importlib.import_module("ollama")
@@ -183,7 +183,7 @@ class OpenAIProvider:
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
         base_url: str | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> None:
         # Lazy import — openai is an optional dependency
         import openai as openai_mod
@@ -278,7 +278,7 @@ class GroqProvider:
         self,
         model: str = "llama3-70b-8192",
         api_key: str | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> None:
         # Lazy import — groq is an optional dependency
         import groq as groq_mod
@@ -362,7 +362,7 @@ class AnthropicProvider:
         self,
         model: str = "claude-3-5-sonnet-20240620",
         api_key: str | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> None:
         # Lazy import — anthropic is an optional dependency
         import anthropic as anthropic_mod
@@ -443,7 +443,7 @@ class GeminiProvider:
         self,
         model: str = "gemini-1.5-flash",
         api_key: str | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> None:
         # Lazy import — google-generativeai is an optional dependency
         import google.generativeai as genai
@@ -527,7 +527,7 @@ class OpenRouterProvier:
         self,
         model: str = "meta-llama/llama-3-70b-instruct",
         api_key: str | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> None:
         import openai as openai_mod
         self.model = model
@@ -543,7 +543,7 @@ class OpenRouterProvier:
         *,
         temperature: float = 0.0,
         max_tokens: int = 150,
-        images: list[str] | None = None,
+        images: list[str] | None = None,  # noqa: ARG002
     ) -> str:
         # OpenRouter supports standard OpenAI format
         messages = [{"role": "user", "content": prompt}]
@@ -561,7 +561,7 @@ class OpenRouterProvier:
         *,
         temperature: float = 0.0,
         max_tokens: int = 150,
-        images: list[str] | None = None,
+        images: list[str] | None = None,  # noqa: ARG002
     ) -> AsyncGenerator[str, None]:
         messages = [{"role": "user", "content": prompt}]
         stream = await self._client.chat.completions.create(

@@ -321,11 +321,11 @@ class ApexParser:
                     markdown_text_parts.append(page.get_text())
                 doc.close()
                 markdown_text = "\n\n".join(markdown_text_parts)
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "PDF parsing requires either 'markitdown' or 'pymupdf'. "
                     "Install with: pip install markitdown"
-                )
+                ) from err
 
         # Extract PDF metadata for source_date
         if source_date is None:
@@ -361,10 +361,10 @@ class ApexParser:
         """Parse a DOCX file via *python-docx* into Markdown, then AST nodes."""
         try:
             from docx import Document
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "DOCX parsing requires 'python-docx'. Install with: pip install python-docx"
-            )
+            ) from err
 
         doc = Document(str(path))
 

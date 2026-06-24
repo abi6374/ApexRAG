@@ -29,6 +29,7 @@ Usage::
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
 from collections.abc import AsyncGenerator

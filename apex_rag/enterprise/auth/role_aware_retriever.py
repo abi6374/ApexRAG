@@ -26,16 +26,13 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
 from apex_rag.enterprise.auth.access_control import AccessControlAgent
 from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.models.unified_models import (
     AccessAuditRecord,
-    ASTNode,
     EvidencePacket,
-    TemporalMetadata,
 )
 from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
 from apex_rag.temporal.version_resolver import VersionResolver
@@ -95,7 +92,7 @@ class RoleAwareRetriever:
         tenant_context: TenantContext,
         *,
         as_of: datetime | None = None,
-        allowed_roles: list[str] | None = None,
+        allowed_roles: list[str] | None = None,  # noqa: ARG002
     ) -> RoleAwareResult:
         """Run the full role-aware retrieval pipeline.
 

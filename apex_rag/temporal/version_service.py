@@ -28,6 +28,8 @@ from sqlalchemy import select, update
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
     NodeVersionRow,
+)
+from apex_rag.ingestion.apex_storage import (
     TemporalMetadataRow as TMRow,
 )
 from apex_rag.models.unified_models import TemporalMetadata
@@ -192,7 +194,7 @@ class TemporalVersionService:
         doc_id: str,
         tenant_id: str,
         source_timestamp: datetime | None,
-        approval_timestamp: datetime | None,
+        approval_timestamp: datetime | None,  # noqa: ARG002
         validity_status: str,
         content_hash: str,
         now: datetime,

@@ -79,7 +79,11 @@ class AccessControlAgent:
                 await res
 
     async def define_custom_rule(
-        self, name: str, rule_type: str, expression: str, description: str | None = None
+        self,
+        name: str,
+        rule_type: str,
+        expression: str,  # noqa: ARG002
+        description: str | None = None,  # noqa: ARG002
     ) -> None:
         """
         Define a custom rule.
@@ -426,10 +430,9 @@ class AccessControlAgent:
                 return True
             elif role in (Roles.AUDITOR, Roles.VIEWER):
                 return True
-            elif role == Roles.GUEST:
+            elif role == Roles.GUEST and field_name in ("title", "summary", "public_metadata"):
                 # Guest allowlist: only title, summary, public_metadata
-                if field_name in ("title", "summary", "public_metadata"):
-                    return True
+                return True
 
         return False
 
@@ -448,7 +451,6 @@ class AccessControlAgent:
         masked_content = content
 
         # Guest allowlist: only title, summary, public_metadata
-        allowed_fields = {"title", "summary", "public_metadata"}
 
         for role in context.roles:
             if role == Roles.GUEST:

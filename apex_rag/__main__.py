@@ -215,7 +215,7 @@ async def _cmd_repl(args: argparse.Namespace | None = None) -> None:
         await repl_loop(index)
 
 
-async def _cmd_doctor(args: argparse.Namespace | None = None) -> None:
+async def _cmd_doctor(_args: argparse.Namespace | None = None) -> None:
     """Validate environment and configuration."""
     doctor_check()
 
@@ -239,7 +239,7 @@ async def _cmd_global_query(args: argparse.Namespace) -> None:
     console.print()
 
 
-async def _cmd_list(args: argparse.Namespace | None = None) -> None:
+async def _cmd_list(_args: argparse.Namespace | None = None) -> None:
     """List all documents."""
     from apex_rag import ApexIndex
 
@@ -268,7 +268,7 @@ async def _cmd_list(args: argparse.Namespace | None = None) -> None:
         format_table(rows, headers=["Document ID", "Nodes", "Leaves", "Depth"])
 
 
-async def _cmd_info(args: argparse.Namespace | None = None) -> None:
+async def _cmd_info(_args: argparse.Namespace | None = None) -> None:
     """Show system information."""
     from apex_rag.cli import _print_system_info
     _print_system_info()

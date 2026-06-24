@@ -60,23 +60,23 @@ class PluginManager:
         self._custom_synthesizers[name.lower()] = synth_cls
 
     # -- Resolvers --
-    def get_parser(self, extension: str) -> Optional[type[Any]]:
+    def get_parser(self, extension: str) -> type[Any] | None:
         return self._custom_parsers.get(extension.lower())
 
-    def get_verifier(self, name: str) -> Optional[type[Any]]:
+    def get_verifier(self, name: str) -> type[Any] | None:
         return self._custom_verifiers.get(name.lower())
 
-    def get_agent(self, role: str) -> Optional[type[Any]]:
+    def get_agent(self, role: str) -> type[Any] | None:
         return self._custom_agents.get(role.lower())
 
-    def get_graph_builder(self, name: str) -> Optional[type[Any]]:
+    def get_graph_builder(self, name: str) -> type[Any] | None:
         return self._custom_graph_builders.get(name.lower())
 
-    def get_storage_backend(self, name: str) -> Optional[type[Any]]:
+    def get_storage_backend(self, name: str) -> type[Any] | None:
         return self._custom_storage_backends.get(name.lower())
 
-    def get_retrieval_policy(self, name: str) -> Optional[type[Any]]:
+    def get_retrieval_policy(self, name: str) -> type[Any] | None:
         return self._custom_retrieval_policies.get(name.lower())
 
-    def get_synthesizer(self, name: str) -> Optional[type[Any]]:
+    def get_synthesizer(self, name: str) -> type[Any] | None:
         return self._custom_synthesizers.get(name.lower())

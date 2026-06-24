@@ -15,9 +15,11 @@ and evidence chains before passing everything to the synthesizer.
 
 from __future__ import annotations
 
-import time
-
 import asyncio
+import inspect
+import json
+import time
+import uuid
 
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 from apex_rag.core.cache import QueryCache
@@ -29,7 +31,11 @@ from apex_rag.graph.edges.causal_retriever import CausalRetriever
 from apex_rag.graph.reasoning_engine import GraphReasoningEngine
 from apex_rag.models.unified_models import (
     ApexAnswer,
+    NodeType,
     TemporalMetadata,
+)
+from apex_rag.models.unified_models import (
+    ASTNode as UnifiedASTNode,
 )
 from apex_rag.models.unified_models import (
     EvidencePacket as UnifiedEvidencePacket,
@@ -336,8 +342,6 @@ class Orchestrator:
             return cached
 
         # Check for temporal query using TemporalReasoningAgent
-        import json
-        import uuid
 
         from apex_rag.temporal.state_reconstructor import StateReconstructor
         from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
@@ -637,7 +641,7 @@ class Orchestrator:
         packets: list[UnifiedEvidencePacket] = []
         resolved: set[str] = set()
 
-        for i, (sq, result) in enumerate(zip(sub_queries, results, strict=False)):
+        for _i, (sq, result) in enumerate(zip(sub_queries, results, strict=False)):
             if isinstance(result, Exception):
                 logger.error("[NAVIGATE] Sub-query '%s' failed: %s", sq, result)
                 continue
