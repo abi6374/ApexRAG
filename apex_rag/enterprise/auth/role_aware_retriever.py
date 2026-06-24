@@ -92,7 +92,7 @@ class RoleAwareRetriever:
         tenant_context: TenantContext,
         *,
         as_of: datetime | None = None,
-        _allowed_roles: list[str] | None = None,
+        allowed_roles: list[str] | None = None,  # noqa: ARG002
     ) -> RoleAwareResult:
         """Run the full role-aware retrieval pipeline.
 

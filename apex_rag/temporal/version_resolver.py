@@ -54,7 +54,7 @@ class VersionResolver:
         self,
         node_id: str,
         *,
-        _tenant_id: str = "default",
+        tenant_id: str = "default",  # noqa: ARG002
     ) -> TemporalNodeVersion | None:
         """Resolve the latest current version of a node.
 
@@ -84,7 +84,7 @@ class VersionResolver:
         node_id: str,
         as_of: datetime,
         *,
-        _tenant_id: str = "default",
+        tenant_id: str = "default",  # noqa: ARG002
     ) -> TemporalNodeVersion | None:
         """Resolve the node version that was active at a specific datetime.
 

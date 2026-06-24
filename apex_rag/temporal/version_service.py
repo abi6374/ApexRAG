@@ -194,7 +194,7 @@ class TemporalVersionService:
         doc_id: str,
         tenant_id: str,
         source_timestamp: datetime | None,
-        _approval_timestamp: datetime | None,
+        approval_timestamp: datetime | None,  # noqa: ARG002
         validity_status: str,
         content_hash: str,
         now: datetime,

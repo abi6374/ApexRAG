@@ -79,7 +79,11 @@ class AccessControlAgent:
                 await res
 
     async def define_custom_rule(
-        self, name: str, rule_type: str, _expression: str, _description: str | None = None
+        self,
+        name: str,
+        rule_type: str,
+        expression: str,  # noqa: ARG002
+        description: str | None = None,  # noqa: ARG002
     ) -> None:
         """
         Define a custom rule.

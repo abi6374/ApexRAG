@@ -334,7 +334,7 @@ class ChainGapDetector:
         self,
         facts: list[TemporalFact],
         *,
-        _tenant_context: str | None = None,
+        tenant_context: str | None = None,  # noqa: ARG002
     ) -> list[ChainAnomaly]:
         """Detect missing version numbers in the chain."""
         anomalies: list[ChainAnomaly] = []

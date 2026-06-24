@@ -217,7 +217,7 @@ class TemporalReasoningService:
 
     async def _answer_as_of(
         self,
-        _query: str,
+        query: str,  # noqa: ARG002
         doc_id: str,
         as_of: datetime,
     ) -> dict[str, Any]:
@@ -245,7 +245,7 @@ class TemporalReasoningService:
 
     async def _answer_range(
         self,
-        _query: str,
+        query: str,  # noqa: ARG002
         doc_id: str,
         start_date: datetime,
         end_date: datetime,
