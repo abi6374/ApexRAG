@@ -6,7 +6,7 @@
 pip install apex-rag
 ```
 
-This installs only 5 lightweight dependencies: sqlalchemy, aiosqlite, markitdown, ollama, and rich.
+This installs only core dependencies: markitdown, sqlalchemy, aiosqlite, openai, pydantic, rich, typing-extensions, networkx, opentelemetry-api, opentelemetry-sdk, and langchain-core.
 
 ## Optional Extras
 

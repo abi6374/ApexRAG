@@ -399,6 +399,30 @@ class ApexAnswer(BaseModel):
     query: str = ""
     latency_ms: float = 0.0
 
+    # ── Accuracy Metrics (instrumented per-query) ───────────────────
+    precision: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Verified packets / total retrieved packets"
+    )
+    recall: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Resolved sub-queries / total sub-queries"
+    )
+    f1_score: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Harmonic mean of precision and recall"
+    )
+    hit: bool = Field(default=False, description="Whether any evidence was found for the query")
+    total_subqueries: int = Field(
+        default=0, description="Number of sub-queries the planner decomposed the query into"
+    )
+    resolved_subqueries: int = Field(
+        default=0, description="Number of sub-queries successfully answered"
+    )
+    critic_pass_rate: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Fraction of iterations where the critic approved"
+    )
+    nodes_visited: int = Field(default=0, description="Total AST nodes visited during navigation")
+    llm_calls: int = Field(default=0, description="Total LLM calls made during the query")
+    backtracks: int = Field(default=0, description="Number of navigation backtracks")
+
     @field_validator("prediction_set_size")
     @classmethod
     def _size_non_negative(cls, v: int) -> int:

@@ -1,15 +1,21 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock
-from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow, NodeVersionRow, StateSnapshotRow, TimelineEventRow, ChangeHistoryRow
-from apex_rag.temporal.temporal_retriever import TemporalRetriever
-from apex_rag.temporal.state_reconstructor import StateReconstructor
+
+from apex_rag.ingestion.apex_storage import (
+    ApexStorage,
+    ASTNodeRow,
+    NodeVersionRow,
+    StateSnapshotRow,
+)
 from apex_rag.temporal.analyzers import ChangeAnalyzer, TrendAnalyzer
+from apex_rag.temporal.state_reconstructor import StateReconstructor
 from apex_rag.temporal.temporal_agent import TemporalReasoningAgent
+from apex_rag.temporal.temporal_retriever import TemporalRetriever
+
 
 @pytest.mark.asyncio
 class TestTemporalIntelligence:
-
     @pytest.fixture
     async def storage(self) -> ApexStorage:
         # Create SQLite in-memory database for testing
@@ -17,11 +23,11 @@ class TestTemporalIntelligence:
 
     async def test_temporal_retriever_query_modes(self, storage: ApexStorage) -> None:
         retriever = TemporalRetriever(storage)
-        
+
         # Seed test node versions
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 1, 10, tzinfo=timezone.utc)
-        
+
         node_uuid = "4552c447-004f-420e-94cd-e55fc4bcf799"
         # Must create the parent AST node first (FK: node_versions.node_id → apex_ast_nodes.node_id)
         ast_node = ASTNodeRow(
@@ -40,7 +46,7 @@ class TestTemporalIntelligence:
             version_number=1,
             is_current=False,
             doc_id="doc-x",
-            tenant_id="tenant-1"
+            tenant_id="tenant-1",
         )
         row2 = NodeVersionRow(
             version_id="v2",
@@ -51,9 +57,9 @@ class TestTemporalIntelligence:
             version_number=2,
             is_current=True,
             doc_id="doc-x",
-            tenant_id="tenant-1"
+            tenant_id="tenant-1",
         )
-        
+
         async with storage.session() as session:
             session.add(ast_node)
             session.add(row1)
@@ -78,13 +84,13 @@ class TestTemporalIntelligence:
     async def test_state_reconstructor(self, storage: ApexStorage) -> None:
         reconstructor = StateReconstructor(storage)
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        
+
         # Seed state snapshot
         snap = StateSnapshotRow(
             snapshot_id="snap1",
             doc_id="metrics-doc",
             snapshot_date=t1,
-            snapshot_data='{"Revenue": 100000.0, "Stock": 500.0}'
+            snapshot_data='{"Revenue": 100000.0, "Stock": 500.0}',
         )
         async with storage.session() as session:
             session.add(snap)
@@ -95,7 +101,7 @@ class TestTemporalIntelligence:
 
     async def test_change_analyzer(self) -> None:
         analyzer = ChangeAnalyzer()
-        
+
         # Test metric comparison
         comp = analyzer.compare_metrics(100000.0, 120000.0)
         assert comp["difference"] == 20000.0
@@ -113,13 +119,9 @@ class TestTemporalIntelligence:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 1, 2, tzinfo=timezone.utc)
         t3 = datetime(2025, 1, 3, tzinfo=timezone.utc)
-        
-        points = [
-            (t1, 1000.0),
-            (t2, 1200.0),
-            (t3, 1500.0)
-        ]
-        
+
+        points = [(t1, 1000.0), (t2, 1200.0), (t3, 1500.0)]
+
         res = analyzer.analyze_trend(points)
         assert res["direction"] == "growth"
         assert res["percentage_change"] == 50.0

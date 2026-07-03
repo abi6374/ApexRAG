@@ -19,14 +19,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 import pytest
 
 from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.temporal.fact_extractor import FactExtractor
-from apex_rag.temporal.fact_store import TemporalFact
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -368,7 +365,9 @@ class TestFullExtractionPipeline:
         extractor = FactExtractor()
         node = make_node("Revenue was $40M. Policy must be followed. Acme Corp leads.")
         facts = await extractor.extract_from_node(
-            node, doc_id="doc-provenance", tenant_id="tenant-p",
+            node,
+            doc_id="doc-provenance",
+            tenant_id="tenant-p",
         )
         for fact in facts:
             assert fact.source_document_id == "doc-provenance"
@@ -382,7 +381,8 @@ class TestFullExtractionPipeline:
         """extract_from_text wraps content in a temporary node."""
         extractor = FactExtractor()
         facts = await extractor.extract_from_text(
-            "Revenue was $40M", doc_id="doc-txt",
+            "Revenue was $40M",
+            doc_id="doc-txt",
         )
         assert len(facts) >= 1
         assert all(f.source_document_id == "doc-txt" for f in facts)

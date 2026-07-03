@@ -72,9 +72,13 @@ pip install "apex-rag[all]"
 
 # Install specific features
 pip install "apex-rag[anthropic,groq,ollama]"  # Extra LLM Providers
-pip install "apex-rag[web]"                    # FastAPI server & CLI REPL
-pip install "apex-rag[telemetry]"              # OpenTelemetry exporter
+pip install "apex-rag[gemini]"                  # Google Gemini
+pip install "apex-rag[web]"                     # FastAPI server & CLI REPL
+pip install "apex-rag[telemetry]"               # OpenTelemetry exporter
+pip install "apex-rag[vectors]"                 # Vector embeddings (sentence-transformers)
+pip install "apex-rag[postgres]"                # PostgreSQL backend
 ```
+
 
 ---
 

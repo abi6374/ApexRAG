@@ -12,8 +12,9 @@ from __future__ import annotations
 import logging
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # Import all ORM models so Alembic can detect schema changes
 from apex_rag.ingestion.apex_storage import ApexBase
@@ -61,6 +62,7 @@ def run_migrations_online() -> None:
     if not db_url or db_url == "driver://user:pass@localhost/dbname":
         # Fallback to environment variable or default
         import os
+
         db_url = os.getenv("APEX_DB_URL", "sqlite+aiosqlite:///apex.db")
         config.set_main_option("sqlalchemy.url", db_url)
 

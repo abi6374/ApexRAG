@@ -5,11 +5,13 @@ import sys
 # --- 1. Auto-Install Dependencies ---
 try:
     import apex_rag
+
     print(f"✅ Found apex_rag version: {apex_rag.__version__}")
 except ImportError:
     print("📦 apex_rag is not installed. Installing it from PyPI now...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "apex-rag"])
     import apex_rag
+
     print("✅ Installation complete!")
 
 # Now we can safely import it
@@ -31,6 +33,7 @@ The first law of thermodynamics is a version of the law of conservation of energ
 Benzene is an organic chemical compound with the molecular formula C6H6. It is a cyclic hydrocarbon with a continuous pi bond.
 """
 
+
 # --- 3. The Test Script ---
 async def main():
     print("\n🚀 Starting ApexRAG Local-First Engine...")
@@ -43,12 +46,11 @@ async def main():
             trace_enabled=True,
             verify_leaves=True,
         ) as index:
-
             print("\n📥 Step 1: Ingesting sample structural document...")
             doc_id = await index.ingest_text(
                 text=SAMPLE_TEXT,
                 doc_id="science_textbook_demo",
-                synthesize_summaries=True  # Calls Ollama to generate summaries
+                synthesize_summaries=True,  # Calls Ollama to generate summaries
             )
             print(f"✅ Document successfully ingested (ID: {doc_id})\n")
 
@@ -58,9 +60,9 @@ async def main():
 
             result = await index.query(question, doc_id)
 
-            print("\n" + "="*40)
+            print("\n" + "=" * 40)
             print("RESULTS")
-            print("="*40)
+            print("=" * 40)
 
             if result and result.verified:
                 print(f"🎯 Exact Answer Found in Path: {result.path}")
@@ -72,11 +74,14 @@ async def main():
 
     except ConnectionError:
         print("\n⚠️  OLLAMA CONNECTION ERROR  ⚠️")
-        print("ApexRAG requires a local LLM to run. Please make sure you have Ollama installed and running!")
+        print(
+            "ApexRAG requires a local LLM to run. Please make sure you have Ollama installed and running!"
+        )
         print("Download at: https://ollama.com")
         print("Run: `ollama serve` and `ollama pull llama3.1` in your terminal.")
     except Exception as e:
         print(f"\n❌ An error occurred: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

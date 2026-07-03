@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import inspect
 import json
 import logging
 from datetime import datetime
@@ -13,6 +12,8 @@ from apex_rag.core.metrics.parser import MetricValueParser, UnitType
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
     CausalEdgeRow,
+    ChangeHistoryRow,
+    NodeVersionRow,
 )
 
 logger = logging.getLogger("apex_rag.temporal.reconstructor")
@@ -27,34 +28,30 @@ class StateReconstructor:
     def __init__(self, storage: ApexStorage) -> None:
         self.storage = storage
 
-    async def _get_nodes_as_of(self, doc_id: str, as_of: datetime) -> list:
+    async def _get_nodes_as_of(self, doc_id: str, as_of: datetime) -> list[NodeVersionRow]:
         if not hasattr(self.storage, "get_nodes_as_of"):
             return []
-        res = self.storage.get_nodes_as_of(doc_id, as_of)
-        if inspect.isawaitable(res):
-            res = await res
+        res = await self.storage.get_nodes_as_of(doc_id, as_of, tenant_context="default")
         return list(res) if res else []
 
     async def _get_state_snapshot(self, entity_id: str, as_of: datetime) -> Any:
         if not hasattr(self.storage, "get_state_snapshot"):
             return None
-        res = self.storage.get_state_snapshot(entity_id, as_of)
-        if inspect.isawaitable(res):
-            res = await res
+        res = await self.storage.get_state_snapshot(entity_id, as_of)
         return res
 
-    async def _get_causal_edges(self, as_of: datetime) -> list:
+    async def _get_causal_edges(self, as_of: datetime) -> list[CausalEdgeRow]:
         if not hasattr(self.storage, "session"):
             return []
         try:
             async with self.storage.session() as session:
                 stmt = select(CausalEdgeRow).where(CausalEdgeRow.discovered_at <= as_of)
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 
-    async def _get_change_history(self, entity_id: str, as_of: datetime) -> list:
+    async def _get_change_history(self, entity_id: str, as_of: datetime) -> list[ChangeHistoryRow]:
         if not hasattr(self.storage, "session"):
             return []
         try:
@@ -70,7 +67,7 @@ class StateReconstructor:
                     .order_by(ChangeHistoryRow.changed_at.asc())
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 
@@ -141,7 +138,7 @@ class StateReconstructor:
             data = getattr(snapshot, "snapshot_data", "")
             if data and isinstance(data, str):
                 try:
-                    return json.loads(data)
+                    return json.loads(data)  # type: ignore[no-any-return]
                 except json.JSONDecodeError:
                     pass
 
@@ -158,7 +155,7 @@ class StateReconstructor:
                     try:
                         metrics[change.field_name] = float(change.new_value)
                     except (ValueError, TypeError):
-                        metrics[change.field_name] = change.new_value
+                        metrics[change.field_name] = 0.0
             else:
                 metrics[change.field_name] = 0.0
         return metrics

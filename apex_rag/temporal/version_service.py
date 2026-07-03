@@ -21,9 +21,9 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
@@ -64,9 +64,8 @@ class TemporalVersionService:
         *,
         tenant_id: str = "default",
         source_timestamp: datetime | None = None,
-        approval_timestamp: datetime | None = None,
         validity_status: str = "ACTIVE",
-        session: Any = None,
+        session: AsyncSession | None = None,
     ) -> NodeVersionRow:
         """Create a new immutable version for a node.
 
@@ -81,7 +80,6 @@ class TemporalVersionService:
             doc_id:             The document ID.
             tenant_id:          Tenant isolation boundary.
             source_timestamp:   When the source document was authored.
-            approval_timestamp: When this version was approved.
             validity_status:    Status (ACTIVE, PENDING, DRAFT, etc.).
             session:            Optional existing async session.
 
@@ -99,7 +97,6 @@ class TemporalVersionService:
                 doc_id,
                 tenant_id,
                 source_timestamp,
-                approval_timestamp,
                 validity_status,
                 content_hash,
                 now,
@@ -113,7 +110,6 @@ class TemporalVersionService:
                 doc_id,
                 tenant_id,
                 source_timestamp,
-                approval_timestamp,
                 validity_status,
                 content_hash,
                 now,
@@ -124,7 +120,7 @@ class TemporalVersionService:
         node_id: str,
         as_of: datetime,
         *,
-        session: Any = None,
+        session: AsyncSession | None = None,
     ) -> NodeVersionRow | None:
         """Resolve the version active at a specific point in time.
 
@@ -157,7 +153,7 @@ class TemporalVersionService:
         self,
         node_id: str,
         *,
-        session: Any = None,
+        session: AsyncSession | None = None,
     ) -> list[NodeVersionRow]:
         """Get the full version ancestry for a node.
 
@@ -180,7 +176,7 @@ class TemporalVersionService:
         self,
         node_id: str,
         *,
-        session: Any = None,
+        session: AsyncSession | None = None,
     ) -> NodeVersionRow | None:
         """Get the latest current (active) version of a node.
 
@@ -206,13 +202,12 @@ class TemporalVersionService:
 
     async def _create_version_in_session(
         self,
-        session: Any,
+        session: AsyncSession,
         node_id: str,
         content: str,
         doc_id: str,
         tenant_id: str,
         source_timestamp: datetime | None,
-        approval_timestamp: datetime | None,  # noqa: ARG002
         validity_status: str,
         content_hash: str,
         now: datetime,
@@ -320,7 +315,7 @@ class TemporalVersionService:
 
     async def _resolve_version_at_time_in_session(
         self,
-        session: Any,
+        session: AsyncSession,
         node_id: str,
         as_of: datetime,
     ) -> NodeVersionRow | None:
@@ -339,7 +334,7 @@ class TemporalVersionService:
 
     async def _get_version_chain_in_session(
         self,
-        session: Any,
+        session: AsyncSession,
         node_id: str,
     ) -> list[NodeVersionRow]:
         stmt = (
@@ -352,7 +347,7 @@ class TemporalVersionService:
 
     async def _get_latest_version_in_session(
         self,
-        session: Any,
+        session: AsyncSession,
         node_id: str,
     ) -> NodeVersionRow | None:
         # NOTE: Must query by node_id only (not is_current=True) because the

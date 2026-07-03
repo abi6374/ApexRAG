@@ -16,17 +16,17 @@ PRINCIPLE 15 — Immutable Snapshots.
   created for subsequent time points.
 
 Architecture:
-    ┌────────────────┐     ┌──────────────────┐
-    │  Query(as_of)  │────▶│ SnapshotEngine    │
-    └────────────────┘     │  .get_snapshot()  │
-                           └────────┬─────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-            ┌────────────┐  ┌────────────┐  ┌──────────────┐
-            │ Full       │  │ Delta      │  │ Lazy        │
-            │ Snapshot   │  │ Snapshot   │  │ (on-demand) │
-            └────────────┘  └────────────┘  └──────────────┘
+    +----------------+     +------------------+
+    |  Query(as_of)  |---->| SnapshotEngine    |
+    +----------------+     |  .get_snapshot()  |
+                           +--------+---------+
+                                    |
+                    +---------------+---------------+
+                    v               v               v
+            +------------+  +------------+  +--------------+
+            | Full       |  | Delta      |  | Lazy        |
+            | Snapshot   |  | Snapshot   |  | (on-demand) |
+            +------------+  +------------+  +--------------+
 
 Usage:
     engine = SnapshotEngine(historical_engine, fact_store)
@@ -53,6 +53,11 @@ from apex_rag.temporal.historical_state import HistoricalStateEngine
 from apex_rag.temporal.snapshot_models import SnapshotDelta, SnapshotManifest, StatePatch
 
 logger = logging.getLogger("apex_rag.temporal.snapshot_engine")
+
+
+def _cache_key(tenant_id: str, doc_id: str) -> str:
+    """Build a tenant-scoped cache key."""
+    return f"{tenant_id}:{doc_id}"
 
 
 class SnapshotEngine:
@@ -82,10 +87,29 @@ class SnapshotEngine:
         self._fact_store = fact_store
         self._storage = storage
 
-        # In-memory cache: doc_id → {as_of → snapshot_data}
+        # In-memory cache: tenant_id:doc_id -> {as_of -> snapshot_data}
         self._cache: dict[str, dict[str, dict[str, Any]]] = {}
-        # In-memory manifest registry: doc_id → list of manifests
+        # In-memory manifest registry: tenant_id:doc_id -> list of manifests
         self._manifests: dict[str, list[SnapshotManifest]] = {}
+
+    # ── Internal helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _require_tenant(tenant_context: str | None, method_name: str = "operation") -> str:
+        """Validate that tenant_context is provided; returns the non-None value.
+
+        Uses a lazy import to avoid circular dependency.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        if not tenant_context:
+            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
+
+            raise MissingTenantContextError(
+                f"tenant_context is required for {method_name}."
+            )
+        return tenant_context
 
     # ── Snapshot Retrieval ─────────────────────────────────────────────
 
@@ -114,42 +138,38 @@ class SnapshotEngine:
             tenant_context:  Required tenant ID.
 
         Returns:
-            Dict mapping ``subject → {value, confidence, fact_id}``.
+            Dict mapping ``subject -> {value, confidence, fact_id}``.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for get_snapshot.")
-
+        tc = self._require_tenant(tenant_context, "get_snapshot")
+        ck = _cache_key(tc, doc_id)
         cache_key = as_of.isoformat()
 
         # 1. Check in-memory cache
-        doc_cache = self._cache.get(doc_id, {})
+        doc_cache = self._cache.get(ck, {})
         if cache_key in doc_cache:
-            logger.debug("Snapshot cache hit for %s @ %s", doc_id, cache_key)
+            logger.debug("Snapshot cache hit for %s @ %s", ck, cache_key)
             return dict(doc_cache[cache_key])
 
         # 2. Check persisted StateSnapshotRow
         persisted = await self._get_persisted_snapshot(doc_id, as_of)
         if persisted is not None:
-            logger.debug("Persisted snapshot found for %s @ %s", doc_id, cache_key)
-            self._cache.setdefault(doc_id, {})[cache_key] = persisted
+            logger.debug("Persisted snapshot found for %s @ %s", ck, cache_key)
+            self._cache.setdefault(ck, {})[cache_key] = persisted
             return dict(persisted)
 
         # 3. Compute lazy snapshot from scratch (Principle 5)
         logger.debug(
             "No cached/persisted snapshot for %s @ %s, building lazily...",
-            doc_id,
+            ck,
             cache_key,
         )
         state = await self._historical.get_state_at(
             doc_id,
             as_of,
-            tenant_context=tenant_context,
+            tenant_context=tc,
         )
 
-        # Cache in memory
-        self._cache.setdefault(doc_id, {})[cache_key] = state
+        self._cache.setdefault(ck, {})[cache_key] = state
         return dict(state)
 
     async def get_snapshot_between(
@@ -174,9 +194,11 @@ class SnapshotEngine:
         Returns:
             State dict at ``end``.
         """
-        # Try to get baseline first
+        tc = self._require_tenant(tenant_context, "get_snapshot_between")
+        ck = _cache_key(tc, doc_id)
+
         baseline = None
-        doc_cache = self._cache.get(doc_id, {})
+        doc_cache = self._cache.get(ck, {})
         start_key = start.isoformat()
         if start_key in doc_cache:
             baseline = dict(doc_cache[start_key])
@@ -187,27 +209,24 @@ class SnapshotEngine:
                 baseline = dict(persisted)
 
         if baseline is not None:
-            # Compute delta and apply to baseline
             delta = await self._historical.compute_delta(
                 doc_id,
                 start,
                 end,
-                tenant_context=tenant_context,
+                tenant_context=tc,
             )
             patch = StatePatch(
                 doc_id=doc_id,
-                tenant_id=tenant_context or "default",
+                tenant_id=tc,
                 base_as_of=start,
                 target_as_of=end,
                 deltas=[delta],
             )
             result = patch.apply_to_state(baseline)
-            # Cache result
-            self._cache.setdefault(doc_id, {})[end.isoformat()] = result
+            self._cache.setdefault(ck, {})[end.isoformat()] = result
             return result
 
-        # Fallback: full lookup
-        return await self.get_snapshot(doc_id, end, tenant_context=tenant_context)
+        return await self.get_snapshot(doc_id, end, tenant_context=tc)
 
     # ── Snapshot Creation ──────────────────────────────────────────────
 
@@ -233,31 +252,24 @@ class SnapshotEngine:
         Returns:
             A :class:`SnapshotManifest` describing the created snapshot.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for create_snapshot.")
-
+        tc = self._require_tenant(tenant_context, "create_snapshot")
+        ck = _cache_key(tc, doc_id)
         as_of = as_of or datetime.now(timezone.utc)
 
-        # Build state
         state = await self._historical.get_state_at(
             doc_id,
             as_of,
-            tenant_context=tenant_context,
+            tenant_context=tc,
         )
 
-        # Update in-memory cache
-        self._cache.setdefault(doc_id, {})[as_of.isoformat()] = state
+        self._cache.setdefault(ck, {})[as_of.isoformat()] = state
 
-        # Persist if requested
         if persist:
             await self._persist_snapshot(doc_id, as_of, state)
 
-        # Create manifest
         manifest = SnapshotManifest(
             doc_id=doc_id,
-            tenant_id=tenant_context,
+            tenant_id=tc,
             snapshot_date=as_of,
             fact_count=len(state),
             is_full=True,
@@ -266,7 +278,7 @@ class SnapshotEngine:
                 "computed_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        self._manifests.setdefault(doc_id, []).append(manifest)
+        self._manifests.setdefault(ck, []).append(manifest)
         return manifest
 
     async def create_snapshot_from_delta(
@@ -290,33 +302,32 @@ class SnapshotEngine:
         Returns:
             A :class:`SnapshotManifest` for the new snapshot.
         """
-        # Get baseline state
+        tc = self._require_tenant(tenant_context, "create_snapshot_from_delta")
+        ck = _cache_key(tc or delta.tenant_id, delta.doc_id)
+
         baseline = await self.get_snapshot(
             delta.doc_id,
             delta.base_as_of,
-            tenant_context=tenant_context,
+            tenant_context=tc,
         )
 
-        # Apply delta
         patch = StatePatch(
             doc_id=delta.doc_id,
-            tenant_id=tenant_context or delta.tenant_id,
+            tenant_id=tc or delta.tenant_id,
             base_as_of=delta.base_as_of,
             target_as_of=delta.target_as_of,
             deltas=[delta],
         )
         new_state = patch.apply_to_state(baseline)
 
-        # Cache
-        self._cache.setdefault(delta.doc_id, {})[delta.target_as_of.isoformat()] = new_state
+        self._cache.setdefault(ck, {})[delta.target_as_of.isoformat()] = new_state
 
-        # Persist if requested
         if persist:
             await self._persist_snapshot(delta.doc_id, delta.target_as_of, new_state)
 
         manifest = SnapshotManifest(
             doc_id=delta.doc_id,
-            tenant_id=tenant_context or delta.tenant_id,
+            tenant_id=tc or delta.tenant_id,
             snapshot_date=delta.target_as_of,
             fact_count=len(new_state),
             is_full=True,
@@ -327,7 +338,7 @@ class SnapshotEngine:
                 "base_as_of": delta.base_as_of.isoformat(),
             },
         )
-        self._manifests.setdefault(delta.doc_id, []).append(manifest)
+        self._manifests.setdefault(ck, []).append(manifest)
         return manifest
 
     # ── Cache Management ───────────────────────────────────────────────
@@ -335,17 +346,22 @@ class SnapshotEngine:
     async def invalidate_cache(
         self,
         doc_id: str | None = None,
+        *,
+        tenant_context: str | None = None,
     ) -> None:
         """Clear the in-memory snapshot cache.
 
         Args:
             doc_id: Optional — if provided, only clear cache for this
                     document.  Otherwise, clear all cached snapshots.
+            tenant_context: Required tenant ID (ignored when clearing all).
         """
         if doc_id:
-            self._cache.pop(doc_id, None)
-            self._manifests.pop(doc_id, None)
-            logger.debug("Cache invalidated for doc %s", doc_id)
+            tc = self._require_tenant(tenant_context, "invalidate_cache")
+            ck = _cache_key(tc, doc_id)
+            self._cache.pop(ck, None)
+            self._manifests.pop(ck, None)
+            logger.debug("Cache invalidated for %s", ck)
         else:
             self._cache.clear()
             self._manifests.clear()
@@ -354,17 +370,21 @@ class SnapshotEngine:
     async def list_manifests(
         self,
         doc_id: str,
+        *,
+        tenant_context: str | None = None,
     ) -> list[SnapshotManifest]:
         """List all available snapshot manifests for a document.
 
         Args:
-            doc_id: The document ID.
+            doc_id:          The document ID.
+            tenant_context:  Required tenant ID.
 
         Returns:
             Ordered list of manifests (most recent first).
         """
-        manifests = self._manifests.get(doc_id, [])
-        manifests = list(manifests)
+        tc = self._require_tenant(tenant_context, "list_manifests")
+        ck = _cache_key(tc, doc_id)
+        manifests = list(self._manifests.get(ck, []))
         manifests.sort(key=lambda m: m.snapshot_date, reverse=True)
         return manifests
 
@@ -374,21 +394,25 @@ class SnapshotEngine:
         self,
         doc_id: str,
         as_of: datetime,
+        *,
+        tenant_context: str | None = None,
     ) -> bool:
         """Delete a persisted snapshot from the database.
 
         Args:
-            doc_id: The document ID.
-            as_of:  The snapshot datetime to delete.
+            doc_id:          The document ID.
+            as_of:           The snapshot datetime to delete.
+            tenant_context:  Required tenant ID.
 
         Returns:
             True if a snapshot was found and deleted.
         """
-        # Remove from in-memory cache
-        doc_cache = self._cache.get(doc_id, {})
+        tc = self._require_tenant(tenant_context, "delete_snapshot")
+        ck = _cache_key(tc, doc_id)
+
+        doc_cache = self._cache.get(ck, {})
         doc_cache.pop(as_of.isoformat(), None)
 
-        # Remove from database
         try:
             async with self._storage.session() as session:
                 stmt = select(StateSnapshotRow).where(
@@ -398,11 +422,14 @@ class SnapshotEngine:
                 result = await session.execute(stmt)
                 row = result.scalars().first()
                 if row is None:
+                    logger.warning(
+                        "No snapshot found for %s @ %s", ck, as_of.isoformat()
+                    )
                     return False
                 await session.delete(row)
                 return True
         except Exception as exc:
-            logger.error("Failed to delete snapshot: %s", exc)
+            logger.error("Failed to delete snapshot for %s @ %s: %s", ck, as_of.isoformat(), exc)
             return False
 
     # ── Internal: Persistence ──────────────────────────────────────────
@@ -413,9 +440,6 @@ class SnapshotEngine:
         as_of: datetime,
     ) -> dict[str, Any] | None:
         """Fetch the closest persisted snapshot at or before ``as_of``.
-
-        Uses the ``ix_state_snapshots_doc_date`` index for O(log n)
-        lookup.
 
         Returns:
             The snapshot state dict, or None.
@@ -440,6 +464,9 @@ class SnapshotEngine:
                 if isinstance(data, dict):
                     return data
                 return None
+        except json.JSONDecodeError as exc:
+            logger.warning("Corrupt snapshot data for %s @ %s: %s", doc_id, as_of, exc)
+            return None
         except Exception as exc:
             logger.warning("Failed to fetch persisted snapshot: %s", exc)
             return None

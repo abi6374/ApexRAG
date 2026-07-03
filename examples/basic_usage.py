@@ -108,7 +108,6 @@ async def main() -> None:
         model="llama3.1",
         trace_enabled=True,
     ) as index:
-
         # --- INGESTION ---
         print("📄 Ingesting sample financial report…\n")
         doc_id = await index.ingest_text(

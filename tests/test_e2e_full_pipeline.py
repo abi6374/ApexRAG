@@ -30,31 +30,30 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 
-# ── Part 1–2 Imports ────────────────────────────────────────
-from apex_rag.ingestion.apex_parser import ApexParser
-from apex_rag.ingestion.apex_storage import ApexStorage
-from apex_rag.ingestion.embedding_engine import EmbeddingEngine
-from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
+# ── Part 5 Imports ──────────────────────────────────────────
+from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 
-# ── Part 3 Imports ──────────────────────────────────────────
-from apex_rag.temporal.extractor import TemporalExtractor
-from apex_rag.temporal.scorer import FreshnessScorer
-from apex_rag.temporal.contradiction import TemporalContradictionDetector
+# ── Old-system Imports (for real-LLM test) ──────────────────
+from apex_rag.client import ApexIndex
 
 # ── Part 4 Imports ──────────────────────────────────────────
 from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 from apex_rag.graph.edges.causal_retriever import CausalRetriever
 
-# ── Part 5 Imports ──────────────────────────────────────────
-from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
-from apex_rag.agents.orchestrator import Orchestrator
-from apex_rag.models.unified_models import ApexAnswer, EvidencePacket
+# ── Part 1–2 Imports ────────────────────────────────────────
+from apex_rag.ingestion.apex_parser import ApexParser
+from apex_rag.ingestion.apex_storage import ApexStorage
+from apex_rag.ingestion.embedding_engine import EmbeddingEngine
+from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
+from apex_rag.models.unified_models import ApexAnswer
 
 # ── Provider Imports ────────────────────────────────────────
 from apex_rag.providers import OpenAIProvider
+from apex_rag.temporal.contradiction import TemporalContradictionDetector
 
-# ── Old-system Imports (for real-LLM test) ──────────────────
-from apex_rag.client import ApexIndex
+# ── Part 3 Imports ──────────────────────────────────────────
+from apex_rag.temporal.extractor import TemporalExtractor
+from apex_rag.temporal.scorer import FreshnessScorer
 
 # ═══════════════════════════════════════════════════════════════
 # Sample document — realistic financial report
@@ -196,7 +195,9 @@ class TestE2EFullPipeline:
     """
 
     async def test_parse_and_store(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 1-2: ApexParser produces valid nodes; ApexStorage persists them."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -216,15 +217,19 @@ class TestE2EFullPipeline:
 
         # Store
         await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
-        count = await apex_storage.count_nodes(doc_id="e2e-financial-report")  # type: ignore[arg-type]
+        count = await apex_storage.count_nodes(doc_id="e2e-financial-report", tenant_context="default")  # type: ignore[arg-type]
         assert count == len(nodes), f"Stored {count} nodes, expected {len(nodes)}"
 
         # Retrieve
-        retrieved = await apex_storage.get_nodes_by_doc("e2e-financial-report", tenant_context="default")  # type: ignore[arg-type]
+        retrieved = await apex_storage.get_nodes_by_doc(
+            "e2e-financial-report", tenant_context="default"
+        )  # type: ignore[arg-type]
         assert len(retrieved) == len(nodes)
 
     async def test_embedding_pass(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 2: EmbeddingEngine populates node embeddings (fingerprint fallback)."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -246,12 +251,16 @@ class TestE2EFullPipeline:
             await apex_storage.save_node(node, tenant_context="default")  # type: ignore[arg-type]
 
         # Re-read and verify persistence
-        retrieved = await apex_storage.get_nodes_by_doc("e2e-financial-report", tenant_context="default")  # type: ignore[arg-type]
+        retrieved = await apex_storage.get_nodes_by_doc(
+            "e2e-financial-report", tenant_context="default"
+        )  # type: ignore[arg-type]
         for node in retrieved:
             assert len(node.embedding) == 384
 
     async def test_signpost_generation(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 2: SemanticModelBuilder generates signposts for heading nodes."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -265,9 +274,7 @@ class TestE2EFullPipeline:
         # Every heading node should have a signpost (node_type is string due to use_enum_values=True)
         heading_nodes = [n for n in nodes if n.node_type == "HEADING" and len(n.children) > 0]
         for node in heading_nodes:
-            assert node.node_id in signposts, (
-                f"Heading node {node.node_id[:8]} missing signpost"
-            )
+            assert node.node_id in signposts, f"Heading node {node.node_id[:8]} missing signpost"
             assert len(signposts[node.node_id]) > 10, "Signpost should be substantive"
 
         # Non-heading nodes without children should not have signposts
@@ -281,7 +288,9 @@ class TestE2EFullPipeline:
                 continue
 
     async def test_temporal_extraction(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 3: TemporalExtractor extracts dates from node content."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -296,16 +305,22 @@ class TestE2EFullPipeline:
         for node in nodes:
             date = await extractor.extract(
                 text=node.content,
-                metadata={"source_date": node.source_date.isoformat() if node.source_date else None},
+                metadata={
+                    "source_date": node.source_date.isoformat() if node.source_date else None
+                },
             )
             extracted_dates.append(date)
 
         # At least some nodes should have dates extracted
-        dated_nodes = [(node, date) for node, date in zip(nodes, extracted_dates) if date is not None]
+        dated_nodes = [
+            (node, date) for node, date in zip(nodes, extracted_dates, strict=False) if date is not None
+        ]
         assert len(dated_nodes) > 0, "At least one node should have a date extracted"
 
     async def test_freshness_scoring(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 3: FreshnessScorer computes decay-based scores for each node."""
         nodes = parsed_nodes  # type: ignore[valid-type]
@@ -334,7 +349,9 @@ class TestE2EFullPipeline:
         assert all(0.0 <= s <= 1.0 for s in bulk)
 
     async def test_contradiction_detection(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 3: TemporalContradictionDetector finds contradictions between nodes."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -356,7 +373,9 @@ class TestE2EFullPipeline:
         assert isinstance(edges, list)
 
     async def test_causal_graph_and_chain(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 4: CausalGraphBuilder + CausalRetriever build edges and chains."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -370,6 +389,7 @@ class TestE2EFullPipeline:
         class FakeEmbedder:
             async def embed(self, texts: list[str]) -> list[list[float]]:
                 import hashlib
+
                 result: list[list[float]] = []
                 for t in texts:
                     h = hashlib.sha256(t.encode()).hexdigest()
@@ -401,7 +421,7 @@ class TestE2EFullPipeline:
                 await apex_storage.save_causal_edge(ce)
 
         # Verify edges were stored
-        all_stored_edges = await apex_storage.get_all_edges()  # type: ignore[arg-type]
+        all_stored_edges = await apex_storage.get_all_edges(tenant_context="default")  # type: ignore[arg-type]
         assert len(all_stored_edges) > 0, "Should have persisted at least one causal edge"
 
         # CausalRetriever: Build evidence chain
@@ -415,7 +435,9 @@ class TestE2EFullPipeline:
             )
 
     async def test_synthesis_with_evidence(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """Part 5: EvidenceSynthesizerAgent produces a grounded answer."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -449,7 +471,9 @@ class TestE2EFullPipeline:
         assert len(answer) > 20, "Answer should be substantive"
 
     async def test_full_pipeline_apex_answer(
-        self, apex_storage: ApexStorage, parsed_nodes: list  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,
+        parsed_nodes: list,  # type: ignore[valid-type]
     ) -> None:
         """All 5 parts: Full pipeline produces a valid ApexAnswer."""
         nodes = parsed_nodes  # type: ignore[arg-type]
@@ -473,7 +497,9 @@ class TestE2EFullPipeline:
         for node in nodes:
             date = await extractor.extract(
                 text=node.content,
-                metadata={"source_date": node.source_date.isoformat() if node.source_date else None},
+                metadata={
+                    "source_date": node.source_date.isoformat() if node.source_date else None
+                },
             )
             extracted_dates.append(date)
         assert len(extracted_dates) == len(nodes)
@@ -493,6 +519,7 @@ class TestE2EFullPipeline:
         class FakeEmbedder:
             async def embed(self, texts: list[str]) -> list[list[float]]:
                 import hashlib
+
                 result: list[list[float]] = []
                 for t in texts:
                     h = hashlib.sha256(t.encode()).hexdigest()
@@ -548,9 +575,11 @@ class TestE2EFullPipeline:
         # ── Assemble ApexAnswer ──
         from apex_rag.models.unified_models import (
             ASTNode as UnifiedASTNode,
-            CausalEdge,
-            EdgeType,
+        )
+        from apex_rag.models.unified_models import (
             EvidencePacket as UnifiedEvidencePacket,
+        )
+        from apex_rag.models.unified_models import (
             NodeType,
             TemporalMetadata,
         )
@@ -628,7 +657,7 @@ class TestE2ERealLLM:
     @_REQUIRES_OPENAI
     async def test_orchestrator_basic_query(self) -> None:
         """Orchestrator.execute_query with real OpenAI returns evidence packets."""
-        
+
         # Real LLM provider — gpt-4o-mini is cheap and fast
         llm = OpenAIProvider(
             model="gpt-4o-mini",
@@ -636,9 +665,7 @@ class TestE2ERealLLM:
         )
 
         index = await ApexIndex.create(
-            provider=llm,
-            db_url="sqlite+aiosqlite:///:memory:",
-            trace_enabled=False
+            provider=llm, db_url="sqlite+aiosqlite:///:memory:", trace_enabled=False
         )
 
         try:
@@ -673,9 +700,12 @@ class TestE2ERealLLM:
 
             # Verify some content about revenue or margin
             all_content = " ".join(p.node.content for p in packets).lower()
-            assert ("revenue" in all_content or "margin" in all_content or "$52" in all_content or "72%" in all_content), (
-                "Evidence should mention revenue or margin"
-            )
+            assert (
+                "revenue" in all_content
+                or "margin" in all_content
+                or "$52" in all_content
+                or "72%" in all_content
+            ), "Evidence should mention revenue or margin"
 
         finally:
             await index.close()
@@ -689,9 +719,7 @@ class TestE2ERealLLM:
         )
 
         index = await ApexIndex.create(
-            provider=llm,
-            db_url="sqlite+aiosqlite:///:memory:",
-            trace_enabled=False
+            provider=llm, db_url="sqlite+aiosqlite:///:memory:", trace_enabled=False
         )
 
         try:
@@ -709,9 +737,7 @@ class TestE2ERealLLM:
             )
 
             assert answer is not None, "Should have produced an ApexAnswer"
-            assert isinstance(answer, ApexAnswer), (
-                f"Expected ApexAnswer, got {type(answer)}"
-            )
+            assert isinstance(answer, ApexAnswer), f"Expected ApexAnswer, got {type(answer)}"
             assert answer.answer_text, "Answer text should be non-empty"
             assert len(answer.evidence_packets) > 0
             assert 0.0 <= answer.temporal_freshness <= 1.0
@@ -721,9 +747,12 @@ class TestE2ERealLLM:
 
             # Verify content mentions revenue or margin
             answer_lower = answer.answer_text.lower()
-            assert ("revenue" in answer_lower or "margin" in answer_lower or "$52" in answer_lower or "72%" in answer_lower), (
-                f"Answer should reference revenue/margin: {answer.answer_text[:200]}"
-            )
+            assert (
+                "revenue" in answer_lower
+                or "margin" in answer_lower
+                or "$52" in answer_lower
+                or "72%" in answer_lower
+            ), f"Answer should reference revenue/margin: {answer.answer_text[:200]}"
 
         finally:
             await index.close()
@@ -737,9 +766,7 @@ class TestE2ERealLLM:
         )
 
         index = await ApexIndex.create(
-            provider=llm,
-            db_url="sqlite+aiosqlite:///:memory:",
-            trace_enabled=False
+            provider=llm, db_url="sqlite+aiosqlite:///:memory:", trace_enabled=False
         )
 
         try:
@@ -782,7 +809,8 @@ class TestE2ECrossSystem:
     """
 
     async def test_old_and_new_storage_coexistence(
-        self, apex_storage: ApexStorage  # type: ignore[valid-type]
+        self,
+        apex_storage: ApexStorage,  # type: ignore[valid-type]
     ) -> None:
         """Parse document once, store in both old and new storage."""
         # Parse with ApexParser
@@ -797,21 +825,20 @@ class TestE2ECrossSystem:
         await apex_storage.save_nodes(nodes, tenant_context="default")  # type: ignore[arg-type]
 
         # Verify new storage
-        new_count = await apex_storage.count_nodes(doc_id="cross-system-test")  # type: ignore[arg-type]
+        new_count = await apex_storage.count_nodes(doc_id="cross-system-test", tenant_context="default")  # type: ignore[arg-type]
         assert new_count == len(nodes)
 
         # Ingest same text via old system
-        from unittest.mock import AsyncMock
         dummy_llm = AsyncMock()
         dummy_llm.generate = AsyncMock(return_value="Summary")
+
         async def mock_embed(texts, **kwargs):
             return [[0.1] * 384 for _ in texts]
+
         dummy_llm.embed = mock_embed
 
         index = await ApexIndex.create(
-            db_url="sqlite+aiosqlite:///:memory:",
-            provider=dummy_llm,
-            trace_enabled=False
+            db_url="sqlite+aiosqlite:///:memory:", provider=dummy_llm, trace_enabled=False
         )
 
         try:
@@ -827,5 +854,3 @@ class TestE2ECrossSystem:
 
         finally:
             await index.close()
-
-

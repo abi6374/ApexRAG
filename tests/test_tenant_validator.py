@@ -4,7 +4,6 @@ tests/test_tenant_validator.py — Tests for the TenantIsolationValidator (Phase
 
 from __future__ import annotations
 
-import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,25 +34,19 @@ class TestTenantIsolationValidator:
     """Tests for the strict tenant isolation validator."""
 
     @pytest.mark.asyncio
-    async def test_assert_tenant_context_missing(
-        self, validator: TenantIsolationValidator
-    ) -> None:
+    async def test_assert_tenant_context_missing(self, validator: TenantIsolationValidator) -> None:
         """Should raise MissingTenantContextError when tenant_id is None."""
         with pytest.raises(MissingTenantContextError):
             await validator.assert_tenant_context(None)
 
     @pytest.mark.asyncio
-    async def test_assert_tenant_context_empty(
-        self, validator: TenantIsolationValidator
-    ) -> None:
+    async def test_assert_tenant_context_empty(self, validator: TenantIsolationValidator) -> None:
         """Should raise MissingTenantContextError when tenant_id is empty."""
         with pytest.raises(MissingTenantContextError):
             await validator.assert_tenant_context("")
 
     @pytest.mark.asyncio
-    async def test_assert_tenant_context_valid(
-        self, validator: TenantIsolationValidator
-    ) -> None:
+    async def test_assert_tenant_context_valid(self, validator: TenantIsolationValidator) -> None:
         """Should not raise when tenant_id is provided."""
         await validator.assert_tenant_context("tenant-a")  # Should not raise
 
@@ -73,9 +66,7 @@ class TestTenantIsolationValidator:
             await validator.assert_tenant_read_access("", "apex_ast_nodes")
 
     @pytest.mark.asyncio
-    async def test_assert_write_access(
-        self, validator: TenantIsolationValidator
-    ) -> None:
+    async def test_assert_write_access(self, validator: TenantIsolationValidator) -> None:
         """Should handle write access checks (same as read)."""
         await validator.assert_tenant_write_access("tenant-a", "apex_ast_nodes")
 
@@ -92,8 +83,6 @@ class TestTenantIsolationValidator:
         assert TenantIsolationValidator.get_tenant_column("non_existent") is None
 
     @pytest.mark.asyncio
-    async def test_assert_graph_traversal_empty(
-        self, validator: TenantIsolationValidator
-    ) -> None:
+    async def test_assert_graph_traversal_empty(self, validator: TenantIsolationValidator) -> None:
         """Should pass with empty node_ids list."""
         await validator.assert_tenant_graph_traversal("tenant-a", [])

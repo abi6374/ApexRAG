@@ -30,10 +30,13 @@ from collections.abc import AsyncGenerator
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from apex_rag.enterprise.client import EnterpriseClient
 
 # Agents
 from apex_rag.agents.apex_orchestrator import ApexOrchestrator
@@ -42,39 +45,21 @@ from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.critic.agent import EvaluationCriticAgent
 from apex_rag.agents.planner.agent import QueryPlannerAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
-from apex_rag.enterprise.auth.access_control import AccessControlAgent
 from apex_rag.enterprise.auth.models import TenantContext
-from apex_rag.enterprise.auth.role_aware_retriever import RoleAwareRetriever
-from apex_rag.enterprise.auth.role_aware_synthesis import (
-    RoleAwareSynthesis,
-)
-
-# Exceptions & Utilities
 from apex_rag.exceptions import DocumentNotFoundError
 from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
-
-# Ingestion
 from apex_rag.ingestion.apex_parser import ApexParser
 from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.ingestion.embedding_engine import EmbeddingEngine
-
-# Fact pipeline
 from apex_rag.ingestion.fact_pipeline import FactPipeline
-
-# Legacy / To be deprecated & re-exported models
-from apex_rag.ingestion.legacy import IngestionEngine  # noqa: F401
-
-# Legacy / To be deprecated
 from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
-
-# Unified Models
 from apex_rag.models.unified_models import (  # noqa: F401
     ApexAnswer,
     ASTNode,
     EvidencePacket,
     NodeType,
 )
-from apex_rag.navigation import AggregatorAgent, NavigationAgent, NavigationResult  # noqa: F401
+from apex_rag.observability.accuracy_tracker import accuracy_tracker
 from apex_rag.providers import (
     AnthropicProvider,
     AsyncLLM,
@@ -85,14 +70,8 @@ from apex_rag.providers import (
     OpenRouterProvier,
 )
 from apex_rag.retrieval.agentic.navigator import ASTNavigationAgent
-from apex_rag.search import EmbeddingsEngine, HybridSearch  # noqa: F401
-from apex_rag.storage import StorageEngine  # noqa: F401
 from apex_rag.temporal.fact_extractor import FactExtractor
 from apex_rag.temporal.fact_store import FactStore
-from apex_rag.temporal.reasoning_service import TemporalReasoningService
-
-# New enterprise service imports
-from apex_rag.temporal.version_resolver import VersionResolver
 from apex_rag.utils import logger
 
 
@@ -149,6 +128,9 @@ class ApexIndex:
         self._fact_pipeline: FactPipeline | None = None
         self._fact_store: FactStore | None = None
         self._fact_extractor: FactExtractor | None = None
+
+        # Enterprise client (lazily initialised)
+        self._enterprise_client: EnterpriseClient | None = None
 
     # -- Factory ------------------------------------------------------------
 
@@ -269,7 +251,6 @@ class ApexIndex:
         file_path: str | Path,
         *,
         doc_id: str | None = None,
-        source_date: datetime | None = None,  # noqa: ARG002
         synthesize_summaries: bool = True,
     ) -> str:
         """
@@ -285,7 +266,6 @@ class ApexIndex:
         Args:
             file_path:   Path to PDF, DOCX, MD, or PY file.
             doc_id:      Override auto-generated document ID.
-            source_date: Optional authorship date (extracted from meta if None).
 
         Returns:
             The document ID.
@@ -346,14 +326,12 @@ class ApexIndex:
         file_path: str | Path,
         *,
         doc_id: str | None = None,
-        source_date: datetime | None = None,
         synthesize_summaries: bool = True,
     ) -> str:
         """Backward-compatible alias for :meth:`ingest_file`."""
         return await self.ingest_file(
             file_path,
             doc_id=doc_id,
-            source_date=source_date,
             synthesize_summaries=synthesize_summaries,
         )
 
@@ -457,7 +435,6 @@ class ApexIndex:
         coverage: float = 0.90,
         domain: str = "general",
         ablation_mode: bool = False,
-        root_node_id: str | int | None = None,  # noqa: ARG002
         event_queue: asyncio.Queue[Any] | None = None,
         tenant_context: TenantContext | None = None,
     ) -> ApexAnswer:
@@ -498,6 +475,29 @@ class ApexIndex:
         if event_queue is not None:
             await event_queue.put({"event": "done", "doc_id": doc_id})
 
+        # ── Record accuracy metrics from the answer ──────────────────
+        if answer is not None:
+            accuracy_tracker.record_query(
+                query=question,
+                doc_id=doc_id,
+                precision=answer.precision,
+                recall=answer.recall,
+                f1_score=answer.f1_score,
+                hit=answer.hit,
+                coverage_guarantee=answer.coverage_guarantee,
+                prediction_set_size=answer.prediction_set_size,
+                total_packets_retrieved=len(answer.evidence_packets),
+                verified_packets_count=len(answer.evidence_packets),
+                total_subqueries=answer.total_subqueries,
+                resolved_subqueries=answer.resolved_subqueries,
+                critic_pass_rate=answer.critic_pass_rate,
+                nodes_visited=answer.nodes_visited,
+                llm_calls=answer.llm_calls,
+                backtracks=answer.backtracks,
+                latency_ms=answer.latency_ms,
+                tenant_id=(tenant_context.tenant_id if tenant_context else "default"),
+            )
+
         return answer
 
     async def stream_query(
@@ -536,7 +536,6 @@ class ApexIndex:
         self,
         question: str,
         *,
-        synthesize: bool = True,  # noqa: ARG002
         coverage: float = 0.90,
         domain: str = "general",
         event_queue: asyncio.Queue[Any] | None = None,
@@ -572,7 +571,7 @@ class ApexIndex:
             A NetworkX Directed Graph where nodes are ASTNode IDs and edges
             are typed causal relationships.
         """
-        edges = await self._storage.get_all_edges()
+        edges = await self._storage.get_all_edges(tenant_context="default")
         graph = nx.DiGraph()
 
         for edge in edges:
@@ -625,12 +624,12 @@ class ApexIndex:
             A dictionary containing node content, freshness, and all
             incoming/outgoing causal edges.
         """
-        node = await self._storage.get_node(node_id)
+        node = await self._storage.get_node(node_id, tenant_context="default")
         if not node:
             raise DocumentNotFoundError(f"Node {node_id} not found.")
 
         temporal = await self._storage.get_temporal_metadata(node_id)
-        edges = await self._storage.get_edges_for_node(node_id)
+        edges = await self._storage.get_edges_for_node(node_id, tenant_context="default")
 
         return {
             "node": node.model_dump(),
@@ -737,194 +736,16 @@ class ApexIndex:
         """Return all doc_ids currently stored in the index."""
         return await self._storage.list_document_ids(tenant_context="default")
 
-    async def get_nodes(self, doc_id: str) -> list[dict[str, Any]]:
-        """
-        Fetch all nodes for a specific document.
-
-        Returns:
-            List of node dictionaries.
-        """
-        nodes = await self._storage.get_nodes_by_doc(doc_id, tenant_context="default")
-        return [n.model_dump() for n in nodes]
-
-    # ── Enterprise: Temporal Query API ─────────────────────────────────
+    # ── Enterprise Client ─────────────────────────────────────────────
 
     @property
-    def version_resolver(self) -> VersionResolver:
-        """Access the version resolver for temporal version resolution."""
-        return VersionResolver(self._storage)
+    def enterprise(self) -> EnterpriseClient:
+        """Access enterprise features (temporal, RBAC, compliance)."""
+        if self._enterprise_client is None:
+            from apex_rag.enterprise.client import EnterpriseClient
 
-    @property
-    def temporal_reasoning(self) -> TemporalReasoningService:
-        """Access the temporal reasoning service."""
-        return TemporalReasoningService(self._storage)
-
-    @property
-    def access_control(self) -> AccessControlAgent:
-        """Access the access control agent for RBAC operations."""
-        return AccessControlAgent(self._storage)
-
-    async def temporal_query(
-        self,
-        question: str,
-        doc_id: str,
-        *,
-        as_of: datetime | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        latest: bool = False,
-    ) -> dict[str, Any]:
-        """
-        Query the index with temporal awareness.
-
-        Supports the following temporal modes:
-          - **Latest**: ``latest=True`` — returns current state
-          - **As-of date**: ``as_of=datetime(2025, 1, 15)`` — state at a point in time
-          - **Date range**: ``start_date=..., end_date=...`` — state over a range
-          - **Change detection**: uses the reasoning agent to detect changes
-
-        Examples::
-
-            # What was revenue on Jan 15, 2025?
-            result = await index.temporal_query(
-                "What is revenue?", doc_id,
-                as_of=datetime(2025, 1, 15, tzinfo=timezone.utc),
-            )
-
-            # Show the revenue trend between Jan and March
-            result = await index.temporal_query(
-                "Show revenue trend", doc_id,
-                start_date=datetime(2025, 1, 1),
-                end_date=datetime(2025, 3, 31),
-            )
-
-        Args:
-            question:   Natural-language question.
-            doc_id:     Target document ID.
-            as_of:      Retrieve version state as of this datetime.
-            start_date: Start of date range for range queries.
-            end_date:   End of date range for range queries.
-            latest:     If True, return the latest active state.
-
-        Returns:
-            A dict with keys: mode, result, reasoning, provenance, latency_ms.
-        """
-        service = self.temporal_reasoning
-        return await service.answer(
-            question,
-            doc_id,
-            as_of=as_of,
-            start_date=start_date,
-            end_date=end_date,
-            latest=latest,
-        )
-
-    async def get_version_history(
-        self,
-        node_id: str,
-    ) -> list[dict[str, Any]]:
-        """Get the full version history for a node.
-
-        Args:
-            node_id: The node ID.
-
-        Returns:
-            A list of version snapshots with temporal metadata.
-        """
-        return await self.temporal_reasoning.get_version_history(node_id)
-
-    async def get_version_lineage(
-        self,
-        node_id: str,
-    ) -> list[dict[str, Any]]:
-        """Get the version lineage chain for a node.
-
-        Traces the SUPERSEDES/REPLACED_BY chain to show how a node
-        evolved through versions.
-
-        Args:
-            node_id: The node ID.
-
-        Returns:
-            A list of lineage entries.
-        """
-        return await self.temporal_reasoning.get_lineage(node_id)
-
-    # ── Enterprise: Role-Aware Query API ───────────────────────────────
-
-    async def role_aware_query(
-        self,
-        question: str,
-        doc_id: str,
-        tenant_context: TenantContext,
-        *,
-        as_of: datetime | None = None,
-    ) -> ApexAnswer:
-        """
-        Query with enterprise RBAC enforcement.
-
-        Runs the full role-aware retrieval pipeline:
-          1. Access validation (tenant + role + permission)
-          2. Temporal validation (version resolution)
-          3. AST navigation
-          4. Role-aware filtering (field-level masking)
-          5. Audit trail logging
-
-        Args:
-            question:        Natural-language query.
-            doc_id:          Target document ID.
-            tenant_context:  The :class:`TenantContext` for the requesting user.
-            as_of:           Optional — retrieve state as of this datetime.
-
-        Returns:
-            An :class:`ApexAnswer` with only the content the user is
-            authorized to see.
-        """
-        # Build the role-aware retriever (use access_control property for singleton)
-        navigator = self._orchestrator.navigator
-        rar = RoleAwareRetriever(self._storage, navigator, self.access_control)
-
-        # Run role-aware retrieval
-        result = await rar.retrieve(
-            question,
-            doc_id,
-            tenant_context,
-            as_of=as_of,
-        )
-
-        if not result.allowed or not result.packets:
-            return ApexAnswer(
-                answer_text=("Access denied or no authorized evidence found for your query."),
-                query=question,
-                evidence_packets=[],
-            )
-
-        # Run role-aware synthesis
-        from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
-
-        rasynthesis = RoleAwareSynthesis(
-            EvidenceSynthesizerAgent(self._llm) if self._llm else None,
-            self.access_control,
-        )
-
-        answer_text = await rasynthesis.synthesize(
-            tenant_context,
-            question,
-            result.packets,
-        )
-
-        # Build temporal freshness
-        freshness_scores = [p.freshness_score for p in result.packets]
-        mean_freshness = sum(freshness_scores) / len(freshness_scores) if freshness_scores else 1.0
-
-        return ApexAnswer(
-            answer_text=answer_text,
-            evidence_packets=result.packets,
-            temporal_freshness=mean_freshness,
-            query=question,
-            coverage_guarantee=1.0,
-            prediction_set_size=len(result.packets),
-        )
+            self._enterprise_client = EnterpriseClient(self)
+        return self._enterprise_client
 
     # ── Fact Pipeline ──────────────────────────────────────────────────
 
@@ -949,6 +770,9 @@ class ApexIndex:
     ) -> dict[str, Any]:
         """Compare document/metric state between two points in time.
 
+        .. deprecated::
+            Use :meth:`enterprise.temporal_compare` instead.
+
         Args:
             question: Contextual query describing what to compare.
             doc_id:   Target document ID.
@@ -958,7 +782,7 @@ class ApexIndex:
         Returns:
             A dict with before/after metrics, diffs, and change analysis.
         """
-        return await self.temporal_reasoning.compare(
+        return await self.enterprise.temporal_compare(
             question,
             doc_id,
             date_a,

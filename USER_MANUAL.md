@@ -22,11 +22,15 @@ ApexRAG supports multiple backends for converting documents to the structural tr
 
 ### Configuration
 ```python
-await ApexIndex.create(
-    parser_backend="docling",  # or "markitdown"
-    max_concurrent_summaries=8, # Concurrency for ingestion
-    summariser_model="phi3",    # Use a smaller, faster model for summaries
-)
+# Configure ingestion parameters on the settings singleton:
+from apex_rag.config import settings
+
+settings.parser_backend = "docling"
+settings.max_concurrent_summaries = 8
+settings.summariser_model = "phi3"
+
+# Initialize client facade with applied settings:
+index = await ApexIndex.create()
 ```
 
 ---

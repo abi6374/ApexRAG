@@ -2,7 +2,7 @@
 config.py — Centralised configuration for ApexRAG.
 
 All settings are loaded from environment variables with sensible defaults.
-Uses pydantic-settings for validation and type coercion.
+Uses ``os.environ.get()`` — no external dependency required.
 
 Usage:
     from apex_rag.config import settings
@@ -15,9 +15,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
-# ---------------------------------------------------------------------------
-# Lightweight settings — no pydantic dependency required for core library
-# ---------------------------------------------------------------------------
+_VALID_PARSER_BACKENDS: frozenset[str] = frozenset({"markitdown", "docling", "plaintext"})
+_VALID_LOG_FORMATS: frozenset[str] = frozenset({"rich", "json"})
 
 
 class ApexSettings:
@@ -26,6 +25,9 @@ class ApexSettings:
 
     All values are read from environment variables at import time.
     No external dependencies required (pure os.environ.get()).
+
+    ``parser_backend`` and ``log_format`` are validated against
+    allowed :class:`Literal` values at access time via properties.
     """
 
     # ── Database ──────────────────────────────────────────────────────────
@@ -43,11 +45,16 @@ class ApexSettings:
     aggregator_model: str | None = os.getenv("APEX_AGGREGATOR_MODEL") or None
 
     # ── Ingestion ─────────────────────────────────────────────────────────
-    parser_backend: Literal["markitdown", "docling", "plaintext"] = os.getenv(
-        "APEX_PARSER_BACKEND", "markitdown"
-    )  # type: ignore[assignment]
+    _parser_backend_raw: str = os.getenv("APEX_PARSER_BACKEND", "markitdown")
     max_concurrent_summaries: int = int(os.getenv("APEX_MAX_CONCURRENT_SUMMARIES", "10"))
     verify_leaves: bool = os.getenv("APEX_VERIFY", "true").lower() == "true"
+
+    @property
+    def parser_backend(self) -> Literal["markitdown", "docling", "plaintext"]:
+        """Return the validated parser backend, falling back to ``markitdown``."""
+        if self._parser_backend_raw in _VALID_PARSER_BACKENDS:
+            return self._parser_backend_raw  # type: ignore[return-value]
+        return "markitdown"
 
     # ── API Server ────────────────────────────────────────────────────────
     cors_origins: list[str] = [
@@ -59,8 +66,15 @@ class ApexSettings:
 
     # ── Logging ───────────────────────────────────────────────────────────
     log_level: str = os.getenv("APEX_LOG_LEVEL", "INFO").upper()
-    log_format: Literal["rich", "json"] = os.getenv("APEX_LOG_FORMAT", "rich")  # type: ignore[assignment]
+    _log_format_raw: str = os.getenv("APEX_LOG_FORMAT", "rich")
     trace_enabled: bool = os.getenv("APEX_TRACE_ENABLED", "true").lower() == "true"
+
+    @property
+    def log_format(self) -> Literal["rich", "json"]:
+        """Return the validated log format, falling back to ``rich``."""
+        if self._log_format_raw in _VALID_LOG_FORMATS:
+            return self._log_format_raw  # type: ignore[return-value]
+        return "rich"
 
     # ── File paths ────────────────────────────────────────────────────────
     data_dir: Path = Path(os.getenv("APEX_DATA_DIR", "."))
@@ -68,6 +82,15 @@ class ApexSettings:
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024
+
+    def __repr__(self) -> str:
+        return (
+            f"ApexSettings(db_url={self.db_url!r}, model={self.model!r}, "
+            f"parser_backend={self.parser_backend!r}, log_format={self.log_format!r})"
+        )
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 # Singleton — import once, use everywhere

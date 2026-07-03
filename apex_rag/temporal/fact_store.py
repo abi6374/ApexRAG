@@ -49,6 +49,8 @@ from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage
 
 logger = logging.getLogger("apex_rag.temporal.fact_store")
 
+_DEFAULT_FACT_LIMIT = 500
+
 
 # ═══════════════════════════════════════════════════════════════
 # TemporalFact — Immutable Fact Model
@@ -169,7 +171,26 @@ class FactStore:
     def __init__(self, storage: ApexStorage) -> None:
         self._storage = storage
 
-    # ── Helper: FK-safe value coalescing ───────────────────────────────
+    # ── Internal helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _require_tenant(tenant_context: str | None, method_name: str = "operation") -> str:
+        """Validate that tenant_context is provided; returns the non-None value.
+
+        Uses a lazy import to avoid circular dependency with
+        ``apex_rag.enterprise.auth.access_control`` (which imports
+        ``ApexStorage`` from this module's sibling).
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        if not tenant_context:
+            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
+
+            raise MissingTenantContextError(
+                f"tenant_context is required for {method_name}."
+            )
+        return tenant_context
 
     @staticmethod
     def _coalesce_fk(value: str | None) -> str | None:
@@ -180,6 +201,26 @@ class FactStore:
         constraints if no matching row exists in the referenced table.
         """
         return value if value else None
+
+    def _fact_row(self, fact: TemporalFact, *, tenant_context: str) -> FactRow:
+        """Build a FactRow from a TemporalFact, coalescing FK-safe fields."""
+        return FactRow(
+            fact_id=fact.fact_id,
+            tenant_id=tenant_context,
+            subject=fact.subject,
+            predicate=fact.predicate,
+            object_=fact.object,
+            confidence=fact.confidence,
+            source_document_id=fact.source_document_id,
+            source_node_id=self._coalesce_fk(fact.source_node_id),
+            valid_from=fact.valid_from,
+            valid_to=fact.valid_to,
+            created_at=fact.created_at,
+            parent_fact_id=self._coalesce_fk(fact.parent_fact_id),
+            superseded_by=self._coalesce_fk(fact.superseded_by),
+            extraction_method=fact.extraction_method,
+            metadata_json=json.dumps(fact.metadata) if fact.metadata else "{}",
+        )
 
     # ── Write Operations ───────────────────────────────────────────────
 
@@ -201,32 +242,10 @@ class FactStore:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for save_fact.")
-
-        row = FactRow(
-            fact_id=fact.fact_id,
-            tenant_id=tenant_context,
-            subject=fact.subject,
-            predicate=fact.predicate,
-            object_=fact.object,
-            confidence=fact.confidence,
-            source_document_id=fact.source_document_id,
-            source_node_id=self._coalesce_fk(fact.source_node_id),
-            valid_from=fact.valid_from,
-            valid_to=fact.valid_to,
-            created_at=fact.created_at,
-            parent_fact_id=self._coalesce_fk(fact.parent_fact_id),
-            superseded_by=self._coalesce_fk(fact.superseded_by),
-            extraction_method=fact.extraction_method,
-            metadata_json=json.dumps(fact.metadata) if fact.metadata else "{}",
-        )
-
+        tc = self._require_tenant(tenant_context, "save_fact")
+        row = self._fact_row(fact, tenant_context=tc)
         async with self._storage.session() as session:
             session.add(row)
-
         return fact
 
     async def save_facts(
@@ -244,32 +263,10 @@ class FactStore:
         Returns:
             The saved facts.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for save_facts.")
-
+        tc = self._require_tenant(tenant_context, "save_facts")
         async with self._storage.session() as session:
             for fact in facts:
-                row = FactRow(
-                    fact_id=fact.fact_id,
-                    tenant_id=tenant_context,
-                    subject=fact.subject,
-                    predicate=fact.predicate,
-                    object_=fact.object,
-                    confidence=fact.confidence,
-                    source_document_id=fact.source_document_id,
-                    source_node_id=self._coalesce_fk(fact.source_node_id),
-                    valid_from=fact.valid_from,
-                    valid_to=fact.valid_to,
-                    created_at=fact.created_at,
-                    parent_fact_id=self._coalesce_fk(fact.parent_fact_id),
-                    superseded_by=self._coalesce_fk(fact.superseded_by),
-                    extraction_method=fact.extraction_method,
-                    metadata_json=json.dumps(fact.metadata) if fact.metadata else "{}",
-                )
-                session.add(row)
-
+                session.add(self._fact_row(fact, tenant_context=tc))
         return facts
 
     # ── Read Operations ────────────────────────────────────────────────
@@ -289,15 +286,11 @@ class FactStore:
         Returns:
             The :class:`TemporalFact` if found and accessible.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for get_fact.")
-
+        tc = self._require_tenant(tenant_context, "get_fact")
         async with self._storage.session() as session:
             stmt = select(FactRow).where(
                 FactRow.fact_id == fact_id,
-                FactRow.tenant_id == tenant_context,
+                FactRow.tenant_id == tc,
             )
             result = await session.execute(stmt)
             row = result.scalars().first()
@@ -322,15 +315,11 @@ class FactStore:
         Returns:
             A list of :class:`TemporalFact` objects.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for get_facts.")
-
+        tc = self._require_tenant(tenant_context, "get_facts")
         async with self._storage.session() as session:
             stmt = (
                 select(FactRow)
-                .where(FactRow.tenant_id == tenant_context)
+                .where(FactRow.tenant_id == tc)
                 .order_by(FactRow.created_at.desc())
                 .limit(limit)
                 .offset(offset)
@@ -343,29 +332,31 @@ class FactStore:
         doc_id: str,
         *,
         tenant_context: str | None = None,
+        limit: int = _DEFAULT_FACT_LIMIT,
+        offset: int = 0,
     ) -> list[TemporalFact]:
-        """Fetch all facts for a document, scoped to tenant.
+        """Fetch facts for a document with pagination, scoped to tenant.
 
         Args:
             doc_id:          The document ID.
             tenant_context:  Required tenant ID.
+            limit:           Maximum results (default 500).
+            offset:          Pagination offset.
 
         Returns:
             Facts extracted from the document.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for get_facts_by_document.")
-
+        tc = self._require_tenant(tenant_context, "get_facts_by_document")
         async with self._storage.session() as session:
             stmt = (
                 select(FactRow)
                 .where(
                     FactRow.source_document_id == doc_id,
-                    FactRow.tenant_id == tenant_context,
+                    FactRow.tenant_id == tc,
                 )
                 .order_by(FactRow.created_at.asc())
+                .limit(limit)
+                .offset(offset)
             )
             result = await session.execute(stmt)
             return [self._row_to_fact(r) for r in result.scalars().all()]
@@ -390,17 +381,13 @@ class FactStore:
         Returns:
             Facts valid at the given time.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for get_facts_at_time.")
-
+        tc = self._require_tenant(tenant_context, "get_facts_at_time")
         async with self._storage.session() as session:
             stmt = (
                 select(FactRow)
                 .where(
                     FactRow.source_document_id == doc_id,
-                    FactRow.tenant_id == tenant_context,
+                    FactRow.tenant_id == tc,
                     FactRow.valid_from <= as_of,
                     (FactRow.valid_to.is_(None) | (FactRow.valid_to > as_of)),
                 )
@@ -443,8 +430,9 @@ class FactStore:
 
         PRINCIPLE 1 — Immutable Temporal Facts.
         Facts are never mutated.  This method creates a new tombstone fact
-        that marks the original as superseded.  The original row is
-        left untouched — only its lineage is extended.
+        whose ``valid_to`` is set to *now*, causing ``get_facts_at_time()``
+        to exclude the fact from results at any future point.  The original
+        row is left untouched — only its lineage is extended.
 
         Args:
             fact_id:         The fact UUID to expire.
@@ -453,24 +441,17 @@ class FactStore:
         Returns:
             True if the fact was found and a tombstone was created.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for delete_fact.")
-
+        tc = self._require_tenant(tenant_context, "delete_fact")
         async with self._storage.session() as session:
-            # Fetch the existing fact row (read-only, never mutate)
             stmt = select(FactRow).where(
                 FactRow.fact_id == fact_id,
-                FactRow.tenant_id == tenant_context,
+                FactRow.tenant_id == tc,
             )
             result = await session.execute(stmt)
             row = result.scalars().first()
             if row is None:
                 return False
 
-            # Create a tombstone version that supersedes the original.
-            # The original row is never modified (Principle 1).
             now = datetime.now(timezone.utc)
             tombstone = FactRow(
                 fact_id=str(uuid.uuid4()),
@@ -482,7 +463,7 @@ class FactStore:
                 source_document_id=row.source_document_id,
                 source_node_id=row.source_node_id,
                 valid_from=row.valid_from,
-                valid_to=row.valid_to,
+                valid_to=now,  # Expire at now so get_facts_at_time excludes this
                 created_at=now,
                 parent_fact_id=fact_id,
                 extraction_method=row.extraction_method,
@@ -501,8 +482,6 @@ class FactStore:
     @staticmethod
     def _row_to_fact(row: FactRow) -> TemporalFact:
         """Convert a database row to a :class:`TemporalFact`."""
-        import json
-
         try:
             meta = json.loads(row.metadata_json) if row.metadata_json else {}
         except (json.JSONDecodeError, TypeError):

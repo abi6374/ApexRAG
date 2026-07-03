@@ -37,46 +37,71 @@ sequenceDiagram
 ## Basic Query
 
 ```python
-result = await index.query("What was the Q3 revenue growth?", doc_id)
-if result:
-    print(f"Content: {result.content}")
-    print(f"Section: {result.title}")
-    print(f"Path: {result.path}")
-    print(f"Verified: {result.verified}")
-    print(f"Confidence: {result.confidence:.2f}")
+answer = await index.query("What was the Q3 revenue growth?", doc_id)
+
+print(f"Answer: {answer.answer_text}")
+print(f"Confidence Coverage Guarantee: {answer.coverage_guarantee:.2f}")
+
+for idx, packet in enumerate(answer.evidence_packets):
+    print(f"\n[Evidence {idx+1}]")
+    print(f"Source Node: {packet.node_id}")
+    print(f"Page Number: {packet.page_number}")
+    print(f"Section Path: {packet.section_path}")
+    print(f"Content: {packet.content}")
+    print(f"Confidence: {packet.confidence:.2f}")
+    print(f"Freshness: {packet.freshness_score:.2f}")
 ```
 
 ## Query Result
 
-`NavigationResult` contains:
+`ApexAnswer` represents the final output of the query pipeline:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `content` | `str` | Exact leaf section text answering the query |
-| `node_id` | `int` | Primary key of the leaf node |
-| `path` | `str` | LTree path (e.g., `"2.1.3"`) |
-| `title` | `str` | Section heading |
-| `verified` | `bool` | Whether the LLM confirmed the answer |
-| `confidence` | `float` | Self-reported confidence (0–1) |
-| `trace` | `list[tuple]` | Complete navigation path as `(node_id, title)` pairs |
+| `answer_text` | `str` | The generated answer string, with inline citations |
+| `evidence_packets` | `list[EvidencePacket]` | Fully annotated evidence blocks supporting the answer |
+| `temporal_freshness` | `float` | Mean freshness score across all evidence packets (0–1) |
+| `contradictions` | `list[CausalEdge]` | Conflicting temporal edits flagged during audit |
+| `coverage_guarantee` | `float` | Conformal prediction confidence coverage level |
+| `prediction_set_size` | `int` | Number of evidence packets in the prediction set |
+| `causal_chain` | `list[CausalEdge]` | Reasoning chains linking evidence packets |
+| `query` | `str` | The original user query |
+| `latency_ms` | `float` | End-to-end latency in milliseconds |
+
+### EvidencePacket
+
+Each evidence packet in `evidence_packets` contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `node_id` | `str` | UUID4 identifier of the matching ASTNode |
+| `document_id` | `str` | ID of the source document |
+| `page_number` | `int` | Page number in the source document |
+| `section_path` | `str` | Node lineage path |
+| `content` | `str` | Actual text of the retrieved section |
+| `confidence` | `float` | Retrieval/verification confidence (0–1) |
+| `freshness_score` | `float` | Freshness score (0–1) |
 
 ## Subtree Search
 
-Restrict navigation to a specific subtree:
+To restrict navigation to a specific subtree, incorporate the target
+section directly into your question:
 
 ```python
-# Get the tree first
-tree = await index.get_tree(doc_id)
-
-# Find a specific node ID
-target_node = next(n for n in tree if n["title"] == "Financials")
-
-# Query only within that subtree
-result = await index.query(
-    "What is the net profit?",
+# Narrow the scope by referencing the section in the question
+answer = await index.query(
+    "In the 'Financials' section, what is the net profit?",
     doc_id,
-    root_node_id=target_node["id"],
 )
+```
+
+You can inspect the document tree to find section names first:
+
+```python
+tree = await index.get_tree(doc_id)
+for node in tree:
+    if node["node_type"] == "HEADING":
+        print(f"{node['node_id']}: {node['content']}")
 ```
 
 ## Global Search
@@ -84,29 +109,118 @@ result = await index.query(
 Search across all indexed documents:
 
 ```python
-result = await index.query_global("What is our total revenue across all divisions?")
+answer = await index.query_global("What is our total revenue across all divisions?")
+if answer:
+    print(answer.answer_text)
+    for pkt in answer.evidence_packets:
+        print(f"  From document: {pkt.document_id}")
 ```
 
-The agent first identifies relevant documents using keyword search (FTS5) and
-LLM-based document selection, then navigates each candidate in order.
+The agent iterates through all indexed documents, querying each one in
+sequence, and returns the first answer with supporting evidence.
 
 ## Hybrid Search
 
-Combine vector similarity + keyword BM25 + agentic navigation:
+Combine vector similarity + keyword BM25 + agentic navigation by setting
+the ``domain`` parameter:
 
 ```python
-# Requires sentence-transformers
+# Setting domain to 'financial' or 'analytical' enables hybrid search
+# under the hood (requires sentence-transformers)
 pip install apex-rag[vectors]
 
-result = await index.query(
+answer = await index.query(
     "What is the revenue growth percentage?",
     doc_id,
-    hybrid=True,  # Enable hybrid search
+    domain="financial",  # Enables hybrid search
 )
 ```
 
 Hybrid search enriches the agent's navigation with semantic hints, making it
 faster and more accurate for complex queries.
+
+## Enterprise Features
+
+Enterprise capabilities — temporal versioning, RBAC, and audit trails — are
+accessed through the ``index.enterprise`` property.
+
+### Temporal Queries
+
+```python
+from datetime import datetime, timezone
+
+enterprise = index.enterprise
+
+# Latest state
+result = await enterprise.temporal_query(
+    "What is the current revenue?", doc_id, latest=True,
+)
+
+# State as of a specific date
+result = await enterprise.temporal_query(
+    "What was the revenue on Jan 15, 2025?", doc_id,
+    as_of=datetime(2025, 1, 15, tzinfo=timezone.utc),
+)
+
+# State over a date range
+result = await enterprise.temporal_query(
+    "Show the revenue trend", doc_id,
+    start_date=datetime(2025, 1, 1),
+    end_date=datetime(2025, 3, 31),
+)
+
+# Compare two points in time
+result = await enterprise.temporal_compare(
+    "Compare revenue", doc_id,
+    date_a=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    date_b=datetime(2025, 3, 31, tzinfo=timezone.utc),
+)
+```
+
+### Version History & Lineage
+
+```python
+# Get full version history for a specific node
+versions = await enterprise.get_version_history(node_id)
+for v in versions:
+    print(f"v{v['version_number']}: {v['effective_from']} → {v['effective_to']}")
+
+# Trace the supersession chain
+lineage = await enterprise.get_version_lineage(node_id)
+for entry in lineage:
+    print(f"{entry['lineage_type']}: {entry['source_version_id']} → {entry['target_version_id']}")
+```
+
+### Role-Aware Query (RBAC)
+
+```python
+from apex_rag import TenantContext
+
+# Query with enterprise RBAC enforcement
+ctx = TenantContext(
+    tenant_id="acme",
+    user_id="alice",
+    roles=["Analyst"],
+)
+
+answer = await enterprise.role_aware_query(
+    "What is the net profit?",
+    doc_id,
+    tenant_context=ctx,
+)
+
+print(answer.answer_text)
+# Only content the 'Analyst' role is authorized to see is returned
+```
+
+### Service Access
+
+You can also access individual enterprise services directly:
+
+```python
+resolver = enterprise.version_resolver
+history = await resolver.get_version_history(node_id)
+```
 
 ## Streaming (Real-time)
 
@@ -138,18 +252,26 @@ Cache entries have a TTL of 7 days and are pruned automatically.
 
 ## Performance Tips
 
-1. **Verify leaves** — Keep `verify_leaves=True` for production. It adds one LLM
-   call per leaf but eliminates hallucination.
+1. **Use the right domain** — Set the ``domain`` parameter to match your
+   content type (``"financial"``, ``"legal"``, ``"analytical"``) for
+   optimized freshness decay and retrieval strategy.
 
-2. **Use a cheaper verifier** — Set a smaller model for verification:
+2. **Leverage the cache** — Repeated or similar queries hit the cache
+   instantly, returning results in milliseconds.
+
+3. **Conformal coverage** — Lower the ``coverage`` parameter for faster but
+   less conservative results (default 0.90; minimum recommended 0.80):
    ```python
-   await ApexIndex.create(
-       model="llama3.1",         # Smart navigator
-       verifier_model="phi3",    # Cheaper verifier
+   answer = await index.query(
+       "What is Q3 revenue?", doc_id,
+       coverage=0.85,  # Slightly faster, still reliable
    )
    ```
 
-3. **Leverage the cache** — Repeated or similar queries hit the cache instantly.
-
-4. **Subtree pruning** — If you know the answer is in a specific section,
-   use `root_node_id` to skip irrelevant branches.
+4. **Subtree focusing** — If you know the answer is in a specific section,
+   mention it in the question to guide the navigator:
+   ```python
+   answer = await index.query(
+       "In the financial statements, what is Q3 revenue?", doc_id,
+   )
+   ```

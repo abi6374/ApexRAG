@@ -37,8 +37,7 @@ from apex_rag.cli import (
     repl_loop,
     spinner_context,
 )
-from apex_rag.exceptions import ApexRAGError, DocumentNotFoundError
-
+from apex_rag.exceptions import DocumentNotFoundError
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -54,12 +53,8 @@ def mock_index() -> MagicMock:
     """A mocked ApexIndex instance for REPL testing."""
     idx = MagicMock()
     idx.list_documents = AsyncMock(return_value=["doc1", "doc2"])
-    idx.get_stats = AsyncMock(
-        return_value={"total_nodes": 10, "leaf_count": 5, "max_depth": 3}
-    )
-    idx.stream_query = AsyncMock(
-        return_value=_mock_stream(["This ", "is ", "the ", "answer."])
-    )
+    idx.get_stats = AsyncMock(return_value={"total_nodes": 10, "leaf_count": 5, "max_depth": 3})
+    idx.stream_query = AsyncMock(return_value=_mock_stream(["This ", "is ", "the ", "answer."]))
     return idx
 
 
@@ -109,6 +104,7 @@ class TestBanner:
         console = Console(file=buf, width=120)
         with patch("apex_rag.cli.console", console):
             from apex_rag.cli import COMMAND_HELP
+
             console.print(COMMAND_HELP)
         output = buf.getvalue()
         assert "serve" in output
@@ -195,19 +191,17 @@ class TestProgress:
         """Spinner context should accept updates."""
         buf = StringIO()
         console = Console(file=buf, width=120, color_system=None)
-        with patch("apex_rag.cli.console", console):
-            with spinner_context(text="Testing…") as status:
-                status.update("Still testing…")
+        with patch("apex_rag.cli.console", console), spinner_context(text="Testing…") as status:
+            status.update("Still testing…")
         # Should not raise
 
     def test_progress_bar_context(self) -> None:
         """ProgressBar should advance correctly."""
         buf = StringIO()
         console = Console(file=buf, width=120, color_system=None)
-        with patch("apex_rag.cli.console", console):
-            with ProgressBar(total=5, description="Test") as pb:
-                pb.advance()
-                pb.advance(2)
+        with patch("apex_rag.cli.console", console), ProgressBar(total=5, description="Test") as pb:
+            pb.advance()
+            pb.advance(2)
         # Should not raise
 
     @pytest.mark.asyncio
@@ -249,6 +243,7 @@ class TestDoctor:
             _print_system_info()
         output = buf.getvalue()
         from apex_rag import __version__
+
         assert __version__ in output
         assert "Version" in output
 
@@ -355,7 +350,9 @@ class TestREPL:
         index.list_documents = AsyncMock(return_value=["doc1"])
 
         # stream_query is an async generator, so we need a real async gen as the mock
-        async def stream_mock(question: str, doc_id: str, **kwargs: Any) -> AsyncGenerator[str, None]:
+        async def stream_mock(
+            question: str, doc_id: str, **kwargs: Any
+        ) -> AsyncGenerator[str, None]:
             _ = doc_id, kwargs
             for chunk in ["Answer ", "text"]:
                 yield chunk
@@ -440,6 +437,7 @@ class TestMainEntryPoint:
             patch("sys.argv", ["apex-rag", "--version"]),
         ):
             from apex_rag.__main__ import main
+
             main()
         output = buf.getvalue()
         assert __version__ in output
@@ -454,6 +452,7 @@ class TestMainEntryPoint:
             patch("sys.argv", ["apex-rag"]),
         ):
             from apex_rag.__main__ import main
+
             main()
         output = buf.getvalue()
         assert "Usage" in output

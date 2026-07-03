@@ -14,16 +14,14 @@ Covers:
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage
+from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.temporal.fact_store import FactStore, TemporalFact
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -36,9 +34,9 @@ async def storage() -> AsyncGenerator[ApexStorage, None]:
     creation that gracefully handles SQLite's lack of INDEX IF NOT EXISTS.
     """
     import tempfile
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
     yield storage
 
 
@@ -99,7 +97,8 @@ async def seed_facts(fact_store: FactStore) -> dict[str, TemporalFact]:
         ),
     }
     saved = await fact_store.save_facts(
-        list(facts.values()), tenant_context="tenant-a",
+        list(facts.values()),
+        tenant_context="tenant-a",
     )
     assert len(saved) == 5
     # Return by key name for easy access in tests
@@ -178,7 +177,9 @@ class TestFactStoreSave:
     @pytest.mark.asyncio
     async def test_save_fact(self, fact_store: FactStore) -> None:
         fact = TemporalFact(
-            subject="Test", predicate="is", object="saved",
+            subject="Test",
+            predicate="is",
+            object="saved",
             source_document_id="doc-1",
         )
         saved = await fact_store.save_fact(fact, tenant_context="tenant-a")
@@ -212,7 +213,9 @@ class TestFactStoreRead:
     """FactStore get methods."""
 
     @pytest.mark.asyncio
-    async def test_get_fact(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_fact(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         f = seed_facts["revenue_q1"]
         retrieved = await fact_store.get_fact(f.fact_id, tenant_context="tenant-a")
         assert retrieved is not None
@@ -220,7 +223,9 @@ class TestFactStoreRead:
         assert retrieved.object == "$40M"
 
     @pytest.mark.asyncio
-    async def test_get_fact_missing_tenant(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_fact_missing_tenant(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         f = seed_facts["revenue_q1"]
         with pytest.raises(Exception) as exc:
             await fact_store.get_fact(f.fact_id)
@@ -233,7 +238,9 @@ class TestFactStoreRead:
 
     @pytest.mark.asyncio
     async def test_get_facts_by_document(
-        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact],
+        self,
+        fact_store: FactStore,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         facts = await fact_store.get_facts_by_document("doc-123", tenant_context="tenant-a")
         assert len(facts) == 4  # doc-123 has 4 facts
@@ -247,12 +254,16 @@ class TestFactStoreRead:
         assert facts == []
 
     @pytest.mark.asyncio
-    async def test_get_facts(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_facts(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         facts = await fact_store.get_facts(tenant_context="tenant-a", limit=10)
         assert len(facts) == 5  # All facts
 
     @pytest.mark.asyncio
-    async def test_get_facts_pagination(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_facts_pagination(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         facts = await fact_store.get_facts(tenant_context="tenant-a", limit=2, offset=0)
         assert len(facts) == 2
 
@@ -261,7 +272,9 @@ class TestTemporalQueries:
     """Temporal window queries — get_facts_at_time and get_active_facts."""
 
     @pytest.mark.asyncio
-    async def test_get_facts_at_time_q1(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_facts_at_time_q1(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         """Q1 2025 — only revenue_q1 and policy_x are valid."""
         as_of = datetime(2025, 2, 15, tzinfo=timezone.utc)
         facts = await fact_store.get_facts_at_time("doc-123", as_of, tenant_context="tenant-a")
@@ -271,7 +284,9 @@ class TestTemporalQueries:
         assert len(facts) == 2
 
     @pytest.mark.asyncio
-    async def test_get_facts_at_time_q2(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_facts_at_time_q2(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         """Q2 2025 — revenue_q2 and policy_x are valid."""
         as_of = datetime(2025, 5, 15, tzinfo=timezone.utc)
         facts = await fact_store.get_facts_at_time("doc-123", as_of, tenant_context="tenant-a")
@@ -281,7 +296,9 @@ class TestTemporalQueries:
         assert "Travel Policy" in {f.subject for f in facts}
 
     @pytest.mark.asyncio
-    async def test_get_facts_at_time_q4(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_facts_at_time_q4(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         """Q4 2025 — revenue_q3 (active) and policy_x are valid."""
         as_of = datetime(2025, 10, 1, tzinfo=timezone.utc)
         facts = await fact_store.get_facts_at_time("doc-123", as_of, tenant_context="tenant-a")
@@ -291,7 +308,9 @@ class TestTemporalQueries:
         assert "Travel Policy" in {f.subject for f in facts}
 
     @pytest.mark.asyncio
-    async def test_get_facts_at_time_2026(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_facts_at_time_2026(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         """2026 — only revenue_q3 is valid (policy_x expired in 2025)."""
         as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
         facts = await fact_store.get_facts_at_time("doc-123", as_of, tenant_context="tenant-a")
@@ -299,7 +318,9 @@ class TestTemporalQueries:
         assert len(facts) == 1  # Only revenue_q3
 
     @pytest.mark.asyncio
-    async def test_get_active_facts(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_get_active_facts(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         """Active facts are those with valid_to=None (currently valid)."""
         facts = await fact_store.get_active_facts("doc-123", tenant_context="tenant-a")
         # revenue_q3 (no valid_to) should be included; revenue_q1/q2 have ended
@@ -312,7 +333,9 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_cross_tenant_get_facts(
-        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact],
+        self,
+        fact_store: FactStore,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         """Facts saved in tenant-a should not be visible from tenant-b."""
         facts = await fact_store.get_facts_by_document("doc-123", tenant_context="tenant-b")
@@ -320,7 +343,9 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_cross_tenant_get_fact(
-        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact],
+        self,
+        fact_store: FactStore,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         f = seed_facts["revenue_q1"]
         result = await fact_store.get_fact(f.fact_id, tenant_context="tenant-b")
@@ -328,7 +353,9 @@ class TestTenantIsolation:
 
     @pytest.mark.asyncio
     async def test_cross_tenant_get_facts_at_time(
-        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact],
+        self,
+        fact_store: FactStore,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         as_of = datetime(2025, 2, 15, tzinfo=timezone.utc)
         facts = await fact_store.get_facts_at_time("doc-123", as_of, tenant_context="tenant-b")
@@ -340,7 +367,9 @@ class TestDeleteFact:
 
     @pytest.mark.asyncio
     async def test_delete_fact_creates_tombstone(
-        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact],
+        self,
+        fact_store: FactStore,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         f = seed_facts["policy_x"]
         result = await fact_store.delete_fact(f.fact_id, tenant_context="tenant-a")
@@ -363,7 +392,9 @@ class TestDeleteFact:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_delete_fact_missing_tenant(self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]) -> None:
+    async def test_delete_fact_missing_tenant(
+        self, fact_store: FactStore, seed_facts: dict[str, TemporalFact]
+    ) -> None:
         f = seed_facts["revenue_q1"]
         with pytest.raises(Exception) as exc:
             await fact_store.delete_fact(f.fact_id)
@@ -391,8 +422,11 @@ class TestFactStoreRowConversion:
     @pytest.mark.asyncio
     async def test_extraction_method_roundtrip(self, fact_store: FactStore) -> None:
         fact = TemporalFact(
-            subject="Test", predicate="is", object="extracted",
-            source_document_id="doc-1", extraction_method="llm",
+            subject="Test",
+            predicate="is",
+            object="extracted",
+            source_document_id="doc-1",
+            extraction_method="llm",
         )
         await fact_store.save_fact(fact, tenant_context="tenant-a")
         retrieved = await fact_store.get_fact(fact.fact_id, tenant_context="tenant-a")

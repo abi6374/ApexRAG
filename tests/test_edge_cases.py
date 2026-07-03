@@ -21,7 +21,6 @@ from apex_rag.ingestion.legacy import _ast_nodes_to_parsed_sections
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import build_ltree_path, path_depth, truncate
 
-
 _parser = ApexParser()
 
 
@@ -31,6 +30,7 @@ def _parse(text: str) -> list:
         return []
     nodes = _parser.parse_markdown(text)
     return _ast_nodes_to_parsed_sections(nodes)
+
 
 # ---------------------------------------------------------------------------
 # Empty & Minimal Input Tests
@@ -96,7 +96,9 @@ class TestLargeContent:
         """
         # Generate a large section to stress the chunking path
         large_text = "# Huge Section\n"
-        paragraphs = [f"Paragraph {i} with enough content to make multiple chunks." for i in range(200)]
+        paragraphs = [
+            f"Paragraph {i} with enough content to make multiple chunks." for i in range(200)
+        ]
         large_text += "\n\n".join(paragraphs)
         sections = _parse(large_text)
         assert len(sections) == 1
@@ -128,17 +130,27 @@ async def test_concurrent_tree_access() -> None:
     # Insert some nodes
     async with storage.session() as session:
         root = DocumentNode(
-            doc_id="concurrent-test", parent_id=None, path="1",
-            title="Root", summary="Root", content="Root content",
-            depth=0, position=1,
+            doc_id="concurrent-test",
+            parent_id=None,
+            path="1",
+            title="Root",
+            summary="Root",
+            content="Root content",
+            depth=0,
+            position=1,
         )
         await storage.insert_node(session, root)
 
         for i in range(5):
             child = DocumentNode(
-                doc_id="concurrent-test", parent_id=root.id, path=f"1.{i+1}",
-                title=f"Child {i}", summary=f"Summary {i}", content=f"Content {i}",
-                depth=1, position=i + 1,
+                doc_id="concurrent-test",
+                parent_id=root.id,
+                path=f"1.{i + 1}",
+                title=f"Child {i}",
+                summary=f"Summary {i}",
+                content=f"Content {i}",
+                depth=1,
+                position=i + 1,
             )
             await storage.insert_node(session, child)
 
@@ -191,41 +203,67 @@ class TestHelperFunctions:
 class TestDocumentNode:
     def test_is_leaf_with_content(self) -> None:
         node = DocumentNode(
-            doc_id="test", path="1", title="Test",
-            summary="Test", content="Has content",
-            depth=0, position=1,
+            doc_id="test",
+            path="1",
+            title="Test",
+            summary="Test",
+            content="Has content",
+            depth=0,
+            position=1,
         )
         assert node.is_leaf is True
 
     def test_is_leaf_without_content(self) -> None:
         node = DocumentNode(
-            doc_id="test", path="1", title="Test",
-            summary="Test", content=None,
-            depth=0, position=1,
+            doc_id="test",
+            path="1",
+            title="Test",
+            summary="Test",
+            content=None,
+            depth=0,
+            position=1,
         )
         assert node.is_leaf is False
 
     def test_page_range_same_page(self) -> None:
         node = DocumentNode(
-            doc_id="test", path="1", title="Test",
-            summary="Test", content="Content",
-            depth=0, position=1, page_start=5, page_end=5,
+            doc_id="test",
+            path="1",
+            title="Test",
+            summary="Test",
+            content="Content",
+            depth=0,
+            position=1,
+            page_start=5,
+            page_end=5,
         )
         assert node.page_range == "p.5"
 
     def test_page_range_different(self) -> None:
         node = DocumentNode(
-            doc_id="test", path="1", title="Test",
-            summary="Test", content="Content",
-            depth=0, position=1, page_start=3, page_end=7,
+            doc_id="test",
+            path="1",
+            title="Test",
+            summary="Test",
+            content="Content",
+            depth=0,
+            position=1,
+            page_start=3,
+            page_end=7,
         )
         assert "p.3" in node.page_range
         assert "7" in node.page_range
 
     def test_page_range_unknown(self) -> None:
         node = DocumentNode(
-            doc_id="test", path="1", title="Test",
-            summary="Test", content="Content",
-            depth=0, position=1, page_start=0, page_end=0,
+            doc_id="test",
+            path="1",
+            title="Test",
+            summary="Test",
+            content="Content",
+            depth=0,
+            position=1,
+            page_start=0,
+            page_end=0,
         )
         assert node.page_range == ""

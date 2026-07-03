@@ -21,9 +21,10 @@ async def test_strict_leaf_verifier_true():
     assert result is True
     # Ensure system prompt was sent
     call_args = mock_llm.generate.call_args[1]
-    assert "strict verification engine" in call_args['prompt']
+    assert "strict verification engine" in call_args["prompt"]
     assert "temperature" in call_args
-    assert call_args['temperature'] == 0.0
+    assert call_args["temperature"] == 0.0
+
 
 @pytest.mark.asyncio
 async def test_strict_leaf_verifier_false():

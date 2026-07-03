@@ -4,9 +4,7 @@ tests/test_metric_parser.py — Tests for the MetricValueParser (Phase 3).
 
 from __future__ import annotations
 
-import pytest
-
-from apex_rag.core.metrics.parser import MetricValueParser, ParsedMetric, UnitType
+from apex_rag.core.metrics.parser import MetricValueParser, UnitType
 
 
 class TestMetricValueParser:

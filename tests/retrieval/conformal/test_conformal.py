@@ -13,20 +13,25 @@ Total: ~19 tests
 
 from __future__ import annotations
 
-import math
-from unittest.mock import AsyncMock, MagicMock, patch
+# ═══════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════
+import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from apex_rag.core.evidence.models import EvidencePacket as CoreEvidencePacket
 from apex_rag.models.unified_models import (
-    ASTNode as UnifiedASTNode,
     ApexAnswer,
-    CausalEdge,
-    EdgeType,
-    EvidencePacket as UnifiedEvidencePacket,
     NodeType,
     TemporalMetadata,
+)
+from apex_rag.models.unified_models import (
+    ASTNode as UnifiedASTNode,
+)
+from apex_rag.models.unified_models import (
+    EvidencePacket as UnifiedEvidencePacket,
 )
 from apex_rag.retrieval.conformal.calibrator import ConformalCalibrator
 from apex_rag.retrieval.conformal.predictor import ConformalPredictor
@@ -34,15 +39,6 @@ from apex_rag.retrieval.conformal.scorer import (
     NonconformityScorer,
     NonconformityStrategy,
 )
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Helpers
-# ═══════════════════════════════════════════════════════════════════════
-
-
-import uuid
-
 
 _ID_COUNTER: int = 0
 
@@ -403,14 +399,20 @@ class TestOrchestratorConformalIntegration:
 
     async def test_nonconformity_scores_in_apex_answer(self) -> None:
         """ApexAnswer gets nonconformity_scores on EvidencePackets."""
-        from apex_rag.agents.orchestrator import Orchestrator
-        from apex_rag.retrieval.conformal.scorer import NonconformityScorer
-        from apex_rag.retrieval.conformal.predictor import ConformalPredictor
-
-        from apex_rag.models.unified_models import ASTNode, NodeType, EvidencePacket, TemporalMetadata
         import uuid
 
-        def _next_id(): return str(uuid.uuid4())
+        from apex_rag.agents.orchestrator import Orchestrator
+        from apex_rag.models.unified_models import (
+            ASTNode,
+            EvidencePacket,
+            NodeType,
+            TemporalMetadata,
+        )
+        from apex_rag.retrieval.conformal.predictor import ConformalPredictor
+        from apex_rag.retrieval.conformal.scorer import NonconformityScorer
+
+        def _next_id():
+            return str(uuid.uuid4())
 
         planner = MagicMock()
         planner.plan = AsyncMock(return_value=["sub-q1", "sub-q2"])
@@ -425,7 +427,7 @@ class TestOrchestratorConformalIntegration:
             node_id=nav_result.node_id,
             node_type=NodeType.PARAGRAPH,
             content=nav_result.content,
-            doc_id="doc-1"
+            doc_id="doc-1",
         )
         navigator = MagicMock()
         navigator.find = AsyncMock(return_value=nav_result)
@@ -434,9 +436,7 @@ class TestOrchestratorConformalIntegration:
         critic.evaluate = AsyncMock(return_value=True)
 
         synthesizer = MagicMock()
-        synthesizer.synthesize = AsyncMock(
-            return_value="Q3 revenue was $52 million [Source 1]."
-        )
+        synthesizer.synthesize = AsyncMock(return_value="Q3 revenue was $52 million [Source 1].")
 
         scorer = NonconformityScorer(strategy=NonconformityStrategy.INVERSE_RETRIEVAL)
         calibrator = MagicMock()
@@ -452,12 +452,11 @@ class TestOrchestratorConformalIntegration:
                 EvidencePacket(
                     node=nav_result.node,
                     temporal_metadata=TemporalMetadata(
-                        node_id=nav_result.node.node_id,
-                        freshness_score=0.9
+                        node_id=nav_result.node.node_id, freshness_score=0.9
                     ),
                     retrieval_score=0.95,
                     nonconformity_score=1.0,
-                    rank=1
+                    rank=1,
                 )
             ]
 
@@ -470,7 +469,6 @@ class TestOrchestratorConformalIntegration:
             max_iterations=1,
         )
         orchestrator.execute_query = mock_execute_query
-
 
         answer = await orchestrator.execute_query_integrated(
             "What was Q3 revenue?",
@@ -491,8 +489,8 @@ class TestOrchestratorConformalIntegration:
     async def test_conformal_filtering_reduces_prediction_set(self) -> None:
         """Conformal filtering reduces packet count when scores exceed threshold."""
         from apex_rag.agents.orchestrator import Orchestrator
-        from apex_rag.retrieval.conformal.scorer import NonconformityScorer
         from apex_rag.retrieval.conformal.predictor import ConformalPredictor
+        from apex_rag.retrieval.conformal.scorer import NonconformityScorer
 
         planner = MagicMock()
         planner.plan = AsyncMock(return_value=["sub-q1", "sub-q2", "sub-q3"])
@@ -516,13 +514,14 @@ class TestOrchestratorConformalIntegration:
             result.path = r[1]
             result.confidence = r[2]
             result.content = r[3]
-            
+
             from apex_rag.models.unified_models import ASTNode, NodeType
+
             result.node = ASTNode(
                 node_id=result.node_id,
                 node_type=NodeType.PARAGRAPH,
                 content=result.content,
-                doc_id="doc-1"
+                doc_id="doc-1",
             )
             return result
 
@@ -533,9 +532,7 @@ class TestOrchestratorConformalIntegration:
         critic.evaluate = AsyncMock(return_value=True)
 
         synthesizer = MagicMock()
-        synthesizer.synthesize = AsyncMock(
-            return_value="Synthesized answer with citations."
-        )
+        synthesizer.synthesize = AsyncMock(return_value="Synthesized answer with citations.")
 
         # Use strict threshold — only very high confidence packets pass
         scorer = NonconformityScorer(strategy=NonconformityStrategy.INVERSE_RETRIEVAL)
@@ -567,8 +564,7 @@ class TestOrchestratorConformalIntegration:
         # node-2 has confidence=0.20 → NC=0.80 > 0.1 → filtered
         # node-3 has confidence=0.10 → NC=0.90 > 0.1 → filtered
         assert answer.prediction_set_size <= 3, (
-            f"Expected ≤3 packets after conformal filter, "
-            f"got {answer.prediction_set_size}"
+            f"Expected ≤3 packets after conformal filter, got {answer.prediction_set_size}"
         )
         assert answer.coverage_guarantee > 0.0
 
@@ -602,17 +598,13 @@ def test_nonconformity_scores_ordering_consistency() -> None:
     """Higher confidence should always produce lower (better) NC scores."""
     scorer = NonconformityScorer(strategy=NonconformityStrategy.INVERSE_RETRIEVAL)
 
-    packets = [
-        _make_core_packet(confidence=c)
-        for c in [0.1, 0.2, 0.5, 0.8, 0.95]
-    ]
+    packets = [_make_core_packet(confidence=c) for c in [0.1, 0.2, 0.5, 0.8, 0.95]]
     scores = scorer.score_many(packets)
 
     # Scores should be decreasing as confidence increases
     for i in range(len(scores) - 1):
         assert scores[i] >= scores[i + 1], (
-            f"NC scores should decrease with increasing confidence: "
-            f"{scores}"
+            f"NC scores should decrease with increasing confidence: {scores}"
         )
 
 

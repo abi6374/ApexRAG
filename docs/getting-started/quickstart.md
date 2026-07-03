@@ -69,11 +69,11 @@ async def main():
         doc_id = await index.ingest("quarterly_report.pdf")
 
         # Query with agentic navigation
-        result = await index.query("What was the Q3 revenue growth?", doc_id)
+        answer = await index.query("What was the Q3 revenue growth?", doc_id)
 
-        if result and result.verified:
-            print(f"✅ Found in {result.title}: {result.content}")
-            print(f"📍 Path: {result.path} | Confidence: {result.confidence:.2f}")
+        print(f"Answer: {answer.answer_text}")
+        for packet in answer.evidence_packets:
+            print(f"📍 Node: {packet.node_id} | Path: {packet.section_path} | Confidence: {packet.confidence:.2f}")
 
 asyncio.run(main())
 ```

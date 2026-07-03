@@ -15,7 +15,6 @@ from apex_rag.ingestion.legacy import _ast_nodes_to_parsed_sections, _count_node
 from apex_rag.storage import DocumentNode, StorageEngine
 from apex_rag.utils import build_ltree_path, path_depth
 
-
 _parser = ApexParser()
 
 
@@ -25,6 +24,7 @@ def _parse(text: str) -> list:
         return []
     nodes = _parser.parse_markdown(text)
     return _ast_nodes_to_parsed_sections(nodes)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -173,21 +173,36 @@ class TestStorageEngine:
     async def test_parent_child_relationship(self, storage: StorageEngine) -> None:
         async with storage.session() as session:
             parent = DocumentNode(
-                doc_id="doc1", parent_id=None, path="1",
-                title="Parent", summary="Parent summary",
-                content=None, depth=0, position=1,
+                doc_id="doc1",
+                parent_id=None,
+                path="1",
+                title="Parent",
+                summary="Parent summary",
+                content=None,
+                depth=0,
+                position=1,
             )
             parent = await storage.insert_node(session, parent)
 
             child1 = DocumentNode(
-                doc_id="doc1", parent_id=parent.id, path="1.1",
-                title="Child 1", summary="First child",
-                content="Child 1 content", depth=1, position=1,
+                doc_id="doc1",
+                parent_id=parent.id,
+                path="1.1",
+                title="Child 1",
+                summary="First child",
+                content="Child 1 content",
+                depth=1,
+                position=1,
             )
             child2 = DocumentNode(
-                doc_id="doc1", parent_id=parent.id, path="1.2",
-                title="Child 2", summary="Second child",
-                content="Child 2 content", depth=1, position=2,
+                doc_id="doc1",
+                parent_id=parent.id,
+                path="1.2",
+                title="Child 2",
+                summary="Second child",
+                content="Child 2 content",
+                depth=1,
+                position=2,
             )
             await storage.insert_node(session, child1)
             await storage.insert_node(session, child2)
@@ -202,9 +217,14 @@ class TestStorageEngine:
     async def test_delete_document(self, storage: StorageEngine) -> None:
         async with storage.session() as session:
             node = DocumentNode(
-                doc_id="to-delete", parent_id=None, path="1",
-                title="Temp Node", summary="Will be deleted",
-                content="Temporary", depth=0, position=1,
+                doc_id="to-delete",
+                parent_id=None,
+                path="1",
+                title="Temp Node",
+                summary="Will be deleted",
+                content="Temporary",
+                depth=0,
+                position=1,
             )
             await storage.insert_node(session, node)
 
@@ -220,9 +240,14 @@ class TestStorageEngine:
     async def test_is_leaf_property(self, storage: StorageEngine) -> None:
         async with storage.session() as session:
             leaf = DocumentNode(
-                doc_id="d", parent_id=None, path="1",
-                title="Leaf", summary="s", content="Some content",
-                depth=0, position=1,
+                doc_id="d",
+                parent_id=None,
+                path="1",
+                title="Leaf",
+                summary="s",
+                content="Some content",
+                depth=0,
+                position=1,
             )
             persisted = await storage.insert_node(session, leaf)
 
@@ -237,9 +262,14 @@ class TestStorageEngine:
         async with storage.session() as session:
             for i in range(3):
                 node = DocumentNode(
-                    doc_id=f"doc-{i}", parent_id=None, path="1",
-                    title=f"Doc {i}", summary="s", content="c",
-                    depth=0, position=1,
+                    doc_id=f"doc-{i}",
+                    parent_id=None,
+                    path="1",
+                    title=f"Doc {i}",
+                    summary="s",
+                    content="c",
+                    depth=0,
+                    position=1,
                 )
                 await storage.insert_node(session, node)
 
@@ -251,9 +281,14 @@ class TestStorageEngine:
     async def test_metadata_serialization(self, storage: StorageEngine) -> None:
         async with storage.session() as session:
             node = DocumentNode(
-                doc_id="meta-test", parent_id=None, path="1",
-                title="Meta Node", summary="s", content="c",
-                depth=0, position=1,
+                doc_id="meta-test",
+                parent_id=None,
+                path="1",
+                title="Meta Node",
+                summary="s",
+                content="c",
+                depth=0,
+                position=1,
             )
             node.meta = {"pages": [1, 2, 3], "source": "report.pdf"}
             persisted = await storage.insert_node(session, node)

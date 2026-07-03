@@ -175,13 +175,28 @@ class TenantIsolationValidator:
     ) -> None:
         """Verify a specific row belongs to the expected tenant."""
         try:
-            # Use raw SQL for table-agnostic tenant check
+            # Validate table/column names against the known map to prevent SQL injection
+            if table_name not in _TENANT_COLUMN_MAP:
+                logger.warning(
+                    "Unknown table '%s' — skipping tenant isolation check",
+                    table_name,
+                )
+                return
+            if tenant_col != _TENANT_COLUMN_MAP[table_name]:
+                logger.warning(
+                    "Column '%s' doesn't match expected '%s' for table '%s' — skipping",
+                    tenant_col, _TENANT_COLUMN_MAP[table_name], table_name,
+                )
+                return
+
             from sqlalchemy import text as sa_text
 
             async with self._storage.session() as session:
+                # Use a parameterized query with the known-safe column name
+                quoted_col = f'"{tenant_col}"'
                 stmt = sa_text(
-                    f"SELECT {tenant_col} FROM {table_name} WHERE "
-                    f"id = :row_id OR node_id = :row_id2 OR version_id = :row_id3"
+                    f"SELECT {quoted_col} FROM \"{table_name}\" WHERE "
+                    "id = :row_id OR node_id = :row_id2 OR version_id = :row_id3"
                 )
                 result = await session.execute(
                     stmt,

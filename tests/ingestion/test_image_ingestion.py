@@ -13,17 +13,15 @@ Verifies that:
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 
-from apex_rag.ingestion.legacy import IngestionEngine, ParsedSection, Summariser
-
+from apex_rag.ingestion.legacy import IngestionEngine, Summariser
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -49,7 +47,7 @@ def _dummy_jpg_bytes() -> bytes:
         b"\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01"
         b"\x01\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00"
         b"\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x00\x00\x01\xd1\x02"
-        b"\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07\"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R"
+        b'\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R'
         b"\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz"
         b"\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5"
         b"\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc3\xc4\xc5\xc6\xc7\xc8\xc9"
@@ -68,6 +66,7 @@ def _dummy_jpg_bytes() -> bytes:
 
 class _MockLLM:
     """Mock LLM that returns a canned response."""
+
     def __init__(self, response: str = "Mock summary response.") -> None:
         self._response = response
 
@@ -115,8 +114,11 @@ class _MockStorage:
         """Return a dummy async context manager."""
 
         class _DummySession:
-            async def __aenter__(self): return self
-            async def __aexit__(self, *args): pass
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
 
         return _DummySession()
 
@@ -316,7 +318,7 @@ class TestImageIngestionViaEngine:
     async def test_ingest_preserves_image_bytes(self, mock_storage, mock_llm, tmp_png):
         """The base64 image data should exactly match the file contents."""
         expected_bytes = tmp_png.read_bytes()
-        expected_b64 = base64.b64encode(expected_bytes).decode("utf-8")
+        base64.b64encode(expected_bytes).decode("utf-8")
 
         summariser = Summariser(llm=mock_llm, max_concurrent=2)
         engine = IngestionEngine(
@@ -329,7 +331,7 @@ class TestImageIngestionViaEngine:
         node = mock_storage.inserted_nodes[0]
         # Extract base64 from data URI
         assert node.image_data.startswith("data:image/png;base64,")
-        actual_b64 = node.image_data[len("data:image/png;base64,"):]
+        actual_b64 = node.image_data[len("data:image/png;base64,") :]
         actual_bytes = base64.b64decode(actual_b64)
         assert actual_bytes == expected_bytes
 
@@ -417,7 +419,7 @@ class TestImageIngestionViaApexIndex:
             index = await ApexIndex.create(
                 db_url="sqlite+aiosqlite:///:memory:",
                 provider="ollama",
-                parse_images_with_vision=True, # Will be swallowed by **kwargs
+                parse_images_with_vision=True,  # Will be swallowed by **kwargs
                 trace_enabled=False,
             )
             assert index is not None
@@ -443,17 +445,15 @@ class TestImageIngestionViaApexIndex:
 # ── Patches ─────────────────────────────────────────────────────────────────
 
 
-from contextlib import asynccontextmanager
-
-
 @asynccontextmanager
 async def _patch_storage_create():
-    """Temporarily patch StorageEngine.create to return a minimal mock.
+    """Temporarily patch ApexStorage.create to return a minimal mock.
 
     This allows ApexIndex.create() tests to run without real SQLite.
     """
-    import apex_rag.client as client_module
-    original_create = client_module.StorageEngine.create
+    from apex_rag.ingestion.apex_storage import ApexStorage
+
+    original_create = ApexStorage.create
 
     class _MockStorageEngine:
         """Minimal mock that satisfies what ApexIndex.create() needs."""
@@ -462,7 +462,7 @@ async def _patch_storage_create():
             self._inserted_nodes = []
 
         @classmethod
-        async def create(cls, db_url: str = "", echo: bool = False) -> "_MockStorageEngine":
+        async def create(cls, db_url: str = "", echo: bool = False) -> _MockStorageEngine:
             return cls()
 
         async def insert_node(self, session, node):
@@ -474,15 +474,19 @@ async def _patch_storage_create():
 
         def session(self):
             class _DummySession:
-                async def __aenter__(self): return self
-                async def __aexit__(self, *args): pass
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
             return _DummySession()
 
         async def dispose(self):
             pass
 
     try:
-        client_module.StorageEngine.create = _MockStorageEngine.create
+        ApexStorage.create = _MockStorageEngine.create  # type: ignore[assignment]
         yield
     finally:
-        client_module.StorageEngine.create = original_create
+        ApexStorage.create = original_create

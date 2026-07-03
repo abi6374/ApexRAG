@@ -17,13 +17,11 @@ import os
 import tempfile
 import uuid
 from collections.abc import AsyncGenerator
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from apex_rag.models.unified_models import ASTNode, NodeType
-
 
 # ═══════════════════════════════════════════════════════════════
 # Helpers
@@ -74,12 +72,14 @@ class _MockVisionLLM:
         max_tokens: int = 150,
         images: list[str] | None = None,
     ) -> str:
-        self.generate_calls.append({
-            "prompt": prompt,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "images": images,
-        })
+        self.generate_calls.append(
+            {
+                "prompt": prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "images": images,
+            }
+        )
         if "Classify" in prompt:
             return "chart"
         elif "Extract ALL text" in prompt:
@@ -95,12 +95,14 @@ class _MockVisionLLM:
         max_tokens: int = 150,
         images: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
-        self.generate_calls.append({
-            "prompt": prompt,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "images": images,
-        })
+        self.generate_calls.append(
+            {
+                "prompt": prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "images": images,
+            }
+        )
         for chunk in self.stream_chunks:
             yield chunk
 
@@ -116,11 +118,13 @@ class TestVisionAdapter:
     @pytest.fixture
     def adapter(self) -> Any:
         from apex_rag.retrieval.vision.provider import VisionAdapter
+
         return VisionAdapter(_MockVisionLLM())
 
     def test_constructor(self) -> None:
         """Can instantiate VisionAdapter with any LLM provider."""
         from apex_rag.retrieval.vision.provider import VisionAdapter
+
         adapter = VisionAdapter(_MockVisionLLM())
         assert adapter is not None
 
@@ -170,7 +174,10 @@ class TestVisionAdapter:
         class _ReturnsGibberish:
             async def generate(self, prompt: str, **kwargs: Any) -> str:
                 return "gibberish"
-            async def stream_generate(self, prompt: str, **kwargs: Any) -> AsyncGenerator[str, None]:
+
+            async def stream_generate(
+                self, prompt: str, **kwargs: Any
+            ) -> AsyncGenerator[str, None]:
                 yield "gibberish"
 
         adapter = VisionAdapter(_ReturnsGibberish())
@@ -225,17 +232,20 @@ class TestImageParser:
     @pytest.fixture
     def parser(self) -> Any:
         from apex_rag.retrieval.vision.parser import ImageParser
+
         return ImageParser(use_local_ocr=False, default_doc_id="img-test-doc")
 
     def test_constructor(self) -> None:
         """Can instantiate ImageParser."""
         from apex_rag.retrieval.vision.parser import ImageParser
+
         parser = ImageParser()
         assert parser is not None
 
     def test_supported_extensions(self) -> None:
         """Supported extensions include common image formats."""
         from apex_rag.retrieval.vision.parser import SUPPORTED_EXTENSIONS
+
         assert ".png" in SUPPORTED_EXTENSIONS
         assert ".jpg" in SUPPORTED_EXTENSIONS
         assert ".jpeg" in SUPPORTED_EXTENSIONS
@@ -248,6 +258,7 @@ class TestImageParser:
     def test_tesseract_detection(self) -> None:
         """is_tesseract_available reflects actual installation."""
         from apex_rag.retrieval.vision.parser import ImageParser
+
         parser = ImageParser()
         # This will be False unless pytesseract + tesseract binary are installed
         assert isinstance(parser.is_tesseract_available, bool)
@@ -331,6 +342,7 @@ class TestImageParser:
     def test_local_ocr_can_be_disabled(self) -> None:
         """use_local_ocr=False disables tesseract."""
         from apex_rag.retrieval.vision.parser import ImageParser
+
         parser = ImageParser(use_local_ocr=False)
         assert parser.is_local_ocr_enabled is False
 
@@ -338,6 +350,7 @@ class TestImageParser:
     async def test_parse_with_custom_doc_id(self) -> None:
         """Custom doc_id overrides the default."""
         from apex_rag.retrieval.vision.parser import ImageParser
+
         parser = ImageParser(use_local_ocr=False)
 
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -355,6 +368,7 @@ class TestImageParser:
     def test_module_init_exports(self) -> None:
         """__init__.py exports VisionAdapter and ImageParser."""
         from apex_rag.retrieval.vision import ImageParser, VisionAdapter
+
         assert VisionAdapter is not None
         assert ImageParser is not None
 
@@ -524,5 +538,6 @@ async def test_apex_parser_markdown_still_works() -> None:
 def test_apex_rag_init_exports_vision() -> None:
     """apex_rag.__init__ exports VisionAdapter and ImageParser."""
     import apex_rag
+
     assert hasattr(apex_rag, "VisionAdapter")
     assert hasattr(apex_rag, "ImageParser")

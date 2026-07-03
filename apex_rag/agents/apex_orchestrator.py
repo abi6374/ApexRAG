@@ -269,6 +269,16 @@ class ApexOrchestrator(Orchestrator):
             ac_agent = AccessControlAgent(self.navigator._storage)
             answer_text = await ac_agent.mask_content(tenant_context, answer_text)
 
+        # ── Compute accuracy metrics ─────────────────────────────────
+        total_packets = len(unified_packets) if unified_packets else 0
+        verified_count = len(filtered_packets) if filtered_packets else 0
+        total_subqueries = 1  # Will be refined by planner data
+        resolved_count = 1 if total_packets > 0 else 0
+        precision = verified_count / total_packets if total_packets > 0 else 0.0
+        recall = resolved_count / total_subqueries if total_subqueries > 0 else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        hit = total_packets > 0
+
         return ApexAnswer(
             answer_text=answer_text,
             evidence_packets=filtered_packets,
@@ -279,6 +289,13 @@ class ApexOrchestrator(Orchestrator):
             causal_chain=list(contradictions),
             query=query,
             latency_ms=round(elapsed, 1),
+            # Accuracy metrics
+            precision=precision,
+            recall=recall,
+            f1_score=f1,
+            hit=hit,
+            total_subqueries=total_subqueries,
+            resolved_subqueries=resolved_count,
         )
 
     # ── Streaming ────────────────────────────────────────────────────

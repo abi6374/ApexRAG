@@ -13,9 +13,7 @@ async def test_groq_provider():
     mock_async_client = MagicMock()
     mock_groq_module.AsyncGroq.return_value = mock_async_client
     mock_async_client.chat.completions.create = AsyncMock(
-        return_value=MagicMock(
-            choices=[MagicMock(message=MagicMock(content="Groq response"))]
-        )
+        return_value=MagicMock(choices=[MagicMock(message=MagicMock(content="Groq response"))])
     )
 
     with patch.dict("sys.modules", {"groq": mock_groq_module}):
@@ -23,6 +21,7 @@ async def test_groq_provider():
         import importlib
 
         import apex_rag.providers as providers_mod
+
         importlib.reload(providers_mod)
         from apex_rag.providers import GroqProvider as GP
 
@@ -38,15 +37,14 @@ async def test_anthropic_provider():
     mock_async_client = MagicMock()
     mock_anthropic_module.AsyncAnthropic.return_value = mock_async_client
     mock_async_client.messages.create = AsyncMock(
-        return_value=MagicMock(
-            content=[MagicMock(text="Anthropic response")]
-        )
+        return_value=MagicMock(content=[MagicMock(text="Anthropic response")])
     )
 
     with patch.dict("sys.modules", {"anthropic": mock_anthropic_module}):
         import importlib
 
         import apex_rag.providers as providers_mod
+
         importlib.reload(providers_mod)
         from apex_rag.providers import AnthropicProvider as AP
 
@@ -63,8 +61,11 @@ async def test_query_cache_integration():
     async with storage.session() as session:
         # 1. Setup a node
         node = DocumentNode(
-            doc_id="doc1", path="1", title="Title",
-            summary="Summary", content="Leaf content",
+            doc_id="doc1",
+            path="1",
+            title="Title",
+            summary="Summary",
+            content="Leaf content",
         )
         await storage.insert_node(session, node)
         node_id = node.id
@@ -121,13 +122,19 @@ async def test_hybrid_search_logic():
 
     async with storage.session() as session:
         node1 = DocumentNode(
-            doc_id="doc1", path="1", title="Physics",
-            summary="Science", depth=0,
+            doc_id="doc1",
+            path="1",
+            title="Physics",
+            summary="Science",
+            depth=0,
         )
         await storage.insert_node(session, node1)
         node2 = DocumentNode(
-            doc_id="doc2", path="1", title="Chemistry",
-            summary="Science", depth=0,
+            doc_id="doc2",
+            path="1",
+            title="Chemistry",
+            summary="Science",
+            depth=0,
         )
         await storage.insert_node(session, node2)
 

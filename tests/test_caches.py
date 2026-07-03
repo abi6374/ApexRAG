@@ -36,6 +36,7 @@ class TestInMemoryCacheBackend:
     async def test_get_expired(self, cache: InMemoryCacheBackend[str]) -> None:
         await cache.set("key1", "value1", ttl_seconds=0)  # Already expired
         import time
+
         time.sleep(0.01)  # Tiny wait for expiry
         result = await cache.get("key1")
         assert result is None

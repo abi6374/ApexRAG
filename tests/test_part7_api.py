@@ -7,15 +7,19 @@ and uncertainty-quantified querying.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import networkx as nx
+import pytest
 
 from apex_rag import ApexIndex
-from apex_rag.models.unified_models import ASTNode, ApexAnswer, EvidencePacket, NodeType, TemporalMetadata
+from apex_rag.models.unified_models import (
+    ApexAnswer,
+    ASTNode,
+    NodeType,
+    TemporalMetadata,
+)
 
 
 @pytest.fixture
@@ -23,11 +27,13 @@ def mock_llm():
     llm = MagicMock()
     llm.generate = AsyncMock(return_value="Mocked response")
     llm.embed = AsyncMock(return_value=[[0.1] * 384])
+
     # Mock stream_generate as an async generator
     async def _stream(*args, **kwargs):
         yield "Mocked "
         yield "stream "
         yield "response"
+
     llm.stream_generate = _stream
     return llm
 
@@ -47,16 +53,16 @@ def mock_storage():
 @pytest.mark.asyncio
 async def test_apex_index_create_factory(mock_llm) -> None:
     """Test the one-line setup via provider string."""
-    with patch("apex_rag.client.OpenAIProvider", return_value=mock_llm):
-        with patch("apex_rag.ingestion.apex_storage.ApexStorage.create") as mock_storage_create:
-            mock_storage_create.return_value = AsyncMock()
-            
-            index = await ApexIndex.create(provider="openai", api_key="sk-test")
-            
-            assert isinstance(index, ApexIndex)
-            assert index._orchestrator is not None
-            # Verify provider was resolved correctly (internally)
-            # Since we patched OpenAIProvider, it should have been called
+    with (
+        patch("apex_rag.client.OpenAIProvider", return_value=mock_llm),
+        patch("apex_rag.ingestion.apex_storage.ApexStorage.create") as mock_storage_create,
+    ):
+        mock_storage_create.return_value = AsyncMock()
+
+        index = await ApexIndex.create(provider="openai", api_key="sk-test")
+
+        assert isinstance(index, ApexIndex)
+        assert index._orchestrator is not None
 
 
 @pytest.mark.asyncio
@@ -80,13 +86,18 @@ async def test_ingest_file_pipeline(mock_llm) -> None:
             node_type=NodeType.HEADING,
             doc_id="test-doc",
         )
-        
-        with patch("apex_rag.ingestion.apex_parser.ApexParser.parse_file", return_value=[node1]):
-            with patch("apex_rag.ingestion.semantic_model_builder.SemanticModelBuilder.build_signposts", return_value={node1.node_id: "Summary 1"}):
+
+        with (
+            patch("apex_rag.ingestion.apex_parser.ApexParser.parse_file", return_value=[node1]),
+            patch(
+                "apex_rag.ingestion.semantic_model_builder.SemanticModelBuilder.build_signposts",
+                return_value={node1.node_id: "Summary 1"},
+            ),
+        ):
                 # Instantiate ApexIndex with mocked dependencies
                 index = ApexIndex(
                     storage=mock_storage,
-                    parser=MagicMock(), # Replaced by patch
+                    parser=MagicMock(),  # Replaced by patch
                     embedder=MagicMock(),
                     summariser=MagicMock(),
                     graph_builder=MagicMock(),
@@ -96,7 +107,9 @@ async def test_ingest_file_pipeline(mock_llm) -> None:
                 index._parser = MagicMock()
                 index._parser.parse_file = AsyncMock(return_value=[node1])
                 index._summariser = MagicMock()
-                index._summariser.build_signposts = AsyncMock(return_value={node1.node_id: "Summary 1"})
+                index._summariser.build_signposts = AsyncMock(
+                    return_value={node1.node_id: "Summary 1"}
+                )
                 index._embedder = MagicMock()
                 index._embedder.embed_nodes = AsyncMock()
                 index._graph_builder = MagicMock()
@@ -108,7 +121,7 @@ async def test_ingest_file_pipeline(mock_llm) -> None:
                 index._get_fact_pipeline = MagicMock(return_value=mock_pipeline)
 
                 doc_id = await index.ingest_file(dummy_file)
-                
+
                 assert doc_id == "test-doc"
                 index._parser.parse_file.assert_called_once()
                 index._summariser.build_signposts.assert_called_once()
@@ -125,13 +138,15 @@ async def test_ingest_file_pipeline(mock_llm) -> None:
 async def test_query_conformal_guarantee(mock_llm) -> None:
     """Test querying with coverage guarantee."""
     mock_orchestrator = MagicMock()
-    mock_orchestrator.run = AsyncMock(return_value=ApexAnswer(
-        answer_text="Synthesized answer",
-        evidence_packets=[],
-        coverage_guarantee=0.95,
-        prediction_set_size=3,
-        query="Test query",
-    ))
+    mock_orchestrator.run = AsyncMock(
+        return_value=ApexAnswer(
+            answer_text="Synthesized answer",
+            evidence_packets=[],
+            coverage_guarantee=0.95,
+            prediction_set_size=3,
+            query="Test query",
+        )
+    )
     mock_orchestrator.conformal_wrapper = MagicMock()
 
     index = ApexIndex(
@@ -181,7 +196,12 @@ async def test_get_causal_graph_utility() -> None:
     assert isinstance(graph, nx.DiGraph)
     assert len(graph.edges) == 1
     assert "00000000-0000-4000-8000-000000000001" in graph.nodes
-    assert graph.edges["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"]["type"] == EdgeType.SUPPORTS
+    assert (
+        graph.edges["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"][
+            "type"
+        ]
+        == EdgeType.SUPPORTS
+    )
 
 
 @pytest.mark.asyncio

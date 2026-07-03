@@ -15,13 +15,11 @@ Test count: 35+
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -33,11 +31,9 @@ from apex_rag.models.unified_models import (
     ASTNode,
     CausalEdge,
     EdgeType,
-    EvidencePacket,
     NodeType,
     TemporalMetadata,
 )
-
 
 # ═══════════════════════════════════════════════════════════════
 # ApexParser — Markdown tests
@@ -160,7 +156,7 @@ End of example."""
         paras = [n for n in nodes if n.node_type == NodeType.PARAGRAPH]
         root = headings[0]
         for p in paras:
-            assert p.parent_id == root.node_id, f"Paragraph should be child of implicit root"
+            assert p.parent_id == root.node_id, "Paragraph should be child of implicit root"
 
     def test_mixed_content(self) -> None:
         """A document with headings, paragraphs, code, and tables parses correctly."""
@@ -293,7 +289,9 @@ class TestLargeSectionChunking:
             doc_id="d1",
         )
         nodes = [node]
-        result = _chunk_large_sections(nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=3000)
+        result = _chunk_large_sections(
+            nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=3000
+        )
         # No new nodes should be created
         assert len(result) == 1
         # Content should remain on original node
@@ -303,14 +301,18 @@ class TestLargeSectionChunking:
     def test_large_section_chunked(self) -> None:
         """A section exceeding max_chars is split into child nodes."""
         # Create a node with content > 100 chars
-        large_content = "\n\n".join([f"Paragraph {i} contains enough text to fill a section." for i in range(20)])
+        large_content = "\n\n".join(
+            [f"Paragraph {i} contains enough text to fill a section." for i in range(20)]
+        )
         node = ASTNode(
             content=large_content,
             node_type=NodeType.PARAGRAPH,
             doc_id="d1",
         )
         nodes = [node]
-        result = _chunk_large_sections(nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=100)
+        result = _chunk_large_sections(
+            nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=100
+        )
 
         # Should have more than 1 chunk
         chunks = [n for n in result if n.parent_id == node.node_id]
@@ -323,14 +325,18 @@ class TestLargeSectionChunking:
 
     def test_chunk_respects_max_chars(self) -> None:
         """Each chunk should be under max_chars."""
-        large_content = "\n\n".join([f"Long paragraph number {i} with filler text to exceed limits." for i in range(30)])
+        large_content = "\n\n".join(
+            [f"Long paragraph number {i} with filler text to exceed limits." for i in range(30)]
+        )
         node = ASTNode(
             content=large_content,
             node_type=NodeType.HEADING,
             doc_id="d1",
         )
         nodes = [node]
-        result = _chunk_large_sections(nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=200)
+        result = _chunk_large_sections(
+            nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=200
+        )
         chunks = [n for n in result if n.parent_id == node.node_id]
         for chunk in chunks:
             assert len(chunk.content) <= 220, f"Chunk exceeds max_chars: {len(chunk.content)}"
@@ -344,7 +350,9 @@ class TestLargeSectionChunking:
             doc_id="d1",
         )
         nodes = [node]
-        result = _chunk_large_sections(nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=100)
+        result = _chunk_large_sections(
+            nodes, "d1", None, datetime.now(timezone.utc), 0, max_chars=100
+        )
         updated = next(n for n in result if n.node_id == node.node_id)
         assert len(updated.children) >= 2
         for child_id in updated.children:
@@ -361,7 +369,9 @@ class TestLargeSectionChunking:
             doc_id="d1",
         )
         nodes = [node]
-        result = _chunk_large_sections(nodes, "d1", None, datetime.now(timezone.utc), 7, max_chars=100)
+        result = _chunk_large_sections(
+            nodes, "d1", None, datetime.now(timezone.utc), 7, max_chars=100
+        )
         chunks = [n for n in result if n.parent_id == node.node_id]
         for chunk in chunks:
             assert chunk.page_number == 7, f"Expected page_number=7, got {chunk.page_number}"
@@ -437,7 +447,9 @@ class ReportGenerator:
         # Methods should be children of their class
         for method in code_nodes:
             assert method.parent_id is not None, "Method should have a parent"
-            parent_is_class = method.parent_id == processor.node_id or method.parent_id == generator.node_id
+            parent_is_class = (
+                method.parent_id == processor.node_id or method.parent_id == generator.node_id
+            )
             assert parent_is_class, f"Method {method.content[:20]} should be child of a class"
 
     def test_empty_python_file(self) -> None:
@@ -559,9 +571,7 @@ class TestApexParserFile:
 
         try:
             parser = ApexParser()
-            nodes = parser.parse_markdown(
-                Path(fname).read_text(encoding="utf-8")
-            )
+            nodes = parser.parse_markdown(Path(fname).read_text(encoding="utf-8"))
             assert len(nodes) >= 2
             headings = [n for n in nodes if n.node_type == NodeType.HEADING]
             assert any("File Test" in n.content for n in headings)
@@ -591,6 +601,7 @@ class TestApexParserFile:
         with pytest.raises(FileNotFoundError):
             # parse_file is async, but the error happens before any await
             import asyncio
+
             asyncio.run(parser.parse_file("/nonexistent/file.md"))
 
 
@@ -613,7 +624,9 @@ class TestEmbeddingEngine:
         result = await engine.embed_nodes(nodes)
         assert len(result) == 2
         for node in result:
-            assert len(node.embedding) == 384, f"Expected 384-d embedding, got {len(node.embedding)}"
+            assert len(node.embedding) == 384, (
+                f"Expected 384-d embedding, got {len(node.embedding)}"
+            )
             assert any(v != 0.0 for v in node.embedding[:5]), "Embedding should be non-zero"
 
     @pytest.mark.asyncio
@@ -694,7 +707,7 @@ class TestApexStorage:
             for i in range(5)
         ]
         await storage.save_nodes(nodes, tenant_context="default")
-        count = await storage.count_nodes("doc-1")
+        count = await storage.count_nodes("doc-1", tenant_context="default")
         assert count == 5
 
     @pytest.mark.asyncio
@@ -769,7 +782,7 @@ class TestApexStorage:
         )
         await storage.save_causal_edge(edge)
 
-        edges = await storage.get_edges_for_node(node_a.node_id)
+        edges = await storage.get_edges_for_node(node_a.node_id, tenant_context="default")
         assert len(edges) == 1
         assert edges[0].edge_type == EdgeType.SUPPORTS
         assert edges[0].strength == 0.9
@@ -810,10 +823,10 @@ class TestApexStorage:
             ASTNode(content="3", node_type=NodeType.PARAGRAPH, doc_id="d2"),
         ]
         await storage.save_nodes(nodes, tenant_context="default")
-        assert await storage.count_nodes() == 3
-        assert await storage.count_nodes("d1") == 2
-        assert await storage.count_nodes("d2") == 1
-        assert await storage.count_nodes("d3") == 0
+        assert await storage.count_nodes(tenant_context="default") == 3
+        assert await storage.count_nodes("d1", tenant_context="default") == 2
+        assert await storage.count_nodes("d2", tenant_context="default") == 1
+        assert await storage.count_nodes("d3", tenant_context="default") == 0
 
     @pytest.mark.asyncio
     async def test_get_all_nodes(self, storage: ApexStorage) -> None:
@@ -823,7 +836,7 @@ class TestApexStorage:
             ASTNode(content="2", node_type=NodeType.PARAGRAPH, doc_id="d2"),
         ]
         await storage.save_nodes(nodes, tenant_context="default")
-        all_nodes = await storage.get_all_nodes()
+        all_nodes = await storage.get_all_nodes(tenant_context="default")
         assert len(all_nodes) == 2
 
     @pytest.mark.asyncio
@@ -835,13 +848,21 @@ class TestApexStorage:
         await storage.save_nodes([node_a, node_b, node_c], tenant_context="default")
 
         edges = [
-            CausalEdge(source_node_id=node_a.node_id, target_node_id=node_b.node_id, edge_type=EdgeType.SUPPORTS),
-            CausalEdge(source_node_id=node_b.node_id, target_node_id=node_c.node_id, edge_type=EdgeType.REFINES),
+            CausalEdge(
+                source_node_id=node_a.node_id,
+                target_node_id=node_b.node_id,
+                edge_type=EdgeType.SUPPORTS,
+            ),
+            CausalEdge(
+                source_node_id=node_b.node_id,
+                target_node_id=node_c.node_id,
+                edge_type=EdgeType.REFINES,
+            ),
         ]
         for e in edges:
             await storage.save_causal_edge(e)
 
-        all_edges = await storage.get_all_edges()
+        all_edges = await storage.get_all_edges(tenant_context="default")
         assert len(all_edges) == 2
 
 
@@ -872,9 +893,9 @@ class TestApexStoragePageIndex:
             "term": "Introduction",
             "page_number": 3,
         }
-        await storage.save_page_index_entry(entry)
+        await storage.save_page_index_entry(entry, tenant_context="default")
 
-        entries = await storage.get_page_index_entries("doc-1")
+        entries = await storage.get_page_index_entries("doc-1", tenant_context="default")
         assert len(entries) == 1
         assert entries[0]["term"] == "Introduction"
         assert entries[0]["page_number"] == 3
@@ -890,9 +911,9 @@ class TestApexStoragePageIndex:
             {"node_id": node.node_id, "doc_id": "doc-1", "term": "Alpha", "page_number": 1},
             {"node_id": node.node_id, "doc_id": "doc-1", "term": "Beta", "page_number": 5},
         ]
-        await storage.save_page_index_entries(entries)
+        await storage.save_page_index_entries(entries, tenant_context="default")
 
-        retrieved = await storage.get_page_index_entries("doc-1")
+        retrieved = await storage.get_page_index_entries("doc-1", tenant_context="default")
         assert len(retrieved) == 3
         assert retrieved[0]["term"] == "Alpha"
         assert retrieved[1]["term"] == "Beta"
@@ -905,11 +926,26 @@ class TestApexStoragePageIndex:
         await storage.save_node(node, tenant_context="default")
 
         entries = [
-            {"node_id": node.node_id, "doc_id": "doc-1", "term": "Revenue Growth", "page_number": 12},
-            {"node_id": node.node_id, "doc_id": "doc-1", "term": "Cost Analysis", "page_number": 25},
-            {"node_id": node.node_id, "doc_id": "doc-1", "term": "Revenue Forecast", "page_number": 30},
+            {
+                "node_id": node.node_id,
+                "doc_id": "doc-1",
+                "term": "Revenue Growth",
+                "page_number": 12,
+            },
+            {
+                "node_id": node.node_id,
+                "doc_id": "doc-1",
+                "term": "Cost Analysis",
+                "page_number": 25,
+            },
+            {
+                "node_id": node.node_id,
+                "doc_id": "doc-1",
+                "term": "Revenue Forecast",
+                "page_number": 30,
+            },
         ]
-        await storage.save_page_index_entries(entries)
+        await storage.save_page_index_entries(entries, tenant_context="default")
 
         results = await storage.search_page_index("doc-1", "revenue", tenant_context="default")
         assert len(results) == 2, f"Expected 2 matches for 'revenue', got {len(results)}"
@@ -921,9 +957,10 @@ class TestApexStoragePageIndex:
         node = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1")
         await storage.save_node(node, tenant_context="default")
 
-        await storage.save_page_index_entry({
-            "node_id": node.node_id, "doc_id": "doc-1", "term": "Only Entry", "page_number": 1
-        })
+        await storage.save_page_index_entry(
+            {"node_id": node.node_id, "doc_id": "doc-1", "term": "Only Entry", "page_number": 1},
+            tenant_context="default",
+        )
 
         results = await storage.search_page_index("doc-1", "nonexistent", tenant_context="default")
         assert len(results) == 0
@@ -931,7 +968,7 @@ class TestApexStoragePageIndex:
     @pytest.mark.asyncio
     async def test_page_index_empty_doc(self, storage: ApexStorage) -> None:
         """Document with no entries returns empty list."""
-        entries = await storage.get_page_index_entries("empty-doc")
+        entries = await storage.get_page_index_entries("empty-doc", tenant_context="default")
         assert len(entries) == 0
 
 
@@ -1022,10 +1059,12 @@ class TestApexStorageGlobalSearch:
     async def test_get_document_root_nodes(self, storage: ApexStorage) -> None:
         """Fetch root-level nodes for a document."""
         root = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1")
-        child = ASTNode(content="Child", node_type=NodeType.PARAGRAPH, parent_id=root.node_id, doc_id="doc-1")
+        child = ASTNode(
+            content="Child", node_type=NodeType.PARAGRAPH, parent_id=root.node_id, doc_id="doc-1"
+        )
         await storage.save_nodes([root, child], tenant_context="default")
 
-        roots = await storage.get_document_root_nodes("doc-1")
+        roots = await storage.get_document_root_nodes("doc-1", tenant_context="default")
         assert len(roots) == 1
         assert roots[0].node_id == root.node_id
 
@@ -1033,9 +1072,13 @@ class TestApexStorageGlobalSearch:
     async def test_search_nodes_global(self, storage: ApexStorage) -> None:
         """Search across all documents."""
         nodes = [
-            ASTNode(content="Quarterly revenue increased", node_type=NodeType.PARAGRAPH, doc_id="doc-1"),
+            ASTNode(
+                content="Quarterly revenue increased", node_type=NodeType.PARAGRAPH, doc_id="doc-1"
+            ),
             ASTNode(content="Operating costs stable", node_type=NodeType.PARAGRAPH, doc_id="doc-1"),
-            ASTNode(content="Revenue outlook positive", node_type=NodeType.PARAGRAPH, doc_id="doc-2"),
+            ASTNode(
+                content="Revenue outlook positive", node_type=NodeType.PARAGRAPH, doc_id="doc-2"
+            ),
         ]
         await storage.save_nodes(nodes, tenant_context="default")
 
@@ -1047,8 +1090,20 @@ class TestApexStorageGlobalSearch:
     async def test_get_document_stats(self, storage: ApexStorage) -> None:
         """Get aggregate stats for a document."""
         root = ASTNode(content="Root", node_type=NodeType.HEADING, doc_id="doc-1", depth=0)
-        leaf1 = ASTNode(content="Leaf 1", node_type=NodeType.PARAGRAPH, doc_id="doc-1", depth=1, parent_id=root.node_id)
-        leaf2 = ASTNode(content="Leaf 2", node_type=NodeType.PARAGRAPH, doc_id="doc-1", depth=1, parent_id=root.node_id)
+        leaf1 = ASTNode(
+            content="Leaf 1",
+            node_type=NodeType.PARAGRAPH,
+            doc_id="doc-1",
+            depth=1,
+            parent_id=root.node_id,
+        )
+        leaf2 = ASTNode(
+            content="Leaf 2",
+            node_type=NodeType.PARAGRAPH,
+            doc_id="doc-1",
+            depth=1,
+            parent_id=root.node_id,
+        )
         root.children = [leaf1.node_id, leaf2.node_id]
         await storage.save_nodes([root, leaf1, leaf2], tenant_context="default")
 
@@ -1070,5 +1125,5 @@ class TestApexStorageGlobalSearch:
 
         deleted = await storage.delete_document("doc-1", tenant_context="default")
         assert deleted == 2
-        assert await storage.count_nodes("doc-1") == 0
-        assert await storage.count_nodes("doc-2") == 1
+        assert await storage.count_nodes("doc-1", tenant_context="default") == 0
+        assert await storage.count_nodes("doc-2", tenant_context="default") == 1

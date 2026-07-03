@@ -4,14 +4,11 @@ tests/temporal/test_chain_reconciler.py — Tests for Sprint 6 chain reconciliat
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from apex_rag.ingestion.apex_storage import ApexStorage
-from apex_rag.temporal.fact_store import FactStore, TemporalFact
 from apex_rag.temporal.chain_reconciler import (
     AnomalyType,
     ChainAnomaly,
@@ -22,7 +19,7 @@ from apex_rag.temporal.chain_reconciler import (
     ReconciledChain,
     VersionChainReconciler,
 )
-
+from apex_rag.temporal.fact_store import FactStore, TemporalFact
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures
@@ -182,17 +179,20 @@ class TestChainDiagnosticReport:
             anomalies=[
                 ChainAnomaly(
                     anomaly_type=AnomalyType.BROKEN_SUPERSEDES_LINK,
-                    description="err1", fact_id="f1",
+                    description="err1",
+                    fact_id="f1",
                     severity="error",
                 ),
                 ChainAnomaly(
                     anomaly_type=AnomalyType.MISSING_VERSION,
-                    description="warn1", fact_id="f2",
+                    description="warn1",
+                    fact_id="f2",
                     severity="warning",
                 ),
                 ChainAnomaly(
                     anomaly_type=AnomalyType.ORPHANED_FACT,
-                    description="info1", fact_id="f3",
+                    description="info1",
+                    fact_id="f3",
                     severity="info",
                 ),
             ],
@@ -209,7 +209,8 @@ class TestChainDiagnosticReport:
             anomalies=[
                 ChainAnomaly(
                     anomaly_type=AnomalyType.MISSING_VERSION,
-                    description="warn", fact_id="f1",
+                    description="warn",
+                    fact_id="f1",
                     severity="warning",
                 ),
             ],
@@ -255,7 +256,9 @@ class TestDetectAll:
     """Tests for ChainGapDetector.detect_all()."""
 
     @pytest.mark.asyncio
-    async def test_healthy_chain(self, store_and_facts: tuple[FactStore, list[TemporalFact]]) -> None:
+    async def test_healthy_chain(
+        self, store_and_facts: tuple[FactStore, list[TemporalFact]]
+    ) -> None:
         fact_store, facts = store_and_facts
         detector = ChainGapDetector(fact_store)
         report = await detector.detect_all("Revenue", doc_id="", tenant_context="tenant-a")
@@ -286,11 +289,17 @@ class TestCheckGaps:
         detector = ChainGapDetector.__new__(ChainGapDetector)
         facts = [
             TemporalFact(
-                fact_id="v1", subject="X", predicate="was", object="1",
+                fact_id="v1",
+                subject="X",
+                predicate="was",
+                object="1",
                 metadata={"version_number": 1},
             ),
             TemporalFact(
-                fact_id="v2", subject="X", predicate="was", object="2",
+                fact_id="v2",
+                subject="X",
+                predicate="was",
+                object="2",
                 metadata={"version_number": 2},
             ),
         ]
@@ -308,10 +317,12 @@ class TestCheckOverlappingValidity:
         t2 = datetime(2025, 2, 1, tzinfo=timezone.utc)
         t3 = datetime(2025, 3, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         valid_from=t1, valid_to=t2),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         valid_from=t2, valid_to=t3),
+            TemporalFact(
+                fact_id="a", subject="X", predicate="was", object="1", valid_from=t1, valid_to=t2
+            ),
+            TemporalFact(
+                fact_id="b", subject="X", predicate="was", object="2", valid_from=t2, valid_to=t3
+            ),
         ]
         anomalies = detector._check_overlapping_validity(facts)
         assert len(anomalies) == 0
@@ -323,10 +334,12 @@ class TestCheckOverlappingValidity:
         t2 = datetime(2025, 2, 1, tzinfo=timezone.utc)
         # Overlap: a ends at t2, b starts at t1 — overlapping
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         valid_from=t1, valid_to=t2),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         valid_from=t1, valid_to=t2),
+            TemporalFact(
+                fact_id="a", subject="X", predicate="was", object="1", valid_from=t1, valid_to=t2
+            ),
+            TemporalFact(
+                fact_id="b", subject="X", predicate="was", object="2", valid_from=t1, valid_to=t2
+            ),
         ]
         anomalies = detector._check_overlapping_validity(facts)
         assert len(anomalies) >= 1
@@ -339,10 +352,18 @@ class TestCheckOverlappingValidity:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 2, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         valid_from=t1, valid_to=t2, superseded_by="b"),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         valid_from=t1, valid_to=None),
+            TemporalFact(
+                fact_id="a",
+                subject="X",
+                predicate="was",
+                object="1",
+                valid_from=t1,
+                valid_to=t2,
+                superseded_by="b",
+            ),
+            TemporalFact(
+                fact_id="b", subject="X", predicate="was", object="2", valid_from=t1, valid_to=None
+            ),
         ]
         anomalies = detector._check_overlapping_validity(facts)
         assert len(anomalies) == 0  # Supersession chain, overlap expected
@@ -356,9 +377,15 @@ class TestCheckExpiredActive:
         detector = ChainGapDetector.__new__(ChainGapDetector)
         past = datetime(2020, 1, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         valid_from=past, valid_to=past + timedelta(days=1),
-                         superseded_by=None),
+            TemporalFact(
+                fact_id="a",
+                subject="X",
+                predicate="was",
+                object="1",
+                valid_from=past,
+                valid_to=past + timedelta(days=1),
+                superseded_by=None,
+            ),
         ]
         anomalies = detector._check_expired_active(facts)
         assert len(anomalies) == 1
@@ -369,9 +396,15 @@ class TestCheckExpiredActive:
         detector = ChainGapDetector.__new__(ChainGapDetector)
         past = datetime(2020, 1, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         valid_from=past, valid_to=past + timedelta(days=1),
-                         superseded_by="b"),
+            TemporalFact(
+                fact_id="a",
+                subject="X",
+                predicate="was",
+                object="1",
+                valid_from=past,
+                valid_to=past + timedelta(days=1),
+                superseded_by="b",
+            ),
         ]
         anomalies = detector._check_expired_active(facts)
         assert len(anomalies) == 0  # Has superseder, OK
@@ -384,10 +417,10 @@ class TestCheckForks:
     async def test_no_fork(self) -> None:
         detector = ChainGapDetector.__new__(ChainGapDetector)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         parent_fact_id=None),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         parent_fact_id="a"),
+            TemporalFact(
+                fact_id="a", subject="X", predicate="was", object="1", parent_fact_id=None
+            ),
+            TemporalFact(fact_id="b", subject="X", predicate="was", object="2", parent_fact_id="a"),
         ]
         anomalies = detector._check_forks(facts)
         assert len(anomalies) == 0
@@ -396,12 +429,11 @@ class TestCheckForks:
     async def test_fork_detected(self) -> None:
         detector = ChainGapDetector.__new__(ChainGapDetector)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         parent_fact_id=None),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         parent_fact_id="a"),
-            TemporalFact(fact_id="c", subject="X", predicate="was", object="3",
-                         parent_fact_id="a"),
+            TemporalFact(
+                fact_id="a", subject="X", predicate="was", object="1", parent_fact_id=None
+            ),
+            TemporalFact(fact_id="b", subject="X", predicate="was", object="2", parent_fact_id="a"),
+            TemporalFact(fact_id="c", subject="X", predicate="was", object="3", parent_fact_id="a"),
         ]
         anomalies = detector._check_forks(facts)
         assert len(anomalies) == 1
@@ -425,10 +457,22 @@ class TestCheckOrphans:
         detector = ChainGapDetector.__new__(ChainGapDetector)
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         parent_fact_id=None, valid_from=t1),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         parent_fact_id="a", valid_from=t1),
+            TemporalFact(
+                fact_id="a",
+                subject="X",
+                predicate="was",
+                object="1",
+                parent_fact_id=None,
+                valid_from=t1,
+            ),
+            TemporalFact(
+                fact_id="b",
+                subject="X",
+                predicate="was",
+                object="2",
+                parent_fact_id="a",
+                valid_from=t1,
+            ),
         ]
         # 'a' has a child 'b', so not orphaned. 'b' has parent 'a', so not orphaned.
         anomalies = detector._check_orphans(facts)
@@ -445,12 +489,14 @@ class TestResolveAuthoritative:
 
     @pytest.mark.asyncio
     async def test_follows_supersession_chain(
-        self, store_and_facts: tuple[FactStore, list[TemporalFact]],
+        self,
+        store_and_facts: tuple[FactStore, list[TemporalFact]],
     ) -> None:
         fact_store, facts = store_and_facts
         reconciler = VersionChainReconciler(fact_store)
         auth = await reconciler.resolve_authoritative(
-            "Revenue", tenant_context="tenant-a",
+            "Revenue",
+            tenant_context="tenant-a",
         )
         assert auth is not None
         assert auth.fact_id == "rev-v3"
@@ -458,12 +504,14 @@ class TestResolveAuthoritative:
 
     @pytest.mark.asyncio
     async def test_single_fact(
-        self, store_and_facts: tuple[FactStore, list[TemporalFact]],
+        self,
+        store_and_facts: tuple[FactStore, list[TemporalFact]],
     ) -> None:
         fact_store, facts = store_and_facts
         reconciler = VersionChainReconciler(fact_store)
         auth = await reconciler.resolve_authoritative(
-            "Headcount", tenant_context="tenant-a",
+            "Headcount",
+            tenant_context="tenant-a",
         )
         assert auth is not None
         assert auth.fact_id == "hc-v1"
@@ -473,7 +521,8 @@ class TestResolveAuthoritative:
     async def test_no_tenant(self, fact_store: FactStore) -> None:
         reconciler = VersionChainReconciler(fact_store)
         auth = await reconciler.resolve_authoritative(
-            "Revenue", tenant_context=None,
+            "Revenue",
+            tenant_context=None,
         )
         assert auth is None
 
@@ -483,12 +532,14 @@ class TestReconcileChain:
 
     @pytest.mark.asyncio
     async def test_reconcile_healthy(
-        self, store_and_facts: tuple[FactStore, list[TemporalFact]],
+        self,
+        store_and_facts: tuple[FactStore, list[TemporalFact]],
     ) -> None:
         fact_store, facts = store_and_facts
         reconciler = VersionChainReconciler(fact_store)
         chain = await reconciler.reconcile_chain(
-            "Revenue", tenant_context="tenant-a",
+            "Revenue",
+            tenant_context="tenant-a",
         )
         assert chain.reconciled
         assert chain.chain_length >= 3
@@ -498,11 +549,13 @@ class TestReconcileChain:
 
     @pytest.mark.asyncio
     async def test_reconcile_missing_tenant(
-        self, fact_store: FactStore,
+        self,
+        fact_store: FactStore,
     ) -> None:
         reconciler = VersionChainReconciler(fact_store)
         chain = await reconciler.reconcile_chain(
-            "Revenue", tenant_context=None,
+            "Revenue",
+            tenant_context=None,
         )
         assert chain.chain_length == 0
         assert chain.reconciled is False
@@ -522,27 +575,69 @@ class TestResolveDocumentChains:
 
         doc_id = "doc-recon"
         doc_facts = [
-            TemporalFact(fact_id="dr-rev1", subject="Revenue", predicate="was",
-                         object="$100K", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2, created_at=t1),
-            TemporalFact(fact_id="dr-rev2", subject="Revenue", predicate="was",
-                         object="$120K", source_document_id=doc_id,
-                         valid_from=t2, valid_to=t3, created_at=t2,
-                         parent_fact_id="dr-rev1"),
-            TemporalFact(fact_id="dr-rev3", subject="Revenue", predicate="was",
-                         object="$150K", source_document_id=doc_id,
-                         valid_from=t3, valid_to=None, created_at=t3,
-                         parent_fact_id="dr-rev2"),
-            TemporalFact(fact_id="dr-hc1", subject="Headcount", predicate="was",
-                         object="500", source_document_id=doc_id,
-                         valid_from=t1, valid_to=None, created_at=t1),
-            TemporalFact(fact_id="dr-tax1", subject="TaxRate", predicate="was",
-                         object="21%", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2, created_at=t1),
-            TemporalFact(fact_id="dr-tax2", subject="TaxRate", predicate="was",
-                         object="18%", source_document_id=doc_id,
-                         valid_from=t2, valid_to=None, created_at=t2,
-                         parent_fact_id="dr-tax1"),
+            TemporalFact(
+                fact_id="dr-rev1",
+                subject="Revenue",
+                predicate="was",
+                object="$100K",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="dr-rev2",
+                subject="Revenue",
+                predicate="was",
+                object="$120K",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=t3,
+                created_at=t2,
+                parent_fact_id="dr-rev1",
+            ),
+            TemporalFact(
+                fact_id="dr-rev3",
+                subject="Revenue",
+                predicate="was",
+                object="$150K",
+                source_document_id=doc_id,
+                valid_from=t3,
+                valid_to=None,
+                created_at=t3,
+                parent_fact_id="dr-rev2",
+            ),
+            TemporalFact(
+                fact_id="dr-hc1",
+                subject="Headcount",
+                predicate="was",
+                object="500",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=None,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="dr-tax1",
+                subject="TaxRate",
+                predicate="was",
+                object="21%",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="dr-tax2",
+                subject="TaxRate",
+                predicate="was",
+                object="18%",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=None,
+                created_at=t2,
+                parent_fact_id="dr-tax1",
+            ),
         ]
 
         # Save in dependency order
@@ -555,7 +650,8 @@ class TestResolveDocumentChains:
 
         reconciler = VersionChainReconciler(fact_store)
         report = await reconciler.resolve_document_chains(
-            doc_id, tenant_context="tenant-a",
+            doc_id,
+            tenant_context="tenant-a",
         )
         assert report.doc_id == doc_id
         assert report.total_chains >= 3  # Revenue, Headcount, TaxRate
@@ -572,7 +668,8 @@ class TestResolveDocumentChains:
     async def test_empty_document(self, fact_store: FactStore) -> None:
         reconciler = VersionChainReconciler(fact_store)
         report = await reconciler.resolve_document_chains(
-            "empty-doc", tenant_context="tenant-a",
+            "empty-doc",
+            tenant_context="tenant-a",
         )
         assert report.total_chains == 0
 
@@ -582,12 +679,14 @@ class TestDescribeForks:
 
     @pytest.mark.asyncio
     async def test_no_forks(
-        self, store_and_facts: tuple[FactStore, list[TemporalFact]],
+        self,
+        store_and_facts: tuple[FactStore, list[TemporalFact]],
     ) -> None:
         fact_store, facts = store_and_facts
         reconciler = VersionChainReconciler(fact_store)
         forks = await reconciler.describe_forks(
-            "Revenue", tenant_context="tenant-a",
+            "Revenue",
+            tenant_context="tenant-a",
         )
         assert len(forks) == 0
 
@@ -599,20 +698,32 @@ class TestDescribeForks:
 
         fork_facts = [
             TemporalFact(
-                fact_id="root", subject="Budget", predicate="was", object="100",
+                fact_id="root",
+                subject="Budget",
+                predicate="was",
+                object="100",
                 source_document_id="doc-fork",
-                valid_from=t1, valid_to=None,
+                valid_from=t1,
+                valid_to=None,
             ),
             TemporalFact(
-                fact_id="fork-a", subject="Budget", predicate="was", object="120",
+                fact_id="fork-a",
+                subject="Budget",
+                predicate="was",
+                object="120",
                 source_document_id="doc-fork",
-                valid_from=t2, valid_to=None,
+                valid_from=t2,
+                valid_to=None,
                 parent_fact_id="root",
             ),
             TemporalFact(
-                fact_id="fork-b", subject="Budget", predicate="was", object="150",
+                fact_id="fork-b",
+                subject="Budget",
+                predicate="was",
+                object="150",
                 source_document_id="doc-fork",
-                valid_from=t2, valid_to=None,
+                valid_from=t2,
+                valid_to=None,
                 parent_fact_id="root",
             ),
         ]
@@ -623,7 +734,9 @@ class TestDescribeForks:
 
         reconciler = VersionChainReconciler(fact_store)
         forks = await reconciler.describe_forks(
-            "Budget", doc_id="doc-fork", tenant_context="tenant-a",
+            "Budget",
+            doc_id="doc-fork",
+            tenant_context="tenant-a",
         )
         assert len(forks) == 1
         assert forks[0]["parent_fact_id"] == "root"
@@ -640,25 +753,47 @@ class TestReconstructAuthoritativeState:
 
     @pytest.mark.asyncio
     async def test_reconstruct_state(
-        self, fact_store: FactStore,
+        self,
+        fact_store: FactStore,
     ) -> None:
         """Test full authoritative state reconstruction."""
         doc_id = "doc-auth"
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 2, 1, tzinfo=timezone.utc)
-        t3 = datetime(2025, 3, 1, tzinfo=timezone.utc)
+        datetime(2025, 3, 1, tzinfo=timezone.utc)
 
         facts = [
-            TemporalFact(fact_id="r1", subject="Revenue", predicate="was",
-                         object="$100K", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2, created_at=t1),
-            TemporalFact(fact_id="r2", subject="Revenue", predicate="was",
-                         object="$150K", source_document_id=doc_id,
-                         valid_from=t2, valid_to=None, created_at=t2,
-                         parent_fact_id="r1"),
-            TemporalFact(fact_id="h1", subject="Headcount", predicate="was",
-                         object="500", source_document_id=doc_id,
-                         valid_from=t1, valid_to=None, created_at=t1),
+            TemporalFact(
+                fact_id="r1",
+                subject="Revenue",
+                predicate="was",
+                object="$100K",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="r2",
+                subject="Revenue",
+                predicate="was",
+                object="$150K",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=None,
+                created_at=t2,
+                parent_fact_id="r1",
+            ),
+            TemporalFact(
+                fact_id="h1",
+                subject="Headcount",
+                predicate="was",
+                object="500",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=None,
+                created_at=t1,
+            ),
         ]
         # Save in dependency order: r1 first (no parent), then r2 (parent=r1)
         await fact_store.save_fact(facts[0], tenant_context="tenant-a")
@@ -669,7 +804,8 @@ class TestReconstructAuthoritativeState:
         cross = CrossChainStateReconstructor(fact_store, reconciler)
 
         state = await cross.reconstruct_authoritative_state(
-            doc_id, tenant_context="tenant-a",
+            doc_id,
+            tenant_context="tenant-a",
         )
         assert "Revenue" in state
         assert state["Revenue"]["value"] == "$150K"
@@ -682,7 +818,8 @@ class TestReconstructAuthoritativeState:
         reconciler = VersionChainReconciler(fact_store)
         cross = CrossChainStateReconstructor(fact_store, reconciler)
         state = await cross.reconstruct_authoritative_state(
-            "doc-123", tenant_context=None,
+            "doc-123",
+            tenant_context=None,
         )
         assert state == {}
 
@@ -695,15 +832,27 @@ class TestReconstructStateAt:
         doc_id = "doc-time"
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        t3 = datetime(2025, 12, 1, tzinfo=timezone.utc)
+        datetime(2025, 12, 1, tzinfo=timezone.utc)
 
         facts = [
-            TemporalFact(fact_id="r1", subject="Revenue", predicate="was",
-                         object="$100K", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2),
-            TemporalFact(fact_id="r2", subject="Revenue", predicate="was",
-                         object="$200K", source_document_id=doc_id,
-                         valid_from=t2, valid_to=None),
+            TemporalFact(
+                fact_id="r1",
+                subject="Revenue",
+                predicate="was",
+                object="$100K",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+            ),
+            TemporalFact(
+                fact_id="r2",
+                subject="Revenue",
+                predicate="was",
+                object="$200K",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=None,
+            ),
         ]
         await fact_store.save_facts(facts, tenant_context="tenant-a")
 
@@ -712,13 +861,17 @@ class TestReconstructStateAt:
 
         # At t1 + 1 month, r1 should be active
         state = await cross.reconstruct_state_at(
-            doc_id, t1 + timedelta(days=30), tenant_context="tenant-a",
+            doc_id,
+            t1 + timedelta(days=30),
+            tenant_context="tenant-a",
         )
         assert state["Revenue"]["value"] == "$100K"
 
         # At t2 + 1 month, r2 should be active
         state = await cross.reconstruct_state_at(
-            doc_id, t2 + timedelta(days=30), tenant_context="tenant-a",
+            doc_id,
+            t2 + timedelta(days=30),
+            tenant_context="tenant-a",
         )
         assert state["Revenue"]["value"] == "$200K"
 
@@ -731,15 +884,27 @@ class TestCompareStates:
         doc_id = "doc-compare"
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        t3 = datetime(2025, 12, 1, tzinfo=timezone.utc)
+        datetime(2025, 12, 1, tzinfo=timezone.utc)
 
         facts = [
-            TemporalFact(fact_id="r1", subject="Revenue", predicate="was",
-                         object="$100K", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2),
-            TemporalFact(fact_id="r2", subject="Revenue", predicate="was",
-                         object="$200K", source_document_id=doc_id,
-                         valid_from=t2, valid_to=None),
+            TemporalFact(
+                fact_id="r1",
+                subject="Revenue",
+                predicate="was",
+                object="$100K",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+            ),
+            TemporalFact(
+                fact_id="r2",
+                subject="Revenue",
+                predicate="was",
+                object="$200K",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=None,
+            ),
         ]
         await fact_store.save_facts(facts, tenant_context="tenant-a")
 
@@ -747,7 +912,9 @@ class TestCompareStates:
         cross = CrossChainStateReconstructor(fact_store, reconciler)
 
         result = await cross.compare_states(
-            doc_id, t1 + timedelta(days=1), t2 + timedelta(days=1),
+            doc_id,
+            t1 + timedelta(days=1),
+            t2 + timedelta(days=1),
             tenant_context="tenant-a",
         )
         assert result["summary"]["total_subjects_a"] == 1
@@ -770,27 +937,69 @@ class TestGetChainSummaries:
 
         doc_id = "doc-summary"
         doc_facts = [
-            TemporalFact(fact_id="gs-rev1", subject="Revenue", predicate="was",
-                         object="$100K", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2, created_at=t1),
-            TemporalFact(fact_id="gs-rev2", subject="Revenue", predicate="was",
-                         object="$120K", source_document_id=doc_id,
-                         valid_from=t2, valid_to=t3, created_at=t2,
-                         parent_fact_id="gs-rev1"),
-            TemporalFact(fact_id="gs-rev3", subject="Revenue", predicate="was",
-                         object="$150K", source_document_id=doc_id,
-                         valid_from=t3, valid_to=None, created_at=t3,
-                         parent_fact_id="gs-rev2"),
-            TemporalFact(fact_id="gs-hc1", subject="Headcount", predicate="was",
-                         object="500", source_document_id=doc_id,
-                         valid_from=t1, valid_to=None, created_at=t1),
-            TemporalFact(fact_id="gs-tax1", subject="TaxRate", predicate="was",
-                         object="21%", source_document_id=doc_id,
-                         valid_from=t1, valid_to=t2, created_at=t1),
-            TemporalFact(fact_id="gs-tax2", subject="TaxRate", predicate="was",
-                         object="18%", source_document_id=doc_id,
-                         valid_from=t2, valid_to=None, created_at=t2,
-                         parent_fact_id="gs-tax1"),
+            TemporalFact(
+                fact_id="gs-rev1",
+                subject="Revenue",
+                predicate="was",
+                object="$100K",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="gs-rev2",
+                subject="Revenue",
+                predicate="was",
+                object="$120K",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=t3,
+                created_at=t2,
+                parent_fact_id="gs-rev1",
+            ),
+            TemporalFact(
+                fact_id="gs-rev3",
+                subject="Revenue",
+                predicate="was",
+                object="$150K",
+                source_document_id=doc_id,
+                valid_from=t3,
+                valid_to=None,
+                created_at=t3,
+                parent_fact_id="gs-rev2",
+            ),
+            TemporalFact(
+                fact_id="gs-hc1",
+                subject="Headcount",
+                predicate="was",
+                object="500",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=None,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="gs-tax1",
+                subject="TaxRate",
+                predicate="was",
+                object="21%",
+                source_document_id=doc_id,
+                valid_from=t1,
+                valid_to=t2,
+                created_at=t1,
+            ),
+            TemporalFact(
+                fact_id="gs-tax2",
+                subject="TaxRate",
+                predicate="was",
+                object="18%",
+                source_document_id=doc_id,
+                valid_from=t2,
+                valid_to=None,
+                created_at=t2,
+                parent_fact_id="gs-tax1",
+            ),
         ]
         # Save in dependency order
         roots = [f for f in doc_facts if not f.parent_fact_id]
@@ -804,7 +1013,8 @@ class TestGetChainSummaries:
         cross = CrossChainStateReconstructor(fact_store, reconciler)
 
         summaries = await cross.get_chain_summaries(
-            doc_id, tenant_context="tenant-a",
+            doc_id,
+            tenant_context="tenant-a",
         )
         assert len(summaries) >= 3
 
@@ -820,7 +1030,8 @@ class TestGetChainSummaries:
         reconciler = VersionChainReconciler(fact_store)
         cross = CrossChainStateReconstructor(fact_store, reconciler)
         summaries = await cross.get_chain_summaries(
-            "empty", tenant_context="tenant-a",
+            "empty",
+            tenant_context="tenant-a",
         )
         assert len(summaries) == 0
 
@@ -845,26 +1056,38 @@ class TestEdgeCases:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         # Save a valid reference fact first
         await fact_store.save_fact(
-            TemporalFact(fact_id="valid", subject="X", predicate="was",
-                         object="ref", valid_from=t1),
+            TemporalFact(
+                fact_id="valid", subject="X", predicate="was", object="ref", valid_from=t1
+            ),
             tenant_context="tenant-a",
         )
         # Save one fact with valid superseded_by, then delete the target
-        fact_a = TemporalFact(fact_id="a", subject="X", predicate="was",
-                              object="1", valid_from=t1,
-                              superseded_by="valid")
+        fact_a = TemporalFact(
+            fact_id="a",
+            subject="X",
+            predicate="was",
+            object="1",
+            valid_from=t1,
+            superseded_by="valid",
+        )
         await fact_store.save_fact(fact_a, tenant_context="tenant-a")
 
         # Now create a detector and use _check_broken_links with an
         # in-memory version that references a non-existent ID
         detector = ChainGapDetector(fact_store)
         in_mem_facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was",
-                         object="1", valid_from=t1,
-                         superseded_by="nonexistent-id"),
+            TemporalFact(
+                fact_id="a",
+                subject="X",
+                predicate="was",
+                object="1",
+                valid_from=t1,
+                superseded_by="nonexistent-id",
+            ),
         ]
         anomalies = await detector._check_broken_links(
-            in_mem_facts, tenant_context="tenant-a",
+            in_mem_facts,
+            tenant_context="tenant-a",
         )
         broken = [a for a in anomalies if a.anomaly_type == AnomalyType.BROKEN_SUPERSEDES_LINK]
         assert len(broken) >= 1
@@ -874,10 +1097,22 @@ class TestEdgeCases:
         """Orphaned fact with no parent and no children."""
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="X", predicate="was", object="1",
-                         parent_fact_id=None, valid_from=t1),
-            TemporalFact(fact_id="b", subject="X", predicate="was", object="2",
-                         parent_fact_id=None, valid_from=t1),
+            TemporalFact(
+                fact_id="a",
+                subject="X",
+                predicate="was",
+                object="1",
+                parent_fact_id=None,
+                valid_from=t1,
+            ),
+            TemporalFact(
+                fact_id="b",
+                subject="X",
+                predicate="was",
+                object="2",
+                parent_fact_id=None,
+                valid_from=t1,
+            ),
         ]
         await fact_store.save_fact(facts[0], tenant_context="tenant-a")
         await fact_store.save_fact(facts[1], tenant_context="tenant-a")
@@ -897,11 +1132,18 @@ class TestEdgeCases:
         detector = ChainGapDetector(fact_store)
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         in_mem_facts = [
-            TemporalFact(fact_id="a", subject="Y", predicate="was", object="1",
-                         valid_from=t1, parent_fact_id="nonexistent-parent"),
+            TemporalFact(
+                fact_id="a",
+                subject="Y",
+                predicate="was",
+                object="1",
+                valid_from=t1,
+                parent_fact_id="nonexistent-parent",
+            ),
         ]
         anomalies = await detector._check_broken_links(
-            in_mem_facts, tenant_context="tenant-a",
+            in_mem_facts,
+            tenant_context="tenant-a",
         )
         broken = [a for a in anomalies if a.anomaly_type == AnomalyType.BROKEN_PARENT_LINK]
         assert len(broken) >= 1
@@ -911,10 +1153,22 @@ class TestEdgeCases:
         """Facts with duplicate version numbers should be detected."""
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         facts = [
-            TemporalFact(fact_id="a", subject="Z", predicate="was", object="1",
-                         valid_from=t1, metadata={"version_number": 1}),
-            TemporalFact(fact_id="b", subject="Z", predicate="was", object="2",
-                         valid_from=t1, metadata={"version_number": 1}),
+            TemporalFact(
+                fact_id="a",
+                subject="Z",
+                predicate="was",
+                object="1",
+                valid_from=t1,
+                metadata={"version_number": 1},
+            ),
+            TemporalFact(
+                fact_id="b",
+                subject="Z",
+                predicate="was",
+                object="2",
+                valid_from=t1,
+                metadata={"version_number": 1},
+            ),
         ]
         await fact_store.save_fact(facts[0], tenant_context="tenant-a")
         await fact_store.save_fact(facts[1], tenant_context="tenant-a")
@@ -929,13 +1183,11 @@ class TestEdgeCases:
         """Facts in different tenants should not interfere."""
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         await fact_store.save_fact(
-            TemporalFact(fact_id="ta-a", subject="S", predicate="was",
-                         object="A", valid_from=t1),
+            TemporalFact(fact_id="ta-a", subject="S", predicate="was", object="A", valid_from=t1),
             tenant_context="tenant-a",
         )
         await fact_store.save_fact(
-            TemporalFact(fact_id="tb-b", subject="S", predicate="was",
-                         object="B", valid_from=t1),
+            TemporalFact(fact_id="tb-b", subject="S", predicate="was", object="B", valid_from=t1),
             tenant_context="tenant-b",
         )
 

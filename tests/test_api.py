@@ -45,32 +45,69 @@ def setup_app_state():
     """Ensure the FastAPI app has a valid state for testing."""
     mock_index = MagicMock()
     mock_index.list_documents = AsyncMock(return_value=["doc1", "doc2"])
-    mock_index.get_stats = AsyncMock(return_value={
-        "doc_id": "doc1", "total_nodes": 10, "leaf_count": 5, "max_depth": 3
-    })
-    mock_index.get_tree = AsyncMock(return_value=[{
-        "id": 1, "doc_id": "doc1", "parent_id": None, "path": "1",
-        "title": "Root", "summary": "Root", "depth": 0, "position": 1,
-        "page_start": 0, "page_end": 0, "page_range": "", "is_leaf": False,
-        "has_content": True, "meta": {},
-    }])
-    mock_index.get_page_index = AsyncMock(return_value=[{
-        "id": 1, "doc_id": "doc1", "node_id": 1, "term": "Root",
-        "page_start": 1, "page_end": 5, "path": "1",
-    }])
-    mock_index.query = AsyncMock(return_value=NavigationResult(
-        content="Test answer", node_id=1, path="1.2.3", title="Test Section",
-        trace=[(1, "Root"), (2, "Test Section")], verified=True, confidence=0.95,
-    ))
+    mock_index.get_stats = AsyncMock(
+        return_value={"doc_id": "doc1", "total_nodes": 10, "leaf_count": 5, "max_depth": 3}
+    )
+    mock_index.get_tree = AsyncMock(
+        return_value=[
+            {
+                "id": 1,
+                "doc_id": "doc1",
+                "parent_id": None,
+                "path": "1",
+                "title": "Root",
+                "summary": "Root",
+                "depth": 0,
+                "position": 1,
+                "page_start": 0,
+                "page_end": 0,
+                "page_range": "",
+                "is_leaf": False,
+                "has_content": True,
+                "meta": {},
+            }
+        ]
+    )
+    mock_index.get_page_index = AsyncMock(
+        return_value=[
+            {
+                "id": 1,
+                "doc_id": "doc1",
+                "node_id": 1,
+                "term": "Root",
+                "page_start": 1,
+                "page_end": 5,
+                "path": "1",
+            }
+        ]
+    )
+    mock_index.query = AsyncMock(
+        return_value=NavigationResult(
+            content="Test answer",
+            node_id=1,
+            path="1.2.3",
+            title="Test Section",
+            trace=[(1, "Root"), (2, "Test Section")],
+            verified=True,
+            confidence=0.95,
+        )
+    )
     mock_index.ingest_text = AsyncMock(return_value="test-doc")
     mock_index.ingest = AsyncMock(return_value="test-doc")
     mock_index.delete = AsyncMock(return_value=5)
     mock_index.export_tree = AsyncMock(return_value=[])
     mock_index.search_index = AsyncMock(return_value=[])
-    mock_index.query_global = AsyncMock(return_value=NavigationResult(
-        content="Global answer", node_id=0, path="global", title="Global",
-        trace=[], verified=True, confidence=1.0,
-    ))
+    mock_index.query_global = AsyncMock(
+        return_value=NavigationResult(
+            content="Global answer",
+            node_id=0,
+            path="global",
+            title="Global",
+            trace=[],
+            verified=True,
+            confidence=1.0,
+        )
+    )
 
     # Stream query mock
     mock_index.stream_query = _mock_stream_query
@@ -390,7 +427,9 @@ async def test_llm_generate_with_images() -> None:
             "/llm/generate",
             json={
                 "prompt": "Describe this image",
-                "images": ["iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="],
+                "images": [
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                ],
             },
         )
         assert resp.status_code == 200
@@ -401,6 +440,7 @@ async def test_llm_generate_with_images() -> None:
 @pytest.mark.asyncio
 async def test_query_orchestrate_stream_missing_doc() -> None:
     """Orchestrated stream should handle missing documents gracefully."""
+
     # Patch stream_query to raise an error for missing doc
     async def _mock_stream_error(
         question: str, doc_id: str, *, tenant_id: str = "default"

@@ -290,6 +290,7 @@ class Orchestrator:
                     for pkt in packets:
                         pkt.content = await ac_agent.mask_content(tenant_context, pkt.content)
                         await ac_agent.log_audit_trail(tenant_context, "READ_NODE", pkt.node_id)
+
                 return packets
 
             # Determine what was missing for the next iteration

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-import re
-import sys
-import subprocess
 import os
+import re
+import subprocess
+import sys
+
 
 def main():
     # 1. Get latest commit message to see if there's an override command like [major] or [minor]
     try:
-        commit_msg = subprocess.check_output(
-            ["git", "log", "-1", "--pretty=%B"],
-            text=True
-        ).strip().lower()
+        commit_msg = (
+            subprocess.check_output(["git", "log", "-1", "--pretty=%B"], text=True).strip().lower()
+        )
     except Exception as e:
         print(f"Warning: Could not get git commit message: {e}", file=sys.stderr)
         commit_msg = ""
-        
+
     bump_type = "patch"
     if "[major]" in commit_msg or "#major" in commit_msg:
         bump_type = "major"
@@ -27,7 +27,7 @@ def main():
         print(f"Error: {pyproject_path} not found.", file=sys.stderr)
         sys.exit(1)
 
-    with open(pyproject_path, "r", encoding="utf-8") as f:
+    with open(pyproject_path, encoding="utf-8") as f:
         content = f.read()
 
     # Match version = "x.y.z"
@@ -59,10 +59,7 @@ def main():
 
     # 4. Replace version in content and write back
     new_content = re.sub(
-        r'(^version\s*=\s*")([^"]+)(")',
-        rf'\g<1>{new_version}\g<3>',
-        content,
-        flags=re.MULTILINE
+        r'(^version\s*=\s*")([^"]+)(")', rf"\g<1>{new_version}\g<3>", content, flags=re.MULTILINE
     )
 
     with open(pyproject_path, "w", encoding="utf-8") as f:
@@ -73,6 +70,7 @@ def main():
         with open(os.environ["GITHUB_OUTPUT"], "a") as env_file:
             env_file.write(f"new_version={new_version}\n")
             env_file.write(f"old_version={old_version}\n")
+
 
 if __name__ == "__main__":
     main()

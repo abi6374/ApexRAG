@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from apex_rag.agents.orchestrator import Orchestrator
+from apex_rag.models.unified_models import ASTNode as UnifiedASTNode
+from apex_rag.models.unified_models import NodeType
 from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
-from apex_rag.models.unified_models import ASTNode as UnifiedASTNode, NodeType, EvidencePacket as UnifiedEvidencePacket
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -327,9 +327,7 @@ async def test_execute_query_integrated_no_evidence(orchestrator):
 
 
 @pytest.mark.asyncio
-async def test_execute_query_integrated_no_synthesizer(
-    mock_planner, mock_navigator, mock_critic
-):
+async def test_execute_query_integrated_no_synthesizer(mock_planner, mock_navigator, mock_critic):
     """Without a synthesizer, falls back to formatted text."""
     orchestrator = Orchestrator(
         planner=mock_planner,
@@ -337,9 +335,7 @@ async def test_execute_query_integrated_no_synthesizer(
         critic=mock_critic,
     )
 
-    result = await orchestrator.execute_query_integrated(
-        "Compare Q2 and Q3", "doc1"
-    )
+    result = await orchestrator.execute_query_integrated("Compare Q2 and Q3", "doc1")
 
     assert result is not None
     assert "Q2 is $40M" in result.answer_text or "Source" in result.answer_text
@@ -358,9 +354,7 @@ async def test_execute_query_integrated_no_causal_components(
         synthesizer=mock_synthesizer,
     )
 
-    result = await orchestrator.execute_query_integrated(
-        "Compare Q2 and Q3", "doc1"
-    )
+    result = await orchestrator.execute_query_integrated("Compare Q2 and Q3", "doc1")
 
     assert result is not None
     assert result.causal_chain == []
@@ -379,9 +373,7 @@ async def test_execute_query_integrated_temporal_scoring(
         synthesizer=mock_synthesizer,
     )
 
-    with patch(
-        "apex_rag.agents.orchestrator.FreshnessScorer"
-    ) as MockScorer:
+    with patch("apex_rag.agents.orchestrator.FreshnessScorer") as MockScorer:
         mock_scorer_instance = MagicMock()
         mock_scorer_instance.compute.return_value = 0.85
         MockScorer.return_value = mock_scorer_instance
@@ -432,6 +424,7 @@ async def test_execute_query_integrated_contradictions_chain(
     class FakeBuilder:
         async def build_all(self, nodes, **kwargs):
             from apex_rag.graph.edges.models import GraphEdge, RelationType
+
             return [
                 GraphEdge(
                     source_id=node_a_id,
@@ -497,9 +490,7 @@ async def test_single_sub_query(orchestrator):
 @pytest.mark.asyncio
 async def test_partial_retrieval(orchestrator):
     """Only some sub-queries resolve — should still return partial results."""
-    orchestrator.planner.plan = AsyncMock(
-        return_value=["Q2?", "Q3?", "Q4?"]
-    )
+    orchestrator.planner.plan = AsyncMock(return_value=["Q2?", "Q3?", "Q4?"])
     nav_results = [
         ASTNavigationResult(
             node=UnifiedASTNode(

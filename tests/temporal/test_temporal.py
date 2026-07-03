@@ -28,7 +28,6 @@ from apex_rag.temporal.contradiction import TemporalContradictionDetector
 from apex_rag.temporal.extractor import TemporalExtractor
 from apex_rag.temporal.scorer import DEFAULT_DECAY_RATES, FreshnessScorer
 
-
 # ══════════════════════════════════════════════════════════════════════════
 # TemporalExtractor tests
 # ══════════════════════════════════════════════════════════════════════════
@@ -166,7 +165,7 @@ class TestStrategyB_Regex:
         """Dates after the first 500 chars are not detected."""
         extractor = TemporalExtractor()
         text = "A" * 490 + "2024-12-25"
-        result = extractor._strategy_b(text)
+        extractor._strategy_b(text)
         # 2024-12-25 starts at index 490, within the 500 char window
         # Actually it starts at 490, and the match ends at 500, so it IS within 500 chars.
         # Let me test with a date beyond 500:
@@ -469,9 +468,7 @@ class TestStep3_LLM:
     async def test_llm_denies_contradiction(self) -> None:
         """LLM says NO → None returned."""
         llm = AsyncMock()
-        llm.generate = AsyncMock(
-            return_value="NO|The passages are consistent and complementary."
-        )
+        llm.generate = AsyncMock(return_value="NO|The passages are consistent and complementary.")
         detector = TemporalContradictionDetector(llm=llm)
         node_a = _make_node("Revenue was $40M in Q2.")
         node_b = _make_node("Revenue was $52M in Q3.")
@@ -505,7 +502,9 @@ class TestFullDetect:
         # High cosine similarity (same topic), negation in one
         emb = [0.8, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         node_a = _make_node("The policy is valid for all employees.", embedding=emb)
-        node_b = _make_node("The policy is not valid anymore.", embedding=[0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        node_b = _make_node(
+            "The policy is not valid anymore.", embedding=[0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        )
 
         edge = await detector.detect(node_a, node_b)
         assert edge is not None
@@ -523,7 +522,9 @@ class TestFullDetect:
 
         emb = [0.8, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         node_a = _make_node("Revenue grew by 20% in Q2.", embedding=emb)
-        node_b = _make_node("Revenue grew by 20% this quarter.", embedding=[0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        node_b = _make_node(
+            "Revenue grew by 20% this quarter.", embedding=[0.7, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        )
 
         edge = await detector.detect(node_a, node_b)
         assert edge is None

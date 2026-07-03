@@ -57,6 +57,7 @@ from apex_rag.exceptions import (
 )
 from apex_rag.models.unified_models import ApexAnswer
 from apex_rag.navigation import NavigationResult
+from apex_rag.observability.accuracy_tracker import accuracy_tracker
 from apex_rag.observability.metrics_service import metrics_service
 from apex_rag.observability.trace_manager import trace_manager
 from apex_rag.utils import logger
@@ -384,7 +385,6 @@ class IngestTextRequest(BaseModel):
 class QueryRequest(BaseModel):
     doc_id: str
     question: str
-    root_node_id: int | None = None
     verify_leaves: bool = True
 
 
@@ -688,7 +688,11 @@ async def _stream_llm_sse(
 # ---------------------------------------------------------------------------
 
 
-def _to_query_response(result: NavigationResult | ApexAnswer | str | None) -> QueryResponse:
+def _to_query_response(
+    result: NavigationResult | ApexAnswer | str | None,
+    *,
+    _include_accuracy: bool = False,
+) -> QueryResponse:
     """Convert a NavigationResult (or str/None) into a QueryResponse."""
     if result is None:
         return QueryResponse(
@@ -753,7 +757,6 @@ async def query_document(req: QueryRequest) -> QueryResponse:
     result = await idx.query(
         req.question,
         req.doc_id,
-        root_node_id=req.root_node_id,
     )
     return _to_query_response(result)
 
@@ -772,7 +775,6 @@ async def query_document_stream(req: QueryRequest) -> StreamingResponse:
         idx.query(
             req.question,
             req.doc_id,
-            root_node_id=req.root_node_id,
             event_queue=event_queue,
         )
     )
@@ -786,7 +788,7 @@ async def query_document_stream(req: QueryRequest) -> StreamingResponse:
 async def query_global(req: GlobalQueryRequest) -> QueryResponse:
     """Query across all indexed documents."""
     idx = get_index()
-    result = await idx.query_global(req.question, synthesize=True)
+    result = await idx.query_global(req.question)
     return _to_query_response(result)
 
 
@@ -796,7 +798,7 @@ async def query_global_stream(req: GlobalQueryRequest) -> StreamingResponse:
     idx = get_index()
     event_queue: asyncio.Queue[Any] = asyncio.Queue()
     query_task = asyncio.create_task(
-        idx.query_global(req.question, event_queue=event_queue, synthesize=True)
+        idx.query_global(req.question, event_queue=event_queue)
     )
     return StreamingResponse(
         _stream_query_to_sse(query_task, event_queue),
@@ -923,6 +925,52 @@ async def get_metrics() -> Response:
     """
     return Response(
         content=metrics_service.get_prometheus_metrics(),
+        media_type="text/plain; version=0.0.4",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Accuracy Metrics Endpoint
+# ---------------------------------------------------------------------------
+
+
+@app.get("/accuracy", tags=["System"])
+async def get_accuracy_metrics() -> dict[str, Any]:
+    """Return aggregate per-query accuracy metrics.
+
+    Returns precision, recall, F1, hit rate, and other retrieval quality
+    metrics aggregated across all queries since the server started.
+
+    Returns:
+        A dict with aggregate accuracy statistics.
+    """
+    return accuracy_tracker.get_aggregate_stats()
+
+
+@app.get("/accuracy/recent", tags=["System"])
+async def get_recent_accuracy(
+    limit: int = Query(default=10, description="Number of recent queries to return"),
+    min_precision: float | None = Query(
+        default=None, description="Optional minimum precision filter"
+    ),
+) -> list[dict[str, Any]]:
+    """Return the most recent query accuracy records.
+
+    Args:
+        limit:         Max number of records.
+        min_precision: Optional minimum precision filter.
+
+    Returns:
+        List of recent query accuracy record dicts.
+    """
+    return accuracy_tracker.get_recent_queries(limit=limit, min_precision=min_precision)
+
+
+@app.get("/accuracy/prometheus", tags=["System"])
+async def get_accuracy_prometheus() -> Response:
+    """Prometheus-compatible accuracy metrics output."""
+    return Response(
+        content=accuracy_tracker.get_prometheus_metrics(),
         media_type="text/plain; version=0.0.4",
     )
 

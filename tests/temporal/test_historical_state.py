@@ -12,19 +12,17 @@ Covers:
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from pydantic import ValidationError as PydanticValidationError
 
-from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage
+from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.temporal.fact_store import FactStore, TemporalFact
-from apex_rag.temporal.fact_validity import FactValidityResolver
 from apex_rag.temporal.historical_state import HistoricalStateEngine
 from apex_rag.temporal.snapshot_models import SnapshotDelta, StatePatch
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -32,9 +30,9 @@ from apex_rag.temporal.snapshot_models import SnapshotDelta, StatePatch
 @pytest_asyncio.fixture
 async def storage() -> AsyncGenerator[ApexStorage, None]:
     import tempfile
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
     yield storage
 
 
@@ -54,24 +52,38 @@ async def seed_facts(fact_store: FactStore) -> dict[str, TemporalFact]:
     base = datetime(2025, 1, 1, tzinfo=timezone.utc)
     facts = {
         "revenue_q1": TemporalFact(
-            subject="Revenue", predicate="was", object="$40M",
-            confidence=0.9, source_document_id="doc-123",
-            valid_from=base, valid_to=datetime(2025, 4, 1, tzinfo=timezone.utc),
+            subject="Revenue",
+            predicate="was",
+            object="$40M",
+            confidence=0.9,
+            source_document_id="doc-123",
+            valid_from=base,
+            valid_to=datetime(2025, 4, 1, tzinfo=timezone.utc),
         ),
         "revenue_q2": TemporalFact(
-            subject="Revenue", predicate="was", object="$50M",
-            confidence=0.9, source_document_id="doc-123",
+            subject="Revenue",
+            predicate="was",
+            object="$50M",
+            confidence=0.9,
+            source_document_id="doc-123",
             valid_from=datetime(2025, 4, 1, tzinfo=timezone.utc),
             valid_to=datetime(2025, 7, 1, tzinfo=timezone.utc),
         ),
         "headcount": TemporalFact(
-            subject="Headcount", predicate="was", object="500",
-            confidence=0.85, source_document_id="doc-123",
-            valid_from=base, valid_to=None,
+            subject="Headcount",
+            predicate="was",
+            object="500",
+            confidence=0.85,
+            source_document_id="doc-123",
+            valid_from=base,
+            valid_to=None,
         ),
         "policy_x": TemporalFact(
-            subject="Travel Policy", predicate="shall", object="Receipt required",
-            confidence=0.8, source_document_id="doc-123",
+            subject="Travel Policy",
+            predicate="shall",
+            object="Receipt required",
+            confidence=0.8,
+            source_document_id="doc-123",
             valid_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
             valid_to=datetime(2025, 12, 31, tzinfo=timezone.utc),
         ),
@@ -111,7 +123,8 @@ class TestSnapshotDeltaModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(
-            base_as_of=t1, target_as_of=t2,
+            base_as_of=t1,
+            target_as_of=t2,
             added_fact_ids={"fact-1"},
         )
         assert delta.is_empty is False
@@ -121,7 +134,8 @@ class TestSnapshotDeltaModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(
-            base_as_of=t1, target_as_of=t2,
+            base_as_of=t1,
+            target_as_of=t2,
             removed_fact_ids={"fact-old"},
         )
         assert delta.is_empty is False
@@ -130,7 +144,8 @@ class TestSnapshotDeltaModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(
-            base_as_of=t1, target_as_of=t2,
+            base_as_of=t1,
+            target_as_of=t2,
             added_fact_ids={"a", "b"},
             removed_fact_ids={"c"},
             modified_subjects={"Revenue": {"before": "$10", "after": "$20"}},
@@ -141,7 +156,7 @@ class TestSnapshotDeltaModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(base_as_of=t1, target_as_of=t2)
-        with pytest.raises(Exception):  # frozen model
+        with pytest.raises((AttributeError, TypeError, PydanticValidationError)):
             delta.added_fact_ids = {"new"}  # type: ignore[misc]
 
     def test_time_span_seconds(self) -> None:
@@ -179,12 +194,18 @@ class TestSnapshotDeltaMerge:
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         t3 = datetime(2025, 12, 1, tzinfo=timezone.utc)
         d1 = SnapshotDelta(
-            doc_id="doc-1", base_as_of=t1, target_as_of=t2,
-            added_fact_ids={"a"}, removed_fact_ids={"b"},
+            doc_id="doc-1",
+            base_as_of=t1,
+            target_as_of=t2,
+            added_fact_ids={"a"},
+            removed_fact_ids={"b"},
         )
         d2 = SnapshotDelta(
-            doc_id="doc-1", base_as_of=t2, target_as_of=t3,
-            added_fact_ids={"c"}, removed_fact_ids={"a"},  # a was added in d1, removed in d2
+            doc_id="doc-1",
+            base_as_of=t2,
+            target_as_of=t3,
+            added_fact_ids={"c"},
+            removed_fact_ids={"a"},  # a was added in d1, removed in d2
         )
         merged = d1.merge(d2)
         assert merged.base_as_of == t1
@@ -214,11 +235,15 @@ class TestStatePatchModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(
-            base_as_of=t1, target_as_of=t2,
+            base_as_of=t1,
+            target_as_of=t2,
             added_fact_ids={"fact-new"},
         )
         patch = StatePatch(
-            doc_id="doc-1", base_as_of=t1, target_as_of=t2, deltas=[delta],
+            doc_id="doc-1",
+            base_as_of=t1,
+            target_as_of=t2,
+            deltas=[delta],
         )
         result = patch.apply_to_state({"Revenue": "$40M"})
         assert result["Revenue"] == "$40M"
@@ -228,11 +253,15 @@ class TestStatePatchModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(
-            base_as_of=t1, target_as_of=t2,
+            base_as_of=t1,
+            target_as_of=t2,
             removed_fact_ids={"revenue"},
         )
         patch = StatePatch(
-            doc_id="doc-1", base_as_of=t1, target_as_of=t2, deltas=[delta],
+            doc_id="doc-1",
+            base_as_of=t1,
+            target_as_of=t2,
+            deltas=[delta],
         )
         result = patch.apply_to_state({"Revenue": "$40M", "Headcount": 500})
         assert "Headcount" in result
@@ -243,11 +272,15 @@ class TestStatePatchModel:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
         delta = SnapshotDelta(
-            base_as_of=t1, target_as_of=t2,
+            base_as_of=t1,
+            target_as_of=t2,
             modified_subjects={"Revenue": {"before": "$40M", "after": "$60M"}},
         )
         patch = StatePatch(
-            doc_id="doc-1", base_as_of=t1, target_as_of=t2, deltas=[delta],
+            doc_id="doc-1",
+            base_as_of=t1,
+            target_as_of=t2,
+            deltas=[delta],
         )
         result = patch.apply_to_state({"Revenue": "$40M", "Headcount": 500})
         assert result["Revenue"] == "$60M"
@@ -279,7 +312,9 @@ class TestGetStateAt:
 
     @pytest.mark.asyncio
     async def test_get_state_at_q1(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         """Q1 2025: Revenue=$40M, Headcount=500, Travel Policy active."""
         as_of = datetime(2025, 2, 15, tzinfo=timezone.utc)
@@ -290,7 +325,9 @@ class TestGetStateAt:
 
     @pytest.mark.asyncio
     async def test_get_state_at_q2(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         """Q2 2025: Revenue=$50M (updated from $40M)."""
         as_of = datetime(2025, 5, 15, tzinfo=timezone.utc)
@@ -318,7 +355,9 @@ class TestComputeDelta:
 
     @pytest.mark.asyncio
     async def test_delta_q1_to_q2(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         """Q1→Q2: Revenue changes from $40M to $50M."""
         q1 = datetime(2025, 2, 15, tzinfo=timezone.utc)
@@ -333,7 +372,9 @@ class TestComputeDelta:
 
     @pytest.mark.asyncio
     async def test_delta_no_changes(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         """Same time point produces an empty delta."""
         t = datetime(2025, 2, 15, tzinfo=timezone.utc)
@@ -355,18 +396,25 @@ class TestComputeRange:
 
     @pytest.mark.asyncio
     async def test_compute_range_deltas(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t3 = datetime(2025, 12, 1, tzinfo=timezone.utc)
         deltas = await engine.compute_range(
-            "doc-123", t1, t3, num_intervals=3, tenant_context="tenant-a",
+            "doc-123",
+            t1,
+            t3,
+            num_intervals=3,
+            tenant_context="tenant-a",
         )
         assert len(deltas) == 2  # (num_intervals - 1) deltas
 
     @pytest.mark.asyncio
     async def test_compute_range_invalid_intervals(
-        self, engine: HistoricalStateEngine,
+        self,
+        engine: HistoricalStateEngine,
     ) -> None:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
@@ -380,7 +428,9 @@ class TestBuildPatch:
 
     @pytest.mark.asyncio
     async def test_build_patch(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)
@@ -397,7 +447,9 @@ class TestListSubjects:
 
     @pytest.mark.asyncio
     async def test_list_subjects_all(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         subjects = await engine.list_subjects("doc-123", tenant_context="tenant-a")
         assert "Revenue" in subjects
@@ -406,12 +458,16 @@ class TestListSubjects:
 
     @pytest.mark.asyncio
     async def test_list_subjects_as_of(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         """In Q1, only subjects active at that time."""
         as_of = datetime(2025, 2, 15, tzinfo=timezone.utc)
         subjects = await engine.list_subjects(
-            "doc-123", as_of=as_of, tenant_context="tenant-a",
+            "doc-123",
+            as_of=as_of,
+            tenant_context="tenant-a",
         )
         assert "Revenue" in subjects  # revenue_q1 active in Q1
         assert "Headcount" in subjects  # Always active
@@ -423,7 +479,9 @@ class TestCompareStates:
 
     @pytest.mark.asyncio
     async def test_compare_states(
-        self, engine: HistoricalStateEngine, seed_facts: dict[str, TemporalFact],
+        self,
+        engine: HistoricalStateEngine,
+        seed_facts: dict[str, TemporalFact],
     ) -> None:
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
         t2 = datetime(2025, 6, 1, tzinfo=timezone.utc)

@@ -16,24 +16,23 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
-from apex_rag.agents.audit.conformal_wrapper import ConformalWrapperAgent
 from apex_rag.agents.apex_orchestrator import ApexOrchestrator
+from apex_rag.agents.audit.conformal_wrapper import ConformalWrapperAgent
+from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 from apex_rag.core.evidence.models import EvidencePacket as CoreEvidencePacket
-from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
 from apex_rag.models.unified_models import (
     ApexAnswer,
-    CausalEdge,
-    EdgeType,
-    EvidencePacket as UnifiedEvidencePacket,
     ASTNode,
     NodeType,
     TemporalMetadata,
 )
-from apex_rag.temporal.scorer import FreshnessScorer
+from apex_rag.models.unified_models import (
+    EvidencePacket as UnifiedEvidencePacket,
+)
+from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
 from apex_rag.temporal.contradiction import TemporalContradictionDetector
-
+from apex_rag.temporal.scorer import FreshnessScorer
 
 # ═══════════════════════════════════════════════════════════════════════
 # Helpers
@@ -99,9 +98,7 @@ async def test_single_document_query() -> None:
     critic.evaluate.return_value = True
 
     synthesizer = AsyncMock(spec=EvidenceSynthesizerAgent)
-    synthesizer.synthesize.return_value = (
-        "Based on the evidence, Q3 revenue was $52M."
-    )
+    synthesizer.synthesize.return_value = "Based on the evidence, Q3 revenue was $52M."
     synthesizer.stream_synthesize = AsyncMock()
     synthesizer.stream_synthesize.return_value.__aiter__.return_value = iter(
         ["Based on evidence, Q3 revenue was $52M."]
@@ -141,7 +138,9 @@ async def test_cross_document_causal_traversal() -> None:
     navigator = AsyncMock()
     navigator.find.side_effect = [
         make_nav_result("2023: $48M revenue.", "33333333-3333-4333-8333-333333333333"),
-        make_nav_result("2024: $52M revenue, up from $48M.", "44444444-4444-4444-8444-444444444444"),
+        make_nav_result(
+            "2024: $52M revenue, up from $48M.", "44444444-4444-4444-8444-444444444444"
+        ),
     ]
 
     critic = AsyncMock()
@@ -164,7 +163,8 @@ async def test_cross_document_causal_traversal() -> None:
     )
 
     result = await orchestrator.run(
-        "How did revenue change from 2023 to 2024?", "doc-cross",
+        "How did revenue change from 2023 to 2024?",
+        "doc-cross",
     )
 
     assert result is not None
@@ -231,7 +231,8 @@ async def test_temporal_conflict_detected() -> None:
     )
 
     result = await orchestrator.run(
-        "What is the effective tax rate for 2024?", "doc-conflict",
+        "What is the effective tax rate for 2024?",
+        "doc-conflict",
     )
 
     assert result is not None
@@ -267,7 +268,8 @@ async def test_no_answer_query_returns_none() -> None:
     )
 
     result = await orchestrator.run(
-        "What was the CEO's compensation in 2023?", "doc-no-answer",
+        "What was the CEO's compensation in 2023?",
+        "doc-no-answer",
     )
 
     assert result is None
@@ -378,12 +380,22 @@ async def test_conformal_wrapper_standalone() -> None:
     # Create some packets
     packets = [
         UnifiedEvidencePacket(
-            node=ASTNode(node_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", node_type=NodeType.PARAGRAPH, content="A", doc_id="d1"),
+            node=ASTNode(
+                node_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                node_type=NodeType.PARAGRAPH,
+                content="A",
+                doc_id="d1",
+            ),
             temporal_metadata=TemporalMetadata(node_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
             retrieval_score=0.95,
         ),
         UnifiedEvidencePacket(
-            node=ASTNode(node_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", node_type=NodeType.PARAGRAPH, content="B", doc_id="d1"),
+            node=ASTNode(
+                node_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+                node_type=NodeType.PARAGRAPH,
+                content="B",
+                doc_id="d1",
+            ),
             temporal_metadata=TemporalMetadata(node_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"),
             retrieval_score=0.90,
         ),
@@ -408,8 +420,10 @@ async def test_temporal_auditor_standalone() -> None:
     packets = [
         UnifiedEvidencePacket(
             node=ASTNode(
-                node_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", node_type=NodeType.PARAGRAPH,
-                content="Rate is 21%", doc_id="d1",
+                node_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                node_type=NodeType.PARAGRAPH,
+                content="Rate is 21%",
+                doc_id="d1",
                 source_date=datetime(2023, 6, 1, tzinfo=timezone.utc),
             ),
             temporal_metadata=TemporalMetadata(
@@ -419,8 +433,10 @@ async def test_temporal_auditor_standalone() -> None:
         ),
         UnifiedEvidencePacket(
             node=ASTNode(
-                node_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1", node_type=NodeType.PARAGRAPH,
-                content="Rate has been revised to 18%", doc_id="d1",
+                node_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+                node_type=NodeType.PARAGRAPH,
+                content="Rate has been revised to 18%",
+                doc_id="d1",
                 source_date=datetime(2024, 6, 1, tzinfo=timezone.utc),
             ),
             temporal_metadata=TemporalMetadata(
@@ -444,21 +460,31 @@ async def test_temporal_auditor_standalone() -> None:
 @pytest.mark.asyncio
 async def test_apex_orchestrator_with_conformal() -> None:
     """ApexOrchestrator.run with conformal calibration produces coverage guarantee."""
-    calibrator = type("FakeCal", (), {
-        "coverage_level": 0.90,
-        "__init__": lambda self, **_: None,
-        "calibrate": lambda self, scores: 0.5 if len(scores) >= 10 else 0.0,
-    })()
+    calibrator = type(
+        "FakeCal",
+        (),
+        {
+            "coverage_level": 0.90,
+            "__init__": lambda self, **_: None,
+            "calibrate": lambda self, scores: 0.5 if len(scores) >= 10 else 0.0,
+        },
+    )()
 
-    scorer = type("FakeScorer", (), {
-        "score_many": lambda self, packets: [0.1, 0.2, 0.9],
-        "__init__": lambda self, **_: None,
-    })()
+    scorer = type(
+        "FakeScorer",
+        (),
+        {
+            "score_many": lambda self, packets: [0.1, 0.2, 0.9],
+            "__init__": lambda self, **_: None,
+        },
+    )()
 
     planner = AsyncMock()
     planner.plan.return_value = ["sub-query"]
     navigator = AsyncMock()
-    navigator.find.return_value = make_nav_result("Content here.", "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+    navigator.find.return_value = make_nav_result(
+        "Content here.", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    )
     critic = AsyncMock()
     critic.evaluate.return_value = True
     synthesizer = AsyncMock(spec=EvidenceSynthesizerAgent)
@@ -495,7 +521,8 @@ async def test_apex_orchestrator_stream_with_conformal() -> None:
     planner.plan.return_value = ["What is revenue?  "]
     navigator = AsyncMock()
     navigator.find.return_value = make_nav_result(
-        "Revenue is $52M.", "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "Revenue is $52M.",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     )
     critic = AsyncMock()
     critic.evaluate.return_value = True

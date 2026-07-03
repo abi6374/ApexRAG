@@ -181,7 +181,10 @@ export APEX_RATE_LIMIT="120/minute"
 3. Try a different query phrasing — the agent works best with specific questions
 4. Disable verification for broader results:
    ```python
-   result = await index.query("question", doc_id, verify_leaves=False)
+   from apex_rag.config import settings
+   settings.verify_leaves = False
+
+   result = await index.query("question", doc_id)
    ```
 
 ### Slow queries

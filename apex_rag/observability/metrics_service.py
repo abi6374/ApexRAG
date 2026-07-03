@@ -45,6 +45,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from apex_rag.observability._stats import histogram_summary
+
 logger = logging.getLogger("apex_rag.observability.metrics_service")
 
 
@@ -74,12 +76,23 @@ class MetricsService:
         self._total_queries: int = 0
         self._start_time: float = time.monotonic()
 
+    # ── Query Lifecycle ──────────────────────────────────────────────
+
+    def record_completed_query(self) -> None:
+        """Record that one top-level query has completed.
+
+        Use this instead of relying on ``record_retrieval_latency`` to
+        increment the query count, because a single query may invoke
+        multiple retrieval passes.
+        """
+        with self._lock:
+            self._total_queries += 1
+
     # ── Latency Recording ────────────────────────────────────────────
 
     def record_retrieval_latency(self, ms: float) -> None:
         with self._lock:
             self._retrieval_latencies.append(ms)
-            self._total_queries += 1
 
     def record_planner_latency(self, ms: float) -> None:
         with self._lock:
@@ -136,11 +149,11 @@ class MetricsService:
                     else 0.0,
                     4,
                 ),
-                "retrieval_latency": self._histogram_stats(self._retrieval_latencies),
-                "planner_latency": self._histogram_stats(self._planner_latencies),
-                "navigator_latency": self._histogram_stats(self._navigator_latencies),
-                "verifier_latency": self._histogram_stats(self._verifier_latencies),
-                "critic_latency": self._histogram_stats(self._critic_latencies),
+                "retrieval_latency": histogram_summary(self._retrieval_latencies),
+                "planner_latency": histogram_summary(self._planner_latencies),
+                "navigator_latency": histogram_summary(self._navigator_latencies),
+                "verifier_latency": histogram_summary(self._verifier_latencies),
+                "critic_latency": histogram_summary(self._critic_latencies),
                 "tenant_queries": dict(self._tenant_query_counts),
             }
 
@@ -180,7 +193,9 @@ class MetricsService:
         lines.append("# TYPE apex_rag_cache_hit_rate gauge")
         lines.append(f"apex_rag_cache_hit_rate {stats['cache_hit_rate']}")
 
-        # Latency histograms
+        # Latency histograms — standard Prometheus _bucket / _count / _sum format
+        PROMETHEUS_BUCKETS = [5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 5000.0, float("inf")]
+
         for name, label in [
             ("retrieval_latency", "retrieval"),
             ("planner_latency", "planner"),
@@ -189,11 +204,32 @@ class MetricsService:
             ("critic_latency", "critic"),
         ]:
             h = stats[name]
-            lines.append(f"# HELP apex_rag_{name}_ms Latency for {label} stage (ms)")
-            lines.append(f"# TYPE apex_rag_{name}_ms histogram")
-            lines.append(f"apex_rag_{name}_ms_count {h['count']}")
-            lines.append(f"apex_rag_{name}_ms_sum {h['sum']}")
-            lines.append(f"apex_rag_{name}_ms_avg {h['avg']}")
+            metric_name = f"apex_rag_{name}_ms"
+            lines.append(f"# HELP {metric_name} Latency for {label} stage (ms)")
+            lines.append(f"# TYPE {metric_name} histogram")
+            lines.append(f"{metric_name}_count {h['count']}")
+            lines.append(f"{metric_name}_sum {h['sum']}")
+
+            # Buckets — use the actual values list for accurate bucketing
+            raw_values: list[float] = []
+            with self._lock:
+                if name == "retrieval_latency":
+                    raw_values = list(self._retrieval_latencies)
+                elif name == "planner_latency":
+                    raw_values = list(self._planner_latencies)
+                elif name == "navigator_latency":
+                    raw_values = list(self._navigator_latencies)
+                elif name == "verifier_latency":
+                    raw_values = list(self._verifier_latencies)
+                elif name == "critic_latency":
+                    raw_values = list(self._critic_latencies)
+
+            for bucket in PROMETHEUS_BUCKETS:
+                if bucket == float("inf"):
+                    lines.append(f"{metric_name}_bucket{{le=\"+Inf\"}} {h['count']}")
+                else:
+                    count_in_bucket = sum(1 for v in raw_values if v <= bucket)
+                    lines.append(f"{metric_name}_bucket{{le=\"{bucket}\"}} {count_in_bucket}")
 
         # Tenant query counts
         lines.append("# HELP apex_rag_tenant_queries_total Total queries per tenant")
@@ -241,35 +277,6 @@ class MetricsService:
         if extra:
             entry.update(extra)
         return json.dumps(entry, ensure_ascii=False, default=str)
-
-    # ── Internal ─────────────────────────────────────────────────────
-
-    @staticmethod
-    def _histogram_stats(values: list[float]) -> dict[str, float]:
-        """Compute histogram statistics from a list of values."""
-        if not values:
-            return {
-                "count": 0,
-                "sum": 0.0,
-                "avg": 0.0,
-                "min": 0.0,
-                "max": 0.0,
-                "p50": 0.0,
-                "p95": 0.0,
-                "p99": 0.0,
-            }
-        sorted_vals = sorted(values)
-        n = len(sorted_vals)
-        return {
-            "count": n,
-            "sum": round(sum(sorted_vals), 2),
-            "avg": round(sum(sorted_vals) / n, 2),
-            "min": round(sorted_vals[0], 2),
-            "max": round(sorted_vals[-1], 2),
-            "p50": round(sorted_vals[int(n * 0.50)], 2),
-            "p95": round(sorted_vals[int(n * 0.95)], 2),
-            "p99": round(sorted_vals[int(n * 0.99)], 2),
-        }
 
 
 # Global singleton

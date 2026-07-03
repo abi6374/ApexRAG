@@ -13,9 +13,8 @@ Covers:
 
 from __future__ import annotations
 
-import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -29,7 +28,6 @@ from apex_rag.temporal.consistency import (
     VerificationReport,
 )
 from apex_rag.temporal.fact_store import FactStore, TemporalFact
-
 
 # ── Pure Unit Tests (no DB needed) ─────────────────────────────────────
 
@@ -67,13 +65,16 @@ class TestVerificationReport:
     def test_failed_with_errors(self) -> None:
         issue = VerificationIssue(
             check_type=CheckType.TEMPORAL_ORDERING,
-            fact_id="f1", subject="Test",
+            fact_id="f1",
+            subject="Test",
             details="Bad ordering",
             severity=CheckSeverity.ERROR,
         )
         report = VerificationReport(
-            doc_id="doc-1", tenant_id="tenant-a",
-            issues=[issue], fact_count=1,
+            doc_id="doc-1",
+            tenant_id="tenant-a",
+            issues=[issue],
+            fact_count=1,
         )
         assert report.passed is False
         assert report.error_count == 1
@@ -81,13 +82,16 @@ class TestVerificationReport:
     def test_info_only_passes(self) -> None:
         issue = VerificationIssue(
             check_type=CheckType.EXTRACTION_METHOD,
-            fact_id="f1", subject="Test",
+            fact_id="f1",
+            subject="Test",
             details="Unknown method",
             severity=CheckSeverity.INFO,
         )
         report = VerificationReport(
-            doc_id="doc-1", tenant_id="tenant-a",
-            issues=[issue], fact_count=1,
+            doc_id="doc-1",
+            tenant_id="tenant-a",
+            issues=[issue],
+            fact_count=1,
         )
         assert report.passed is True  # INFO doesn't fail
 
@@ -105,11 +109,14 @@ class TestVerifyFact:
         """valid_from < valid_to → no issue."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Revenue", predicate="was", object="$40M",
+            subject="Revenue",
+            predicate="was",
+            object="$40M",
             valid_from=datetime(2025, 1, 1, tzinfo=timezone.utc),
             valid_to=datetime(2025, 6, 30, tzinfo=timezone.utc),
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         ordering_issues = [i for i in issues if i.check_type == CheckType.TEMPORAL_ORDERING]
         assert len(ordering_issues) == 0
@@ -118,11 +125,14 @@ class TestVerifyFact:
         """valid_from > valid_to → TEMPORAL_ORDERING error."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Revenue", predicate="was", object="$40M",
+            subject="Revenue",
+            predicate="was",
+            object="$40M",
             valid_from=datetime(2025, 6, 30, tzinfo=timezone.utc),
             valid_to=datetime(2025, 1, 1, tzinfo=timezone.utc),
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         ordering_issues = [i for i in issues if i.check_type == CheckType.TEMPORAL_ORDERING]
         assert len(ordering_issues) == 1
@@ -131,10 +141,13 @@ class TestVerifyFact:
         """confidence in [0, 1] → no issue."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="is", object="valid",
+            subject="Test",
+            predicate="is",
+            object="valid",
             confidence=0.85,
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         confidence_issues = [i for i in issues if i.check_type == CheckType.CONFIDENCE_RANGE]
         assert len(confidence_issues) == 0
@@ -143,10 +156,13 @@ class TestVerifyFact:
         """confidence > 1 → CONFIDENCE_RANGE error."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="is", object="invalid",
+            subject="Test",
+            predicate="is",
+            object="invalid",
             confidence=1.5,
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         confidence_issues = [i for i in issues if i.check_type == CheckType.CONFIDENCE_RANGE]
         assert len(confidence_issues) == 1
@@ -155,10 +171,13 @@ class TestVerifyFact:
         """confidence < 0 → CONFIDENCE_RANGE error."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="is", object="neg",
+            subject="Test",
+            predicate="is",
+            object="neg",
             confidence=-0.1,
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         confidence_issues = [i for i in issues if i.check_type == CheckType.CONFIDENCE_RANGE]
         assert len(confidence_issues) == 1
@@ -167,10 +186,13 @@ class TestVerifyFact:
         """Known extraction method → no issue."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="is", object="known",
+            subject="Test",
+            predicate="is",
+            object="known",
             extraction_method="regex",
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         method_issues = [i for i in issues if i.check_type == CheckType.EXTRACTION_METHOD]
         assert len(method_issues) == 0
@@ -179,10 +201,13 @@ class TestVerifyFact:
         """Unknown extraction method → EXTRACTION_METHOD warning."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="is", object="unknown",
+            subject="Test",
+            predicate="is",
+            object="unknown",
             extraction_method="unknown_method",
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         method_issues = [i for i in issues if i.check_type == CheckType.EXTRACTION_METHOD]
         assert len(method_issues) == 1
@@ -191,9 +216,12 @@ class TestVerifyFact:
         """Empty subject → MISSING_REQUIRED_FIELDS."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="", predicate="is", object="test",
+            subject="",
+            predicate="is",
+            object="test",
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         missing = [i for i in issues if i.check_type == CheckType.MISSING_REQUIRED_FIELDS]
         assert len(missing) >= 1
@@ -203,9 +231,12 @@ class TestVerifyFact:
         """Empty predicate → MISSING_REQUIRED_FIELDS."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="", object="val",
+            subject="Test",
+            predicate="",
+            object="val",
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         missing = [i for i in issues if i.check_type == CheckType.MISSING_REQUIRED_FIELDS]
         assert len(missing) >= 1
@@ -215,9 +246,12 @@ class TestVerifyFact:
         """Empty object → MISSING_REQUIRED_FIELDS."""
         verifier = self._make_verifier()
         fact = TemporalFact(
-            subject="Test", predicate="is", object="",
+            subject="Test",
+            predicate="is",
+            object="",
         )
         import asyncio
+
         issues = asyncio.run(verifier.verify_fact(fact))
         missing = [i for i in issues if i.check_type == CheckType.MISSING_REQUIRED_FIELDS]
         assert len(missing) >= 1
@@ -233,9 +267,9 @@ class TestVerifyDocument:
     @pytest_asyncio.fixture
     async def storage(self) -> AsyncGenerator[ApexStorage, None]:
         import tempfile
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
         yield storage
 
     @pytest_asyncio.fixture
@@ -248,7 +282,9 @@ class TestVerifyDocument:
 
     @pytest.mark.asyncio
     async def test_verify_document_passes(
-        self, verifier: ConsistencyVerifier, fact_store: FactStore,
+        self,
+        verifier: ConsistencyVerifier,
+        fact_store: FactStore,
     ) -> None:
         """Consistent facts should pass verification."""
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -256,21 +292,33 @@ class TestVerifyDocument:
 
         facts = [
             TemporalFact(
-                subject="Revenue", predicate="was", object="$40M",
-                valid_from=t1, valid_to=t2, source_document_id="doc-123",
+                subject="Revenue",
+                predicate="was",
+                object="$40M",
+                valid_from=t1,
+                valid_to=t2,
+                source_document_id="doc-123",
             ),
             TemporalFact(
-                subject="Headcount", predicate="was", object="500",
-                valid_from=t1, valid_to=None, source_document_id="doc-123",
+                subject="Headcount",
+                predicate="was",
+                object="500",
+                valid_from=t1,
+                valid_to=None,
+                source_document_id="doc-123",
             ),
         ]
         await fact_store.save_facts(facts, tenant_context="tenant-a")
         report = await verifier.verify_document("doc-123", tenant_context="tenant-a")
-        assert report.passed, f"Expected pass but got {report.error_count} errors, {report.warning_count} warnings"
+        assert report.passed, (
+            f"Expected pass but got {report.error_count} errors, {report.warning_count} warnings"
+        )
 
     @pytest.mark.asyncio
     async def test_verify_document_supersession_break(
-        self, verifier: ConsistencyVerifier, fact_store: FactStore,
+        self,
+        verifier: ConsistencyVerifier,
+        fact_store: FactStore,
     ) -> None:
         """superseded_by pointing to non-existent fact → SUPERSESSION_INTEGRITY error.
 
@@ -278,8 +326,11 @@ class TestVerifyDocument:
         verify_fact with an in-memory fact instead.
         """
         fact = TemporalFact(
-            fact_id="test-id", subject="Revenue", predicate="was",
-            object="$40M", superseded_by="nonexistent",
+            fact_id="test-id",
+            subject="Revenue",
+            predicate="was",
+            object="$40M",
+            superseded_by="nonexistent",
             source_document_id="doc-123",
         )
         # verify_fact() doesn't check supersession (it's per-fact)
@@ -290,11 +341,15 @@ class TestVerifyDocument:
 
     @pytest.mark.asyncio
     async def test_verify_document_temporal_anomaly(
-        self, verifier: ConsistencyVerifier, fact_store: FactStore,
+        self,
+        verifier: ConsistencyVerifier,
+        fact_store: FactStore,
     ) -> None:
         """valid_from > valid_to → TEMPORAL_ORDERING error."""
         fact = TemporalFact(
-            subject="Revenue", predicate="was", object="$40M",
+            subject="Revenue",
+            predicate="was",
+            object="$40M",
             valid_from=datetime(2025, 6, 30, tzinfo=timezone.utc),
             valid_to=datetime(2025, 1, 1, tzinfo=timezone.utc),
             source_document_id="doc-123",
@@ -305,7 +360,9 @@ class TestVerifyDocument:
 
     @pytest.mark.asyncio
     async def test_verify_document_window_overlap(
-        self, verifier: ConsistencyVerifier, fact_store: FactStore,
+        self,
+        verifier: ConsistencyVerifier,
+        fact_store: FactStore,
     ) -> None:
         """Overlapping validity windows without supersession → WARNING."""
         t1 = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -313,22 +370,33 @@ class TestVerifyDocument:
 
         facts = [
             TemporalFact(
-                subject="Revenue", predicate="was", object="$40M",
-                valid_from=t1, valid_to=t2, source_document_id="doc-123",
+                subject="Revenue",
+                predicate="was",
+                object="$40M",
+                valid_from=t1,
+                valid_to=t2,
+                source_document_id="doc-123",
             ),
             TemporalFact(
-                subject="Revenue", predicate="forecast", object="$45M",
-                valid_from=t1, valid_to=t2, source_document_id="doc-123",
+                subject="Revenue",
+                predicate="forecast",
+                object="$45M",
+                valid_from=t1,
+                valid_to=t2,
+                source_document_id="doc-123",
             ),
         ]
         await fact_store.save_facts(facts, tenant_context="tenant-a")
         report = await verifier.verify_document("doc-123", tenant_context="tenant-a")
-        overlap_issues = [i for i in report.issues if i.check_type == CheckType.VALIDITY_WINDOW_OVERLAP]
+        overlap_issues = [
+            i for i in report.issues if i.check_type == CheckType.VALIDITY_WINDOW_OVERLAP
+        ]
         assert len(overlap_issues) >= 1
 
     @pytest.mark.asyncio
     async def test_verify_document_missing_tenant(
-        self, verifier: ConsistencyVerifier,
+        self,
+        verifier: ConsistencyVerifier,
     ) -> None:
         """Missing tenant_context raises error."""
         with pytest.raises(Exception) as exc:
@@ -337,7 +405,8 @@ class TestVerifyDocument:
 
     @pytest.mark.asyncio
     async def test_verify_empty_document(
-        self, verifier: ConsistencyVerifier,
+        self,
+        verifier: ConsistencyVerifier,
     ) -> None:
         """Empty document passes with 0 errors."""
         report = await verifier.verify_document("doc-empty", tenant_context="tenant-a")

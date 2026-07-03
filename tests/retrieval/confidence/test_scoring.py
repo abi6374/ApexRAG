@@ -8,6 +8,7 @@ def test_calculate_score_perfect():
     score = engine.calculate_score(retrieval_confidence=1.0, verifier_score=1.0, graph_depth=0)
     assert score == 1.0
 
+
 def test_calculate_score_with_depth_penalty():
     engine = ConfidenceEngine()
     # base_score = 1.0 * 0.6 + 1.0 * 0.4 = 1.0
@@ -15,6 +16,7 @@ def test_calculate_score_with_depth_penalty():
     # score = 0.9
     score = engine.calculate_score(retrieval_confidence=1.0, verifier_score=1.0, graph_depth=2)
     assert pytest.approx(score) == 0.9
+
 
 def test_calculate_score_clamped_bottom():
     engine = ConfidenceEngine()
@@ -24,11 +26,13 @@ def test_calculate_score_clamped_bottom():
     score = engine.calculate_score(retrieval_confidence=0.1, verifier_score=0.1, graph_depth=5)
     assert score == 0.0
 
+
 def test_calculate_score_clamped_top():
     engine = ConfidenceEngine()
     # If inputs exceed 1.0
     score = engine.calculate_score(retrieval_confidence=2.0, verifier_score=2.0, graph_depth=0)
     assert score == 1.0
+
 
 def test_calculate_score_weights():
     engine = ConfidenceEngine()

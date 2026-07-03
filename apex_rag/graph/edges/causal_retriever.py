@@ -22,11 +22,11 @@ logger = logging.getLogger("apex_rag.graph.causal_retriever")
 class StorageProvider(Protocol):
     """Minimal storage interface for the retriever."""
 
-    async def get_edges_for_node(self, node_id: str) -> list[CausalEdge]: ...
+    async def get_edges_for_node(self, node_id: str, *, tenant_context: str | None = None) -> list[CausalEdge]: ...
 
-    async def get_node(self, node_id: str) -> ASTNode | None: ...
+    async def get_node(self, node_id: str, *, tenant_context: str | None = None) -> ASTNode | None: ...
 
-    async def get_nodes_by_doc(self, doc_id: str) -> list[ASTNode]: ...
+    async def get_nodes_by_doc(self, doc_id: str, *, tenant_context: str | None = None) -> list[ASTNode]: ...
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -133,7 +133,7 @@ class CausalRetriever:
             if len(path) >= max_depth:
                 continue
 
-            edges = await self._storage.get_edges_for_node(current_id)
+            edges = await self._storage.get_edges_for_node(current_id, tenant_context="default")
             for edge in edges:
                 # Determine the next node (the one *not* equal to current)
                 next_id: str | None = None
@@ -188,7 +188,7 @@ class CausalRetriever:
                 if nid in already_visited:
                     continue
                 already_visited.add(nid)
-                edges = await self._storage.get_edges_for_node(nid)
+                edges = await self._storage.get_edges_for_node(nid, tenant_context="default")
                 for edge in edges:
                     if edge.edge_id not in seen_edges:
                         seen_edges.add(edge.edge_id)
@@ -228,7 +228,7 @@ class CausalRetriever:
             if depth >= max_depth:
                 continue
 
-            causal_edges = await self._storage.get_edges_for_node(current_id)
+            causal_edges = await self._storage.get_edges_for_node(current_id, tenant_context="default")
 
             for edge in causal_edges:
                 # Only follow non-contrary edges (support edges)

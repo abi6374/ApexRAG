@@ -11,20 +11,17 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
-import asyncio
 
 from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.enterprise.distributed.indexers import (
     CeleryIndexer,
     RedisQueueIndexer,
-    JOB_STATUS_PREFIX,
 )
-from apex_rag.observability.telemetry import get_tracer, TelemetryTracker
-
+from apex_rag.observability.telemetry import TelemetryTracker, get_tracer
 
 # ═══════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -86,7 +83,7 @@ class TestCeleryIndexer:
     ) -> None:
         """queue_ingestion should return a valid UUID job ID."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             assert isinstance(job_id, str)
             assert len(job_id) > 10  # Looks like a UUID
@@ -97,7 +94,7 @@ class TestCeleryIndexer:
     ) -> None:
         """After queueing, status should be 'queued'."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             status = await indexer.get_job_status(job_id, tenant_a)
             assert status == "queued"
@@ -108,7 +105,7 @@ class TestCeleryIndexer:
     ) -> None:
         """After marking completed, status should reflect it."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             await indexer.mark_completed(job_id, "doc-123")
             status = await indexer.get_job_status(job_id, tenant_a)
@@ -120,7 +117,7 @@ class TestCeleryIndexer:
     ) -> None:
         """After marking failed, status and error should be reflected."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             await indexer.mark_failed(job_id, "Parse error: invalid format")
             status = await indexer.get_job_status(job_id, tenant_a)
@@ -132,7 +129,7 @@ class TestCeleryIndexer:
     ) -> None:
         """Tenant B should not be able to access Tenant A's job."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             with pytest.raises(PermissionError, match="Access denied to job"):
                 await indexer.get_job_status(job_id, tenant_b)
@@ -143,9 +140,8 @@ class TestCeleryIndexer:
     ) -> None:
         """Querying an unknown job ID should raise ValueError."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
-            with pytest.raises(ValueError, match="not found"):
-                await indexer.get_job_status("nonexistent-job-id", tenant_a)
+        with patch.object(indexer, "_get_redis", return_value=mock_redis), pytest.raises(ValueError, match="not found"):
+            await indexer.get_job_status("nonexistent-job-id", tenant_a)
 
     @pytest.mark.asyncio
     async def test_queue_and_check_completed_lifecycle(
@@ -153,7 +149,7 @@ class TestCeleryIndexer:
     ) -> None:
         """Full lifecycle: queue -> complete -> check status."""
         indexer = CeleryIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             assert await indexer.get_job_status(job_id, tenant_a) == "queued"
 
@@ -184,7 +180,7 @@ class TestRedisQueueIndexer:
     ) -> None:
         """queue_ingestion should return a valid UUID job ID."""
         indexer = RedisQueueIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             assert isinstance(job_id, str)
             assert len(job_id) > 10
@@ -195,7 +191,7 @@ class TestRedisQueueIndexer:
     ) -> None:
         """After queueing, status should be 'queued'."""
         indexer = RedisQueueIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             status = await indexer.get_job_status(job_id, tenant_a)
             assert status == "queued"
@@ -206,7 +202,7 @@ class TestRedisQueueIndexer:
     ) -> None:
         """Tenant B should not be able to check Tenant A's job status."""
         indexer = RedisQueueIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
+        with patch.object(indexer, "_get_redis", return_value=mock_redis):
             job_id = await indexer.queue_ingestion(sample_bytes, "test.md", tenant_a)
             with pytest.raises(PermissionError, match="Access denied to job"):
                 await indexer.get_job_status(job_id, tenant_b)
@@ -217,16 +213,15 @@ class TestRedisQueueIndexer:
     ) -> None:
         """Querying an unknown job ID should raise ValueError."""
         indexer = RedisQueueIndexer()
-        with patch.object(indexer, '_get_redis', return_value=mock_redis):
-            with pytest.raises(ValueError, match="not found"):
-                await indexer.get_job_status("nonexistent-job-id", tenant_a)
+        with patch.object(indexer, "_get_redis", return_value=mock_redis), pytest.raises(ValueError, match="not found"):
+            await indexer.get_job_status("nonexistent-job-id", tenant_a)
 
     @pytest.mark.asyncio
     async def test_pop_next_job_fallback_returns_none(self) -> None:
         """pop_next_job should return None when queue is empty."""
         indexer = RedisQueueIndexer()
         # Mock _get_redis to return None (memory fallback mode)
-        with patch.object(indexer, '_get_redis', new_callable=AsyncMock, return_value=None):
+        with patch.object(indexer, "_get_redis", new_callable=AsyncMock, return_value=None):
             result = await indexer.pop_next_job()
             assert result is None
 

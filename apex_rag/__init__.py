@@ -5,15 +5,17 @@ ApexRAG preserves document hierarchy using Abstract Syntax Trees (AST) instead
 of naive chunking, enabling zero-hallucination agentic navigation.
 
 Basic usage:
-    >>> from apex_rag import ApexIndex, OpenAIProvider
+    >>> from apex_rag import ApexIndex
+    >>> from apex_rag.providers import OpenAIProvider
     >>> async with await ApexIndex.create(model=OpenAIProvider()) as index:
     >>>     doc_id = await index.ingest("report.pdf")
-    >>>     answer = await index.orchestrate_query("What is Q3 revenue?", doc_id)
+    >>>     answer = await index.query("What is Q3 revenue?", doc_id)
 """
 
 # ruff: noqa: E402
 import logging
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
 # Initialize Logging
 logger = logging.getLogger("apex_rag")
@@ -34,11 +36,7 @@ except PackageNotFoundError:
 # ── Primary Library Exports ───────────────────────────────────────────────
 
 from apex_rag.client import ApexIndex
-from apex_rag.core.ast.models import ASTNode, ASTNodeMetadata
-from apex_rag.core.evidence.models import EvidencePacket
 from apex_rag.enterprise.auth.models import TenantContext
-
-# ── Error Hierarchy ───────────────────────────────────────────────────────
 from apex_rag.exceptions import (
     ApexRAGError,
     AuthenticationError,
@@ -47,36 +45,15 @@ from apex_rag.exceptions import (
     FileValidationError,
     StorageError,
 )
-
-# ── Integrations ──────────────────────────────────────────────────────────
-from apex_rag.integrations.langchain import ApexRAGRetriever
-from apex_rag.providers import (
-    AnthropicProvider,
-    GroqProvider,
-    LLMProvider,
-    OllamaProvider,
-    OpenAIProvider,
-)
-from apex_rag.retrieval.agentic.navigator import ASTNavigationResult
-
-# ── Vision / Multi-modal (Part 8) ────────────────────────────────────────
-from apex_rag.retrieval.vision import ImageParser, VisionAdapter
+from apex_rag.models.unified_models import ApexAnswer, EvidencePacket
+from apex_rag.providers import LLMProvider
 
 __all__ = [
     "ApexIndex",
     "LLMProvider",
-    "OpenAIProvider",
-    "AnthropicProvider",
-    "GroqProvider",
-    "OllamaProvider",
-    "ASTNode",
-    "ASTNodeMetadata",
-    "EvidencePacket",
-    "VisionAdapter",
-    "ImageParser",
     "TenantContext",
-    "ASTNavigationResult",
-    "ApexRAGRetriever",
+    "ApexAnswer",
+    "EvidencePacket",
     "ApexRAGError",
     "AuthenticationError",
     "ConfigurationError",
@@ -85,3 +62,31 @@ __all__ = [
     "StorageError",
     "__version__",
 ]
+
+
+# ── Deprecation shims ──────────────────────────────────────────────────────
+# These provide clear guidance when users try to import symbols that have been
+# moved to subpackages as part of the API stabilization (v1.0).
+
+
+def __getattr__(name: str) -> Any:
+    """Provide helpful error messages for removed/moved exports."""
+    _moved: dict[str, str] = {
+        "OpenAIProvider": "from apex_rag.providers import OpenAIProvider",
+        "AnthropicProvider": "from apex_rag.providers import AnthropicProvider",
+        "GroqProvider": "from apex_rag.providers import GroqProvider",
+        "OllamaProvider": "from apex_rag.providers import OllamaProvider",
+        "ASTNode": "from apex_rag.core.ast.models import ASTNode",
+        "ASTNodeMetadata": "from apex_rag.core.ast.models import ASTNodeMetadata",
+        "ASTNavigationResult": "from apex_rag.retrieval.agentic.navigator import ASTNavigationResult",
+        "ApexRAGRetriever": "from apex_rag.integrations.langchain import ApexRAGRetriever",
+        "VisionAdapter": "from apex_rag.retrieval.vision import VisionAdapter",
+        "ImageParser": "from apex_rag.retrieval.vision import ImageParser",
+        "EnterpriseClient": "Use index.enterprise (ApexIndex.enterprise property)",
+    }
+    if name in _moved:
+        raise ImportError(
+            f"'{name}' is no longer exported from 'apex_rag'. "
+            f"Use: {_moved[name]}"
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

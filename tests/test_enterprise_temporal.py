@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -36,9 +36,8 @@ from apex_rag.models.unified_models import (
     TemporalNodeVersion,
     VersionLineage,
 )
-from apex_rag.temporal.version_resolver import VersionResolver
 from apex_rag.temporal.reasoning_service import TemporalReasoningService
-
+from apex_rag.temporal.version_resolver import VersionResolver
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -167,9 +166,7 @@ class TestDomainModels:
 
     def test_temporal_node_version_defaults(self):
         """TemporalNodeVersion should have sensible defaults."""
-        version = TemporalNodeVersion(
-            version_id="v1", node_id="n1", content="test", doc_id="d1"
-        )
+        version = TemporalNodeVersion(version_id="v1", node_id="n1", content="test", doc_id="d1")
         assert version.validity_status == "ACTIVE"
         assert version.is_current is True
         assert version.version_number == 1
@@ -180,10 +177,19 @@ class TestDomainModels:
     def test_node_version_history(self, sample_node_id: str):
         """NodeVersionHistory should aggregate versions."""
         v1 = TemporalNodeVersion(
-            version_id="v1", node_id=sample_node_id, content="v1", doc_id="d1", version_number=1,
+            version_id="v1",
+            node_id=sample_node_id,
+            content="v1",
+            doc_id="d1",
+            version_number=1,
         )
         v2 = TemporalNodeVersion(
-            version_id="v2", node_id=sample_node_id, content="v2", doc_id="d1", version_number=2, is_current=True,
+            version_id="v2",
+            node_id=sample_node_id,
+            content="v2",
+            doc_id="d1",
+            version_number=2,
+            is_current=True,
         )
         history = NodeVersionHistory(
             node_id=sample_node_id,
@@ -220,18 +226,28 @@ class TestDomainModels:
         assert resource_perm.resource_type == "document"
 
         node_perm = NodePermission(
-            permission_id="p3", role="Viewer", action="traverse", resource_type="node",
-            node_id="n1", node_type_filter="PARAGRAPH",
+            permission_id="p3",
+            role="Viewer",
+            action="traverse",
+            resource_type="node",
+            node_id="n1",
+            node_type_filter="PARAGRAPH",
         )
         assert node_perm.node_type_filter == "PARAGRAPH"
 
         doc_perm = DocumentPermission(
-            permission_id="p4", role="TenantAdmin", action="delete", resource_type="document",
+            permission_id="p4",
+            role="TenantAdmin",
+            action="delete",
+            resource_type="document",
         )
         assert doc_perm.resource_type == "document"
 
         field_perm = FieldPermission(
-            permission_id="p5", role="Guest", action="read", field_name="revenue",
+            permission_id="p5",
+            role="Guest",
+            action="read",
+            field_name="revenue",
         )
         assert field_perm.field_name == "revenue"
 
@@ -272,7 +288,9 @@ class TestVersionResolver:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_resolve_for_date_no_versions(self, resolver: VersionResolver, sample_node_id: str):
+    async def test_resolve_for_date_no_versions(
+        self, resolver: VersionResolver, sample_node_id: str
+    ):
         """Should return None when no version is active at the given date."""
         result = await resolver.resolve_for_date(
             sample_node_id,
@@ -300,7 +318,10 @@ class TestVersionResolver:
 
     @pytest.mark.asyncio
     async def test_resolve_latest_with_current_version(
-        self, resolver: VersionResolver, sample_node_id: str, sample_temporal_node_version: TemporalNodeVersion,
+        self,
+        resolver: VersionResolver,
+        sample_node_id: str,
+        sample_temporal_node_version: TemporalNodeVersion,
     ):
         """Should resolve the latest active version."""
         from apex_rag.ingestion.apex_storage import NodeVersionRow
@@ -328,7 +349,9 @@ class TestVersionResolver:
 
     @pytest.mark.asyncio
     async def test_resolve_authoritative_no_supersession(
-        self, resolver: VersionResolver, sample_node_id: str,
+        self,
+        resolver: VersionResolver,
+        sample_node_id: str,
     ):
         """Should return the node itself when no supersession chain exists."""
         from apex_rag.ingestion.apex_storage import NodeVersionRow
@@ -356,7 +379,9 @@ class TestVersionResolver:
 
     @pytest.mark.asyncio
     async def test_resolve_authoritative_with_as_of(
-        self, resolver: VersionResolver, sample_node_id: str,
+        self,
+        resolver: VersionResolver,
+        sample_node_id: str,
     ):
         """Should delegate to resolve_for_date when as_of is provided."""
         from apex_rag.ingestion.apex_storage import NodeVersionRow
@@ -387,7 +412,9 @@ class TestVersionResolver:
 
     @pytest.mark.asyncio
     async def test_resolve_for_date_with_active_version(
-        self, resolver: VersionResolver, sample_node_id: str,
+        self,
+        resolver: VersionResolver,
+        sample_node_id: str,
     ):
         """Should resolve version active at a specific date."""
         from apex_rag.ingestion.apex_storage import NodeVersionRow
@@ -436,13 +463,15 @@ class TestVersionResolver:
         resolver._storage.get_temporal_metadata = AsyncMock()
         resolver._storage.get_temporal_metadata.side_effect = lambda nid: (
             TemporalMetadata(
-                node_id=nid, validity_status="ACTIVE",
+                node_id=nid,
+                validity_status="ACTIVE",
                 effective_from=datetime(2025, 1, 1, tzinfo=timezone.utc),
                 source_date=datetime(2025, 1, 1, tzinfo=timezone.utc),
             )
             if nid == sample_node_id
             else TemporalMetadata(
-                node_id=nid, validity_status="EXPIRED",
+                node_id=nid,
+                validity_status="EXPIRED",
                 effective_from=datetime(2024, 1, 1, tzinfo=timezone.utc),
                 effective_to=datetime(2024, 12, 31, tzinfo=timezone.utc),
                 source_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
@@ -520,7 +549,9 @@ class TestTemporalReasoningService:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_get_version_history(self, service: TemporalReasoningService, sample_node_id: str):
+    async def test_get_version_history(
+        self, service: TemporalReasoningService, sample_node_id: str
+    ):
         """Should return version history for a node."""
         result = await service.get_version_history(sample_node_id)
         assert isinstance(result, list)

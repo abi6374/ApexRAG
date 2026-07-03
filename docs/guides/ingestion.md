@@ -122,5 +122,5 @@ After ingestion, you can inspect the tree:
 ```python
 tree = await index.get_tree(doc_id)
 for node in tree:
-    print(f"{node['path']} {node['title']} (leaf={node['is_leaf']})")
+    print(f"Node: {node['node_id']} | Type: {node['node_type']} | Depth: {node['depth']}")
 ```

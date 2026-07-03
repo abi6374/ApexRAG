@@ -5,23 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2] — 2026-05-26
+## [1.0.3] — 2026-06-28
 
 ### Added
-- **Structural Retrieval Operating System Redesign**: Complete overhaul of the retrieval engine to favor structure over proximity.
-- **Universal Document AST**: Canonical internal representation for PDF, MD, and Code, preserving structural lineage.
-- **Multi-Agent Orchestrator**: New reasoning loop featuring `QueryPlannerAgent`, `ASTNavigationAgent`, `EvaluationCriticAgent`, and `EvidenceSynthesizerAgent`.
-- **LLM Provider Adapters**: Clean abstraction for OpenAI, Anthropic, Groq, and Ollama with async streaming support.
-- **LangChain Integration**: `ApexRAGRetriever` for drop-in usage in existing LangChain ecosystems.
-- **Gradio Demo Application**: Out-of-the-box `app.py` for visual document navigation.
-- **RAGAS Benchmark Harness**: Specialized evaluation scripts for HotpotQA.
-- **Multi-Tenant RBAC**: Data isolation and role-based access control at the database level.
-- **Enterprise Observability**: Native OpenTelemetry integration for distributed reasoning traces.
+- **EnterpriseClient**: New dedicated class for enterprise features (temporal queries, RBAC, version history) accessed via `index.enterprise` property. Keeps `ApexIndex` focused on core ingestion and querying.
+- **Deprecation shims**: Removed `__init__.py` symbols raise helpful `ImportError` with the correct import path, easing migration.
 
 ### Changed
-- Promoted project to version 1.0 (Production Stable).
-- Upgraded `pyproject.toml` with modular optional dependencies.
-- Migrated `StorageEngine` to support multi-tenant `NodeData`.
+- **API Stabilization**: Cleaned up the public API surface for a stable 1.x release.
+- **Enterprise features extracted**: `temporal_query()`, `get_version_history()`, `get_version_lineage()`, `role_aware_query()` moved from `ApexIndex` to `EnterpriseClient`. `temporal_compare()` kept as deprecated backward-compat wrapper.
+- **Dead parameters removed**: `source_date` removed from `ingest_file()` / `ingest()`, `root_node_id` removed from `query()`, `synthesize` removed from `query_global()` — all were accepted but never used.
+- **`get_nodes()` removed**: Exact duplicate of `get_tree()`. Use `get_tree()` instead.
+- **Hybrid search API unified**: `hybrid=True` parameter replaced by `domain="financial"` which automatically enables hybrid search with domain-tuned freshness decay.
+- **Unused imports cleaned**: Removed ~15 dead imports from `client.py`.
+- **`__init__.py` exports reduced**: From 21 to 11 symbols. Only user-facing API is now exported (`ApexIndex`, `LLMProvider`, `TenantContext`, `ApexAnswer`, `EvidencePacket`, error classes).
+- **EnterpriseClient services lazy-cached**: `VersionResolver`, `TemporalReasoningService`, and `AccessControlAgent` are now lazy singletons on `EnterpriseClient`, avoiding re-creation on each property access.
+
+### Fixed
+- **Circular import**: `ApexIndex.enterprise` uses lazy import to avoid circular dependency between `client.py` and `enterprise/client.py`.
+- **Test compatibility**: `_patch_storage_create()` in `test_image_ingestion.py` updated to patch `ApexStorage` instead of removed `StorageEngine` import.
 
 ## [0.1.8] — 2026-04-10
 

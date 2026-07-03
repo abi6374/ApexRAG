@@ -31,19 +31,17 @@ Covers:
 
 from __future__ import annotations
 
-import math
 import random
 
 import pytest
 
 from apex_rag.retrieval.conformal.calibrator import (
+    VALID_DOMAINS,
     ConformalCalibrator,
     MondorianConformalCalibrator,
-    VALID_DOMAINS,
 )
 from apex_rag.retrieval.conformal.coverage import CoverageVerifier
 from apex_rag.retrieval.conformal.scorer import NonconformityScorer
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # 1. MondorianConformalCalibrator — 12 tests
@@ -78,9 +76,7 @@ class TestMondorianConformalCalibrator:
 
     def test_small_calibration_returns_zero(self) -> None:
         """Insufficient calibration per domain returns 0.0 threshold."""
-        calibrator = MondorianConformalCalibrator(
-            coverage_level=0.90, min_calibration_size=10
-        )
+        calibrator = MondorianConformalCalibrator(coverage_level=0.90, min_calibration_size=10)
         calibrator.add_domain_scores("LEGAL", [0.1, 0.2, 0.3])
         thresholds = calibrator.calibrate_all()
         assert thresholds["LEGAL"] == 0.0
@@ -98,9 +94,7 @@ class TestMondorianConformalCalibrator:
 
     def test_distinct_domain_thresholds(self) -> None:
         """Different domains with different score distributions get different thresholds."""
-        calibrator = MondorianConformalCalibrator(
-            coverage_level=0.90, min_calibration_size=5
-        )
+        calibrator = MondorianConformalCalibrator(coverage_level=0.90, min_calibration_size=5)
         # LEGAL: very low scores (tight)
         calibrator.add_domain_scores(
             "LEGAL", [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
@@ -116,12 +110,8 @@ class TestMondorianConformalCalibrator:
 
     def test_predict_filters_correctly(self) -> None:
         """predict retains only packets with NC score ≤ domain threshold."""
-        calibrator = MondorianConformalCalibrator(
-            coverage_level=0.90, min_calibration_size=5
-        )
-        calibrator.add_domain_scores(
-            "LEGAL", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-        )
+        calibrator = MondorianConformalCalibrator(coverage_level=0.90, min_calibration_size=5)
+        calibrator.add_domain_scores("LEGAL", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
         calibrator.calibrate_all()
 
         # All low scores → all retained
@@ -131,12 +121,8 @@ class TestMondorianConformalCalibrator:
 
     def test_predict_high_scores_filtered(self) -> None:
         """High scores are filtered out by domain threshold."""
-        calibrator = MondorianConformalCalibrator(
-            coverage_level=0.90, min_calibration_size=5
-        )
-        calibrator.add_domain_scores(
-            "LEGAL", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-        )
+        calibrator = MondorianConformalCalibrator(coverage_level=0.90, min_calibration_size=5)
+        calibrator.add_domain_scores("LEGAL", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
         calibrator.calibrate_all()
 
         # Very high scores → should be filtered
@@ -169,12 +155,8 @@ class TestMondorianConformalCalibrator:
 
     def test_estimate_coverage(self) -> None:
         """estimate_coverage returns per-domain empirical coverage."""
-        calibrator = MondorianConformalCalibrator(
-            coverage_level=0.90, min_calibration_size=5
-        )
-        calibrator.add_domain_scores(
-            "LEGAL", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-        )
+        calibrator = MondorianConformalCalibrator(coverage_level=0.90, min_calibration_size=5)
+        calibrator.add_domain_scores("LEGAL", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
         calibrator.calibrate_all()
 
         test_scores = {
@@ -213,9 +195,7 @@ class TestCoverageVerifier:
         """verify returns dict with all expected keys."""
         calibrator = ConformalCalibrator(coverage_level=0.90, min_calibration_size=10)
         scorer = NonconformityScorer()
-        verifier = CoverageVerifier(
-            calibrator=calibrator, scorer=scorer, n_test=50, seed=42
-        )
+        verifier = CoverageVerifier(calibrator=calibrator, scorer=scorer, n_test=50, seed=42)
 
         cal_scores = [random.random() * 0.5 for _ in range(50)]
         result = verifier.verify(calibration_scores=cal_scores)
@@ -270,9 +250,7 @@ class TestCoverageVerifier:
         """verify handles empty calibration without crashing."""
         calibrator = ConformalCalibrator(coverage_level=0.90, min_calibration_size=5)
         scorer = NonconformityScorer()
-        verifier = CoverageVerifier(
-            calibrator=calibrator, scorer=scorer, n_test=10, seed=42
-        )
+        verifier = CoverageVerifier(calibrator=calibrator, scorer=scorer, n_test=10, seed=42)
         result = verifier.verify(calibration_scores=[])
         assert "empirical_coverage" in result
 
@@ -280,12 +258,30 @@ class TestCoverageVerifier:
         """verify works when calibration is done externally."""
         calibrator = ConformalCalibrator(coverage_level=0.80, min_calibration_size=10)
         scorer = NonconformityScorer()
-        verifier = CoverageVerifier(
-            calibrator=calibrator, scorer=scorer, n_test=50, seed=42
-        )
+        verifier = CoverageVerifier(calibrator=calibrator, scorer=scorer, n_test=50, seed=42)
         # Calibrate externally
-        cal_scores = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10,
-                      0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.20]
+        cal_scores = [
+            0.01,
+            0.02,
+            0.03,
+            0.04,
+            0.05,
+            0.06,
+            0.07,
+            0.08,
+            0.09,
+            0.10,
+            0.11,
+            0.12,
+            0.13,
+            0.14,
+            0.15,
+            0.16,
+            0.17,
+            0.18,
+            0.19,
+            0.20,
+        ]
         calibrator.calibrate(cal_scores)
         # Then call verify without calibration_scores
         result = verifier.verify()
@@ -293,13 +289,9 @@ class TestCoverageVerifier:
 
     def test_verify_with_mondorian_calibrator(self) -> None:
         """verify works with MondorianConformalCalibrator."""
-        calibrator = MondorianConformalCalibrator(
-            coverage_level=0.80, min_calibration_size=5
-        )
+        calibrator = MondorianConformalCalibrator(coverage_level=0.80, min_calibration_size=5)
         scorer = NonconformityScorer()
-        verifier = CoverageVerifier(
-            calibrator=calibrator, scorer=scorer, n_test=50, seed=42
-        )
+        verifier = CoverageVerifier(calibrator=calibrator, scorer=scorer, n_test=50, seed=42)
 
         # Calibrate with domain scores
         cal_scores: dict[str, list[float]] = {
@@ -313,9 +305,7 @@ class TestCoverageVerifier:
         """avg_prediction_set_size is a non-negative float."""
         calibrator = ConformalCalibrator(coverage_level=0.90, min_calibration_size=10)
         scorer = NonconformityScorer()
-        verifier = CoverageVerifier(
-            calibrator=calibrator, scorer=scorer, n_test=50, seed=42
-        )
+        verifier = CoverageVerifier(calibrator=calibrator, scorer=scorer, n_test=50, seed=42)
         cal_scores = [0.1 * i for i in range(1, 21)]
         result = verifier.verify(calibration_scores=cal_scores)
         assert result["avg_prediction_set_size"] >= 0.0
@@ -323,8 +313,8 @@ class TestCoverageVerifier:
 
     def test_deterministic_results(self) -> None:
         """Same seed produces same results."""
-        calibrator = ConformalCalibrator(coverage_level=0.80, min_calibration_size=5)
-        scorer = NonconformityScorer()
+        ConformalCalibrator(coverage_level=0.80, min_calibration_size=5)
+        NonconformityScorer()
         cal_scores = [0.1 * i for i in range(1, 11)]
 
         v1 = CoverageVerifier(
@@ -372,4 +362,3 @@ class TestProofDocstring:
         """CoverageVerifier has a docstring."""
         doc = CoverageVerifier.__doc__ or ""
         assert len(doc) > 50, "Docstring too short"
-

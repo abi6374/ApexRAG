@@ -11,7 +11,7 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import pytest
 from pytest import approx
@@ -20,7 +20,6 @@ from apex_rag.graph.edges.causal_builder import CausalGraphBuilder, Embedder
 from apex_rag.graph.edges.causal_retriever import CausalRetriever, StorageProvider
 from apex_rag.graph.edges.models import GraphEdge, RelationType
 from apex_rag.models.unified_models import ASTNode, CausalEdge, EdgeType
-
 
 # ═══════════════════════════════════════════════════════════════════
 # Fixtures
@@ -227,9 +226,11 @@ class TestCausalGraphBuilder:
 
     async def test_semantic_discovery(self) -> None:
         """Semantic strategy discovers SUPPORTS for similar nodes."""
+
         class FakeEmbedder(Embedder):
             def __init__(self, embs: list[list[float]]) -> None:
                 self._embs = embs
+
             async def embed_texts(self, texts: list[str]) -> list[list[float]]:
                 return self._embs
 
@@ -259,6 +260,7 @@ class TestCausalGraphBuilder:
 
     async def test_semantic_low_similarity(self, node_a, isolated_node) -> None:
         """Semantic strategy skips pairs below threshold."""
+
         class FakeEmbedder(Embedder):
             async def embed_texts(self, texts: list[str]) -> list[list[float]]:
                 return [[0.1, 0.2, 0.3, 0.4], [0.9, 0.1, 0.9, 0.1]]
@@ -375,19 +377,20 @@ class FakeStorage(StorageProvider):
         self._edges.setdefault(edge.source_node_id, []).append(edge)
         self._edges.setdefault(edge.target_node_id, []).append(edge)
 
-    async def get_edges_for_node(self, node_id: str) -> list[CausalEdge]:
+    async def get_edges_for_node(self, node_id: str, *, tenant_context: str | None = None) -> list[CausalEdge]:  # noqa: ARG002
         return self._edges.get(node_id, [])
 
-    async def get_node(self, node_id: str) -> ASTNode | None:
+    async def get_node(self, node_id: str, *, tenant_context: str | None = None) -> ASTNode | None:  # noqa: ARG002
         return self._nodes.get(node_id)
 
-    async def get_nodes_by_doc(self, doc_id: str) -> list[ASTNode]:
+    async def get_nodes_by_doc(self, doc_id: str, *, tenant_context: str | None = None) -> list[ASTNode]:  # noqa: ARG002
         return [n for n in self._nodes.values() if n.doc_id == doc_id]
 
 
 def _valid_uuid(tag: str) -> str:
     """Generate a valid UUID4 from a predictable tag (for testing)."""
     import hashlib
+
     hex_digest = hashlib.md5(tag.encode()).hexdigest()
     # Insert UUID4 version nibble at position 12
     return f"{hex_digest[:12]}4{hex_digest[13:16]}8{hex_digest[17:32]}"
@@ -437,23 +440,43 @@ def chain_storage() -> FakeStorage:
         storage.add_node(n)
 
     # REFINES: parent → child
-    storage.add_edge(CausalEdge(
-        source_node_id=root.node_id, target_node_id=a.node_id,
-        edge_type=EdgeType.REFINES, strength=0.8, evidence="parent-child",
-    ))
-    storage.add_edge(CausalEdge(
-        source_node_id=root.node_id, target_node_id=b.node_id,
-        edge_type=EdgeType.REFINES, strength=0.8, evidence="parent-child",
-    ))
-    storage.add_edge(CausalEdge(
-        source_node_id=a.node_id, target_node_id=c.node_id,
-        edge_type=EdgeType.REFINES, strength=0.8, evidence="parent-child",
-    ))
+    storage.add_edge(
+        CausalEdge(
+            source_node_id=root.node_id,
+            target_node_id=a.node_id,
+            edge_type=EdgeType.REFINES,
+            strength=0.8,
+            evidence="parent-child",
+        )
+    )
+    storage.add_edge(
+        CausalEdge(
+            source_node_id=root.node_id,
+            target_node_id=b.node_id,
+            edge_type=EdgeType.REFINES,
+            strength=0.8,
+            evidence="parent-child",
+        )
+    )
+    storage.add_edge(
+        CausalEdge(
+            source_node_id=a.node_id,
+            target_node_id=c.node_id,
+            edge_type=EdgeType.REFINES,
+            strength=0.8,
+            evidence="parent-child",
+        )
+    )
     # SUPPORTS: a ↔ b siblings
-    storage.add_edge(CausalEdge(
-        source_node_id=a.node_id, target_node_id=b.node_id,
-        edge_type=EdgeType.SUPPORTS, strength=0.6, evidence="siblings",
-    ))
+    storage.add_edge(
+        CausalEdge(
+            source_node_id=a.node_id,
+            target_node_id=b.node_id,
+            edge_type=EdgeType.SUPPORTS,
+            strength=0.6,
+            evidence="siblings",
+        )
+    )
 
     return storage
 
@@ -546,27 +569,41 @@ class TestCausalRetriever:
         storage = FakeStorage()
         a = ASTNode(
             node_id="a0000000-0000-4000-8000-000000000000",
-            content="Node A", node_type="PARAGRAPH", doc_id="doc-001",
+            content="Node A",
+            node_type="PARAGRAPH",
+            doc_id="doc-001",
         )
         b = ASTNode(
             node_id="b0000000-0000-4000-8000-000000000000",
-            content="Node B", node_type="PARAGRAPH", doc_id="doc-001",
+            content="Node B",
+            node_type="PARAGRAPH",
+            doc_id="doc-001",
         )
         c = ASTNode(
             node_id="c0000000-0000-4000-8000-000000000000",
-            content="Node C", node_type="PARAGRAPH", doc_id="doc-001",
+            content="Node C",
+            node_type="PARAGRAPH",
+            doc_id="doc-001",
         )
         for n in [a, b, c]:
             storage.add_node(n)
         # a SUPPORTS b, b CONTRADICTS c
-        storage.add_edge(CausalEdge(
-            source_node_id=a.node_id, target_node_id=b.node_id,
-            edge_type=EdgeType.SUPPORTS, strength=0.7,
-        ))
-        storage.add_edge(CausalEdge(
-            source_node_id=b.node_id, target_node_id=c.node_id,
-            edge_type=EdgeType.CONTRADICTS, strength=0.9,
-        ))
+        storage.add_edge(
+            CausalEdge(
+                source_node_id=a.node_id,
+                target_node_id=b.node_id,
+                edge_type=EdgeType.SUPPORTS,
+                strength=0.7,
+            )
+        )
+        storage.add_edge(
+            CausalEdge(
+                source_node_id=b.node_id,
+                target_node_id=c.node_id,
+                edge_type=EdgeType.CONTRADICTS,
+                strength=0.9,
+            )
+        )
 
         retriever = CausalRetriever(storage)
         chain = await retriever.build_chain([a])

@@ -25,15 +25,14 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from apex_rag.models.unified_models import (
-    ASTNode,
     ApexAnswer,
+    ASTNode,
     CausalEdge,
     EdgeType,
     EvidencePacket,
     NodeType,
     TemporalMetadata,
 )
-
 
 # ═══════════════════════════════════════════════════════════
 # 1. Field type validation — 5 tests
@@ -92,7 +91,7 @@ class TestDefaultValues:
     """Verify sensible defaults across all models."""
 
     def test_ast_node_defaults(self) -> None:
-        """depth=0, parent_id=None, children=[], source_date=None, embedding=[]. """
+        """depth=0, parent_id=None, children=[], source_date=None, embedding=[]."""
         node = ASTNode(content="Hello", node_type=NodeType.PARAGRAPH, doc_id="doc1")
         assert node.depth == 0
         assert node.parent_id is None
@@ -204,7 +203,7 @@ class TestJSONRoundTrip:
             rank=1,
         )
         answer = ApexAnswer(
-            answer_text="Q3 revenue was $52M [Node ID: {}].".format(node.node_id),
+            answer_text=f"Q3 revenue was $52M [Node ID: {node.node_id}].",
             evidence_packets=[packet],
             temporal_freshness=0.95,
             contradictions=[],

@@ -62,25 +62,53 @@ def _build_mock_tree() -> dict[int, DocumentNode]:
     nodes: dict[int, DocumentNode] = {}
 
     root = _make_node(1, None, "Document Root", "Entire science textbook", "1", 0, 1)
-    ch1  = _make_node(2, 1,    "Chapter 1: Physics",   "Covers mechanics, thermodynamics", "1.1", 1, 1)
-    ch2  = _make_node(3, 1,    "Chapter 2: Chemistry", "Covers organic and inorganic chem", "1.2", 1, 2)
-    sec11 = _make_node(4, 2,   "Section 1.1: Mechanics",
-                       "Newton's laws and kinematics", "1.1.1", 2, 1,
-                       content="F=ma. Objects in motion stay in motion.")
-    sec12 = _make_node(5, 2,   "Section 1.2: Thermodynamics",
-                       "Heat, entropy, and energy transfer", "1.1.2", 2, 2,
-                       content="Heat flows from hot to cold bodies.")
-    sec21 = _make_node(6, 3,   "Section 2.1: Organic Chemistry",
-                       "Carbon compounds, benzene ring structures, polymers", "1.2.1", 2, 1,
-                       content="Benzene (C6H6) is the archetypal aromatic compound with a ring structure.")
-    sec22 = _make_node(7, 3,   "Section 2.2: Inorganic Chemistry",
-                       "Metals, salts, and ionic compounds", "1.2.2", 2, 2,
-                       content="Sodium chloride (NaCl) is a common ionic compound.")
+    ch1 = _make_node(2, 1, "Chapter 1: Physics", "Covers mechanics, thermodynamics", "1.1", 1, 1)
+    ch2 = _make_node(3, 1, "Chapter 2: Chemistry", "Covers organic and inorganic chem", "1.2", 1, 2)
+    sec11 = _make_node(
+        4,
+        2,
+        "Section 1.1: Mechanics",
+        "Newton's laws and kinematics",
+        "1.1.1",
+        2,
+        1,
+        content="F=ma. Objects in motion stay in motion.",
+    )
+    sec12 = _make_node(
+        5,
+        2,
+        "Section 1.2: Thermodynamics",
+        "Heat, entropy, and energy transfer",
+        "1.1.2",
+        2,
+        2,
+        content="Heat flows from hot to cold bodies.",
+    )
+    sec21 = _make_node(
+        6,
+        3,
+        "Section 2.1: Organic Chemistry",
+        "Carbon compounds, benzene ring structures, polymers",
+        "1.2.1",
+        2,
+        1,
+        content="Benzene (C6H6) is the archetypal aromatic compound with a ring structure.",
+    )
+    sec22 = _make_node(
+        7,
+        3,
+        "Section 2.2: Inorganic Chemistry",
+        "Metals, salts, and ionic compounds",
+        "1.2.2",
+        2,
+        2,
+        content="Sodium chloride (NaCl) is a common ionic compound.",
+    )
 
     # Wire up children lists (mirrors what DB queries would return)
     root.children = [ch1, ch2]
-    ch1.children  = [sec11, sec12]
-    ch2.children  = [sec21, sec22]
+    ch1.children = [sec11, sec12]
+    ch2.children = [sec21, sec22]
 
     for n in [root, ch1, ch2, sec11, sec12, sec21, sec22]:
         nodes[n.id] = n
@@ -139,8 +167,12 @@ def mock_storage(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 class DummyLLM:
     """Dummy AsyncLLM for testing."""
-    async def generate(self, prompt: str, *, temperature: float = 0.0, max_tokens: int = 150) -> str:
+
+    async def generate(
+        self, prompt: str, *, temperature: float = 0.0, max_tokens: int = 150
+    ) -> str:
         return ""
+
 
 # ---------------------------------------------------------------------------
 # Helper: patch the LLM with a scripted decision sequence
@@ -177,7 +209,6 @@ def make_llm_responses(decisions: list[tuple[int | None, str]]):
 
 
 class TestNavigationAgent:
-
     @pytest.mark.asyncio
     async def test_finds_correct_leaf(
         self, mock_storage: MagicMock, silent_trace: ReasoningTrace
@@ -186,7 +217,9 @@ class TestNavigationAgent:
         Query about benzene should navigate: Root → Ch2 → Section 2.1 (leaf).
         LLM decisions: [root→ch2 (id=3), ch2→sec21 (id=6)]
         """
-        agent = NavigationAgent(mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False)
+        agent = NavigationAgent(
+            mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False
+        )
 
         decisions = [(3, "Chemistry chapter covers benzene"), (6, "Organic chem has benzene ring")]
         with patch.object(NavigationAgent, "_ask_llm", make_llm_responses(decisions)):
@@ -225,12 +258,14 @@ class TestNavigationAgent:
           [ch2 is now tried directly as a remaining sibling — no extra LLM call at root]
           call#2 → ch2's children → choose sec22 (id=7)
         """
-        agent = NavigationAgent(mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False)
+        agent = NavigationAgent(
+            mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False
+        )
 
         decisions = [
-            (2, "Physics seems relevant"),   # call#0: root → ch1 (wrong path)
-            (None, "Not in physics"),         # call#1: ch1 → NONE (backtrack)
-            (7, "Inorganic covers salts"),    # call#2: ch2 → sec22
+            (2, "Physics seems relevant"),  # call#0: root → ch1 (wrong path)
+            (None, "Not in physics"),  # call#1: ch1 → NONE (backtrack)
+            (7, "Inorganic covers salts"),  # call#2: ch2 → sec22
         ]
         with patch.object(NavigationAgent, "_ask_llm", make_llm_responses(decisions)):
             result = await agent.find("Tell me about sodium chloride.", DOC_ID, root_node_id=1)
@@ -244,7 +279,9 @@ class TestNavigationAgent:
         self, mock_storage: MagicMock, silent_trace: ReasoningTrace
     ) -> None:
         """The trace should record the path of visited nodes."""
-        agent = NavigationAgent(mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False)
+        agent = NavigationAgent(
+            mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False
+        )
 
         decisions = [(2, "Physics"), (4, "Mechanics has Newton's laws")]
         with patch.object(NavigationAgent, "_ask_llm", make_llm_responses(decisions)):
@@ -261,7 +298,9 @@ class TestNavigationAgent:
         self, mock_storage: MagicMock, silent_trace: ReasoningTrace
     ) -> None:
         """If root_node_id points directly to a leaf, return it immediately."""
-        agent = NavigationAgent(mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False)
+        agent = NavigationAgent(
+            mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False
+        )
         result = await agent.find("F=ma", DOC_ID, root_node_id=4)
 
         assert result is not None
@@ -275,10 +314,11 @@ class TestNavigationAgent:
 
 
 class TestResponseParser:
-
     @pytest.fixture
     def agent(self, mock_storage: MagicMock, silent_trace: ReasoningTrace) -> NavigationAgent:
-        return NavigationAgent(mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False)
+        return NavigationAgent(
+            mock_storage, model=DummyLLM(), trace=silent_trace, verify_leaves=False
+        )
 
     def test_valid_json_parsed(self, agent: NavigationAgent) -> None:
         children = [TREE[2], TREE[3]]

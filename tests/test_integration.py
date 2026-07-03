@@ -16,8 +16,6 @@ import pytest_asyncio
 
 from apex_rag.client import ApexIndex
 from apex_rag.providers import AsyncLLM
-from apex_rag.storage import StorageEngine
-from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 
 
 @pytest_asyncio.fixture
@@ -35,7 +33,11 @@ async def dummy_llm() -> AsyncLLM:
     ) -> str:
         # Detect which prompt is being used and return appropriate response
         prompt_lower = prompt.lower()
-        if "navigate" in prompt_lower or "chosen_id" in prompt_lower or "sub-section" in prompt_lower:
+        if (
+            "navigate" in prompt_lower
+            or "chosen_id" in prompt_lower
+            or "sub-section" in prompt_lower
+        ):
             # Navigation prompt - return valid JSON with first child id
             # Extract child IDs from the prompt
             ids = re.findall(r"\[(\d+)\]", prompt)
@@ -75,10 +77,11 @@ Detailed analysis of the results.
 async def test_full_pipeline(dummy_llm: AsyncLLM) -> None:
     """Test the complete ingest → query → tree → delete pipeline."""
     # Build index with custom storage (in-memory) and mock LLM
-    from unittest.mock import AsyncMock
     import json
+    from unittest.mock import AsyncMock
+
     mock_llm = AsyncMock(spec=AsyncLLM)
-    
+
     async def mock_generate(prompt, **kwargs):
         p_lower = prompt.lower()
         if "decomposition" in p_lower or "plan" in p_lower:
@@ -93,15 +96,14 @@ async def test_full_pipeline(dummy_llm: AsyncLLM) -> None:
         return json.dumps({"chosen_id": "mock-1", "reason": "Relevant"})
 
     mock_llm.generate = mock_generate
-    
+
     async def mock_embed(texts, **kwargs):
         return [[0.1] * 384 for _ in texts]
+
     mock_llm.embed = mock_embed
-    
+
     index = await ApexIndex.create(
-        db_url="sqlite+aiosqlite:///:memory:",
-        provider=mock_llm,
-        trace_enabled=False
+        db_url="sqlite+aiosqlite:///:memory:", provider=mock_llm, trace_enabled=False
     )
 
     try:
@@ -133,8 +135,8 @@ async def test_full_pipeline(dummy_llm: AsyncLLM) -> None:
         # 6. Query (with mocked LLM)
         # We need to ensure the Navigator finds a real node ID from the doc
         # Let's get a real node ID from the tree
-        real_node_id = tree[0]["node_id"]
-        
+        tree[0]["node_id"]
+
         async def mock_generate_with_ids(prompt, **kwargs):
             p_lower = prompt.lower()
             if "decomposition" in p_lower or "plan" in p_lower:
@@ -145,7 +147,7 @@ async def test_full_pipeline(dummy_llm: AsyncLLM) -> None:
                 return json.dumps({"passes_evaluation": True, "reason": "Verified"})
             if "cite each claim" in p_lower:
                 return "The introduction is about the company. [Node ID: mock-1]"
-            
+
             # Navigation - pick a real node ID from the candidates listed in the prompt
             node_ids = re.findall(r"\[([a-f0-9\-]+)\]", prompt)
             chosen = node_ids[0] if node_ids else "mock-1"
@@ -177,16 +179,17 @@ async def test_full_pipeline(dummy_llm: AsyncLLM) -> None:
 async def test_ingest_empty_text() -> None:
     """Ingesting empty text should create a minimal tree."""
     from unittest.mock import AsyncMock
+
     mock_llm = AsyncMock(spec=AsyncLLM)
     mock_llm.generate = AsyncMock(return_value="Summary")
+
     async def mock_embed(texts, **kwargs):
         return [[0.1] * 384 for _ in texts]
+
     mock_llm.embed = mock_embed
-    
+
     index = await ApexIndex.create(
-        db_url="sqlite+aiosqlite:///:memory:",
-        provider=mock_llm,
-        trace_enabled=False
+        db_url="sqlite+aiosqlite:///:memory:", provider=mock_llm, trace_enabled=False
     )
 
     try:
@@ -201,16 +204,17 @@ async def test_ingest_empty_text() -> None:
 async def test_concurrent_ingestion(dummy_llm: AsyncLLM) -> None:
     """Test that multiple documents can be ingested concurrently."""
     from unittest.mock import AsyncMock
+
     mock_llm = AsyncMock(spec=AsyncLLM)
     mock_llm.generate = AsyncMock(return_value="Summary")
+
     async def mock_embed(texts, **kwargs):
         return [[0.1] * 384 for _ in texts]
+
     mock_llm.embed = mock_embed
-    
+
     index = await ApexIndex.create(
-        db_url="sqlite+aiosqlite:///:memory:",
-        provider=mock_llm,
-        trace_enabled=False
+        db_url="sqlite+aiosqlite:///:memory:", provider=mock_llm, trace_enabled=False
     )
 
     try:
@@ -235,24 +239,27 @@ async def test_concurrent_ingestion(dummy_llm: AsyncLLM) -> None:
 async def test_ingest_many(dummy_llm: AsyncLLM) -> None:
     """Test batch ingestion of multiple documents via ingest_many()."""
     from unittest.mock import AsyncMock
+
     mock_llm = AsyncMock(spec=AsyncLLM)
     mock_llm.generate = AsyncMock(return_value="Summary")
+
     async def mock_embed(texts, **kwargs):
         return [[0.1] * 384 for _ in texts]
+
     mock_llm.embed = mock_embed
-    
+
     index = await ApexIndex.create(
-        db_url="sqlite+aiosqlite:///:memory:",
-        provider=mock_llm,
-        trace_enabled=False
+        db_url="sqlite+aiosqlite:///:memory:", provider=mock_llm, trace_enabled=False
     )
 
     try:
-        doc_ids = await index.ingest_many([
-            ("batch-doc-1", "# Doc One\nContent for first batch document."),
-            ("batch-doc-2", "# Doc Two\nContent for second batch document."),
-            ("batch-doc-3", "# Doc Three\nContent for third batch document."),
-        ])
+        doc_ids = await index.ingest_many(
+            [
+                ("batch-doc-1", "# Doc One\nContent for first batch document."),
+                ("batch-doc-2", "# Doc Two\nContent for second batch document."),
+                ("batch-doc-3", "# Doc Three\nContent for third batch document."),
+            ]
+        )
 
         assert doc_ids == ["batch-doc-1", "batch-doc-2", "batch-doc-3"]
 

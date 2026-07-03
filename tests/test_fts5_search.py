@@ -52,9 +52,9 @@ class TestFTS5SearchIntegration:
     @pytest.fixture
     async def storage(self):
         from apex_rag.ingestion.apex_storage import ApexStorage
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        db_url = f"sqlite+aiosqlite:///{tmp.name}"
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            db_url = f"sqlite+aiosqlite:///{tmp.name}"
         storage = await ApexStorage.create(db_url)
         yield storage
         await storage.dispose()

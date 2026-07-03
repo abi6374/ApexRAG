@@ -19,8 +19,9 @@ async def test_numerical_verifier_true():
 
     assert result is True
     call_args = mock_llm.generate.call_args[1]
-    assert "specialized numerical verification engine" in call_args['prompt']
-    assert call_args['temperature'] == 0.0
+    assert "specialized numerical verification engine" in call_args["prompt"]
+    assert call_args["temperature"] == 0.0
+
 
 @pytest.mark.asyncio
 async def test_numerical_verifier_false():

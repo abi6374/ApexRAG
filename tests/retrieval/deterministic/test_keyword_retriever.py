@@ -1,8 +1,8 @@
 import pytest
 
 from apex_rag.ingestion.apex_parser import ApexParser
-from apex_rag.retrieval.deterministic.keyword import KeywordDeterministicRetriever
 from apex_rag.models.unified_models import NodeType
+from apex_rag.retrieval.deterministic.keyword import KeywordDeterministicRetriever
 
 
 @pytest.mark.asyncio
@@ -18,18 +18,20 @@ The engineering team shipped 5 new features.
 """
     parser = ApexParser()
     nodes = parser.parse_markdown(md_text, doc_id="dummy-doc")
-    
+
     # We need to link the flat nodes into a tree structure for the retriever
     # or just use the first node (which the parser returns as a root container if possible).
     # Since ApexParser returns a list, let's create a dummy root and attach them
-    from apex_rag.models.unified_models import ASTNode
     import uuid
+
+    from apex_rag.models.unified_models import ASTNode
+
     root = ASTNode(
         node_id=str(uuid.uuid4()),
         doc_id="dummy-doc",
-        node_type=NodeType.PARAGRAPH, # Proxy for document
+        node_type=NodeType.PARAGRAPH,  # Proxy for document
         content="Root",
-        children=nodes
+        children=nodes,
     )
 
     retriever = KeywordDeterministicRetriever()

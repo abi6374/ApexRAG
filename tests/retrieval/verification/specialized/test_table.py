@@ -14,13 +14,16 @@ async def test_table_verifier_true():
 
     verifier = TableVerifier(llm=mock_llm)
 
-    node = ASTNode(id="1", node_type="Table", content="| Quarter | Revenue |\n|---|---|\n| Q3 | $50M |")
+    node = ASTNode(
+        id="1", node_type="Table", content="| Quarter | Revenue |\n|---|---|\n| Q3 | $50M |"
+    )
     result = await verifier.verify("What was Q3 revenue?", node)
 
     assert result is True
     call_args = mock_llm.generate.call_args[1]
-    assert "specialized table verification engine" in call_args['prompt']
-    assert call_args['temperature'] == 0.0
+    assert "specialized table verification engine" in call_args["prompt"]
+    assert call_args["temperature"] == 0.0
+
 
 @pytest.mark.asyncio
 async def test_table_verifier_false():
@@ -29,10 +32,13 @@ async def test_table_verifier_false():
 
     verifier = TableVerifier(llm=mock_llm)
 
-    node = ASTNode(id="1", node_type="Table", content="| Employee | Role |\n|---|---|\n| Alice | Engineer |")
+    node = ASTNode(
+        id="1", node_type="Table", content="| Employee | Role |\n|---|---|\n| Alice | Engineer |"
+    )
     result = await verifier.verify("What was Q3 revenue?", node)
 
     assert result is False
+
 
 @pytest.mark.asyncio
 async def test_table_verifier_not_a_table():

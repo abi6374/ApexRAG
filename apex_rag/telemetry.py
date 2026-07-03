@@ -6,6 +6,9 @@ metrics. This is the observability backbone that makes ApexRAG production-ready:
 
   - **Traces**: Every query, ingestion, and navigation step is traced with spans.
   - **Metrics**: Tracks query latency, ingestion throughput, cache hit rates, errors.
+    (Prefer :class:`apex_rag.observability.metrics_service.MetricsService` for
+    production metrics — ``QueryMetricsCollector`` is kept for backward
+    compatibility.)
   - **Logs**: Structured JSON logging correlates trace IDs with log entries.
 
 Usage in a FastAPI app::
@@ -41,7 +44,12 @@ from apex_rag.utils import logger
 
 @dataclass
 class QueryMetricsCollector:
-    """In-memory query metrics — always available, zero dependencies.
+    """In-memory query metrics collector.
+
+    .. deprecated::
+       Use :class:`apex_rag.observability.metrics_service.MetricsService`
+       for production metrics tracking. This collector is kept for backward
+       compatibility with existing integrations.
 
     Tracks:
       - Total queries
@@ -135,12 +143,20 @@ class QueryMetrics:
 
 
 class _QueryContext:
-    def __init__(self) -> None:
-        self.cache_hit = False
+    """Context object yielded by :meth:`QueryMetrics.measure_query`."""
 
-    def set_attributes(self, attrs: dict[str, str]) -> None:
-        if attrs.get("cache_hit") == "True":
-            self.cache_hit = True
+    def __init__(self) -> None:
+        self.cache_hit: bool = False
+
+    def set_attributes(self, attrs: dict[str, object]) -> None:
+        """Set context attributes from a dict.
+
+        Recognised keys:
+            cache_hit (bool): Whether the query result came from cache.
+        """
+        cache_hit = attrs.get("cache_hit")
+        if isinstance(cache_hit, bool):
+            self.cache_hit = cache_hit
 
 
 # ---------------------------------------------------------------------------

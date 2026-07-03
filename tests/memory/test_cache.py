@@ -20,6 +20,7 @@ async def test_store_and_get_path():
     retrieved_path = await cache.get_path(query)
     assert retrieved_path == path
 
+
 @pytest.mark.asyncio
 async def test_overwrite_path():
     cache = ReasoningMemoryCache()

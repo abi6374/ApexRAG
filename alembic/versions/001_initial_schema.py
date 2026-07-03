@@ -5,17 +5,19 @@ Revision ID: 001
 Revises: None
 Create Date: 2025-06-23
 """
+
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
+
 revision: str = "001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -26,7 +28,12 @@ def upgrade() -> None:
         sa.Column("content", sa.Text, nullable=False, server_default=""),
         sa.Column("node_type", sa.String(20), nullable=False),
         sa.Column("depth", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("parent_id", sa.String(36), sa.ForeignKey("apex_ast_nodes.node_id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "parent_id",
+            sa.String(36),
+            sa.ForeignKey("apex_ast_nodes.node_id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("children_json", sa.Text, nullable=False, server_default="[]"),
         sa.Column("doc_id", sa.String(255), nullable=False),
         sa.Column("tenant_id", sa.String(255), nullable=False, server_default="default"),
@@ -43,7 +50,12 @@ def upgrade() -> None:
     # ── Temporal Metadata ───────────────────────────────────────────────
     op.create_table(
         "apex_temporal_metadata",
-        sa.Column("node_id", sa.String(36), sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"), primary_key=True),
+        sa.Column(
+            "node_id",
+            sa.String(36),
+            sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
         sa.Column("source_date", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ingestion_date", sa.DateTime(timezone=True), nullable=False),
         sa.Column("freshness_score", sa.Float, nullable=False, server_default="1.0"),
@@ -66,8 +78,18 @@ def upgrade() -> None:
     op.create_table(
         "apex_causal_edges",
         sa.Column("edge_id", sa.String(36), primary_key=True),
-        sa.Column("source_node_id", sa.String(36), sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"), nullable=False),
-        sa.Column("target_node_id", sa.String(36), sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "source_node_id",
+            sa.String(36),
+            sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "target_node_id",
+            sa.String(36),
+            sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("edge_type", sa.String(20), nullable=False),
         sa.Column("strength", sa.Float, nullable=False, server_default="0.5"),
         sa.Column("evidence", sa.Text, nullable=False, server_default=""),
@@ -81,7 +103,12 @@ def upgrade() -> None:
     op.create_table(
         "apex_page_index",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("node_id", sa.String(36), sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "node_id",
+            sa.String(36),
+            sa.ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("doc_id", sa.String(255), nullable=False),
         sa.Column("term", sa.String(512), nullable=False),
         sa.Column("page_number", sa.Integer, nullable=True),

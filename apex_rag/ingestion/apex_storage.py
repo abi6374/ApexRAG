@@ -155,8 +155,14 @@ class PageIndexEntryRow(ApexBase):
     doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     term: Mapped[str] = mapped_column(String(512), nullable=False)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True, default="default"
+    )
 
-    __table_args__ = (Index("ix_apex_pie_doc_term", "doc_id", "term"),)
+    __table_args__ = (
+        Index("ix_apex_pie_doc_term", "doc_id", "term"),
+        Index("ix_apex_pie_tenant", "tenant_id"),
+    )
 
 
 class CausalEdgeRow(ApexBase):
@@ -527,42 +533,25 @@ class ApexStorage:
         return instance
 
     async def _create_schema(self) -> None:
-        """Create all tables if they don't already exist.
-
-        Handles SQLite's lack of ``IF NOT EXISTS`` for indexes by
-        catching and ignoring duplicate index errors PER TABLE.
-        This prevents a single failing index from rolling back the
-        creation of all other tables (which ``create_all`` does when
-        run within a single transaction).
-
-        Strategy:
-          1. Fast path — try ``create_all`` once (succeeds on fresh DB).
-          2. Fallback — if step 1 fails, create each table individually
-             so a duplicate-index error on one table doesn't cascade.
-        """
-        # Fast path: single create_all for fresh databases
+        """Create all tables if they don't already exist, tolerating duplicate indexes."""
         async with self._engine.begin() as conn:
             try:
                 await conn.run_sync(ApexBase.metadata.create_all)
-                return
             except Exception:
                 logger.warning(
                     "Fast-path create_all failed (likely duplicate index). "
                     "Falling back to per-table creation..."
                 )
-
-        # Fallback: create each table individually so a failure on one
-        # table's indexes doesn't roll back the others.
-        for table in ApexBase.metadata.sorted_tables:
-            try:
-                async with self._engine.begin() as conn:
-                    await conn.run_sync(table.create, checkfirst=True)
-            except Exception as exc:
-                logger.warning(
-                    "Table '%s' already exists or index failed: %s",
-                    table.name,
-                    exc,
-                )
+                for table in ApexBase.metadata.sorted_tables:
+                    try:
+                        async with self._engine.begin() as conn2:
+                            await conn2.run_sync(table.create, checkfirst=True)
+                    except Exception as exc:
+                        logger.warning(
+                            "Table '%s' already exists or index failed: %s",
+                            table.name,
+                            exc,
+                        )
 
     async def drop_all(self) -> None:
         """Drop all ApexRAG tables — use with caution (tests only)."""
@@ -571,7 +560,7 @@ class ApexStorage:
 
     async def dispose(self) -> None:
         """Release all pooled connections."""
-        if not hasattr(self, "_engine") or self._engine is None:
+        if self._engine is None:
             return
         await self._engine.dispose()
 
@@ -588,12 +577,57 @@ class ApexStorage:
                 await sess.rollback()
                 raise
 
+    # ── Internal helpers ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _require_tenant(tenant_context: str | None, method_name: str = "operation") -> str:
+        """Validate that tenant_context is provided; returns the non-None value.
+
+        Uses a lazy import to avoid circular dependency with
+        ``apex_rag.enterprise.auth.access_control`` (which imports
+        ``ApexStorage`` from this module).
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        if not tenant_context:
+            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
+
+            raise MissingTenantContextError(
+                f"tenant_context is required for {method_name}. "
+                "All storage operations require a tenant context."
+            )
+        return tenant_context
+
+    async def _run_with_session(
+        self,
+        callback: Any,
+        session: AsyncSession | None = None,
+    ) -> Any:
+        """Execute a callback with an optional existing session.
+
+        If ``session`` is provided, the callback runs inside that session.
+        Otherwise, a new session is created (committed on success, rolled
+        back on error).
+
+        Args:
+            callback:  Coroutine function ``async def _(sess: AsyncSession) -> T``.
+            session:   Optional existing session (creates one if omitted).
+
+        Returns:
+            Whatever the callback returns.
+        """
+        if session is not None:
+            return await callback(session)
+        async with self.session() as sess:
+            return await callback(sess)
+
     # ── Node CRUD ──────────────────────────────────────────────────────────
 
     @staticmethod
     def _get_table_name(model_class: type[ApexBase]) -> str:
         """Get the table name for a given ORM model class."""
-        return model_class.__tablename__
+        return str(model_class.__tablename__)
 
     async def save_node(
         self,
@@ -612,22 +646,16 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for save_node. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "save_node")
         from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
 
         validator = TenantIsolationValidator(self)
         await validator.assert_tenant_write_access(tenant_context, self._get_table_name(ASTNodeRow))
-        if session is not None:
-            await self._save_node_single(session, node, tenant_context=tenant_context)
-        else:
-            async with self.session() as sess:
-                await self._save_node_single(sess, node, tenant_context=tenant_context)
+
+        async def _save(sess: AsyncSession) -> None:
+            await self._save_node_single(sess, node, tenant_context=tenant_context)
+
+        await self._run_with_session(_save, session)
 
     async def save_nodes(
         self,
@@ -646,38 +674,31 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for save_nodes. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "save_nodes")
         from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
 
         validator = TenantIsolationValidator(self)
         await validator.assert_tenant_write_access(tenant_context, self._get_table_name(ASTNodeRow))
-        if session is not None:
+
+        async def _save(sess: AsyncSession) -> None:
             for node in nodes:
-                await self._save_node_single(session, node)
-        else:
-            async with self.session() as sess:
-                for node in nodes:
-                    await self._save_node_single(sess, node)
+                await self._save_node_single(sess, node, tenant_context=tenant_context)
+
+        await self._run_with_session(_save, session)
 
     async def _save_node_single(
         self,
         session: AsyncSession,
         node: ASTNode,
         *,
-        tenant_context: str | None = None,
+        tenant_context: str = "default",
     ) -> None:
         """Map an ASTNode to a row and INSERT or UPDATE.
 
         Args:
             session:         The active database session.
             node:            The AST node to persist.
-            tenant_context:  Required tenant ID — used to set the tenant_id column.
+            tenant_context:  Tenant ID — used to set the tenant_id column (caller must validate).
         """
         existing = await session.get(ASTNodeRow, node.node_id)
         if existing is not None:
@@ -694,8 +715,7 @@ class ApexStorage:
             existing.ingestion_date = node.ingestion_date
             existing.embedding_json = json.dumps(node.embedding)
             existing.page_number = node.page_number
-            if tenant_context:
-                existing.tenant_id = tenant_context
+            existing.tenant_id = tenant_context
         else:
             node_type_str = (
                 node.node_type if isinstance(node.node_type, str) else node.node_type.value
@@ -712,7 +732,7 @@ class ApexStorage:
                 ingestion_date=node.ingestion_date,
                 embedding_json=json.dumps(node.embedding),
                 page_number=node.page_number,
-                tenant_id=tenant_context or "default",
+                tenant_id=tenant_context,
             )
             session.add(row)
 
@@ -729,13 +749,7 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for get_node. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "get_node")
         from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
 
         validator = TenantIsolationValidator(self)
@@ -768,18 +782,12 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
+        tenant_context = self._require_tenant(tenant_context, "get_nodes_by_doc")
 
-            raise MissingTenantContextError(
-                "tenant_context is required for get_nodes_by_doc. "
-                "All storage operations require a tenant context."
-            )
-        if session is not None:
-            return await self._get_nodes_by_doc(session, doc_id, tenant_context)
-
-        async with self.session() as sess:
+        async def _get(sess: AsyncSession) -> list[ASTNode]:
             return await self._get_nodes_by_doc(sess, doc_id, tenant_context)
+
+        return await self._run_with_session(_get, session)
 
     async def _get_nodes_by_doc(
         self, session: AsyncSession, doc_id: str, tenant_context: str | None = None
@@ -792,14 +800,23 @@ class ApexStorage:
         rows = result.scalars().all()
         return [_row_to_ast_node(r) for r in rows]
 
-    async def get_all_nodes(self) -> list[ASTNode]:
-        """Fetch all AST nodes across all documents.
+    async def get_all_nodes(self, *, tenant_context: str | None = None) -> list[ASTNode]:
+        """Fetch all AST nodes across all documents, scoped to tenant.
+
+        Args:
+            tenant_context: Required tenant ID for multi-tenant isolation.
 
         Returns:
-            A list of all :class:`ASTNode` objects.
+            A list of all :class:`ASTNode` objects belonging to the tenant.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
         """
+        tenant_context = self._require_tenant(tenant_context, "get_all_nodes")
         async with self.session() as session:
-            result = await session.execute(select(ASTNodeRow))
+            result = await session.execute(
+                select(ASTNodeRow).where(ASTNodeRow.tenant_id == tenant_context)
+            )
             rows = result.scalars().all()
             return [_row_to_ast_node(r) for r in rows]
 
@@ -844,13 +861,7 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for delete_node. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "delete_node")
         async with self.session() as session:
             row = await session.get(ASTNodeRow, node_id)
             if row is None:
@@ -864,22 +875,35 @@ class ApexStorage:
             await session.delete(row)
             return True
 
-    async def count_nodes(self, doc_id: str | None = None) -> int:
-        """Count nodes, optionally filtered by document.
+    async def count_nodes(
+        self, doc_id: str | None = None, *, tenant_context: str | None = None
+    ) -> int:
+        """Count nodes, optionally filtered by document and scoped to tenant.
 
         Args:
-            doc_id: Optional document ID to filter by.
+            doc_id:          Optional document ID to filter by.
+            tenant_context:  Required tenant ID for multi-tenant isolation.
 
         Returns:
             The node count.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
         """
+        tenant_context = self._require_tenant(tenant_context, "count_nodes")
         async with self.session() as session:
             if doc_id is None:
-                result = await session.execute(sa_text("SELECT COUNT(*) FROM apex_ast_nodes"))
+                result = await session.execute(
+                    sa_text("SELECT COUNT(*) FROM apex_ast_nodes WHERE tenant_id = :tid"),
+                    {"tid": tenant_context},
+                )
             else:
                 result = await session.execute(
-                    sa_text("SELECT COUNT(*) FROM apex_ast_nodes WHERE doc_id = :did"),
-                    {"did": doc_id},
+                    sa_text(
+                        "SELECT COUNT(*) FROM apex_ast_nodes "
+                        "WHERE doc_id = :did AND tenant_id = :tid"
+                    ),
+                    {"did": doc_id, "tid": tenant_context},
                 )
             return result.scalar() or 0
 
@@ -890,13 +914,8 @@ class ApexStorage:
     ) -> None:
         """Persist temporal metadata for a node using immutable versioning.
 
-        Delegates to :class:`TemporalVersionService.create_version()` to ensure
-        historical data is NEVER overwritten.  Each call creates a new immutable
-        version row instead of updating the existing one.
-
-        After version creation, the :class:`TemporalMetadataRow` is upserted
-        with the caller's metadata values (freshness_score, decay_rate, etc.)
-        to ensure they are preserved.
+        Creates a new immutable version and upserts the ``TemporalMetadataRow``
+        within a SINGLE transaction to preserve atomicity.
 
         Args:
             meta: The :class:`TemporalMetadata` to save.
@@ -905,30 +924,25 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for save_temporal_metadata."
-            )
+        tenant_context = self._require_tenant(tenant_context, "save_temporal_metadata")
         from apex_rag.temporal.version_service import TemporalVersionService
 
         version_service = TemporalVersionService(self)
-        # Fetch the AST node to get actual content and doc_id for versioning
         ast_node = await self.get_node(meta.node_id, tenant_context=tenant_context)
         node_content = ast_node.content if ast_node else meta.node_id
         node_doc_id = ast_node.doc_id if ast_node else meta.node_id
-        await version_service.create_version(
-            node_id=meta.node_id,
-            content=node_content,
-            doc_id=node_doc_id,
-            tenant_id=tenant_context,
-            source_timestamp=meta.source_date or meta.source_timestamp,
-            approval_timestamp=meta.approval_timestamp,
-            validity_status=meta.validity_status or "ACTIVE",
-        )
-        # Upsert the TemporalMetadataRow with the caller's actual metadata values
+
+        # Version creation + metadata upsert within a SINGLE transaction
         async with self.session() as session:
+            await version_service.create_version(
+                node_id=meta.node_id,
+                content=node_content,
+                doc_id=node_doc_id,
+                tenant_id=tenant_context,
+                source_timestamp=meta.source_date or meta.source_timestamp,
+                validity_status=meta.validity_status or "ACTIVE",
+                session=session,
+            )
             existing = await session.get(TemporalMetadataRow, meta.node_id)
             now = datetime.now(timezone.utc)
             if existing is not None:
@@ -1014,7 +1028,6 @@ class ApexStorage:
         Returns:
             ``True`` if adding the edge would create a cycle.
         """
-        # BFS from target_node_id following outgoing edges to see if we can reach source_node_id
         visited: set[str] = {target_node_id}
         bfs_queue: deque[str] = deque([target_node_id])
         depth = 0
@@ -1057,7 +1070,6 @@ class ApexStorage:
                 edge.edge_type if isinstance(edge.edge_type, str) else edge.edge_type.value
             )
 
-            # Check for existing edge with same ID — upsert is safe
             existing = await session.get(CausalEdgeRow, edge.edge_id)
             if existing is not None:
                 existing.source_node_id = edge.source_node_id
@@ -1068,7 +1080,6 @@ class ApexStorage:
                 existing.discovered_at = edge.discovered_at
                 return
 
-            # DAG cycle detection: reject if the new edge would create a cycle
             if await self._detect_cycle_in_causal_graph(
                 edge.source_node_id,
                 edge.target_node_id,
@@ -1076,9 +1087,9 @@ class ApexStorage:
             ):
                 raise ValueError(
                     f"Cannot add causal edge {edge.edge_id}: "
-                    f"{edge.source_node_id} → {edge.target_node_id} would create a cycle "
+                    f"{edge.source_node_id} \u2192 {edge.target_node_id} would create a cycle "
                     f"in the causal graph.  Cycles are rejected at write time "
-                    f"(Principle 11 — DAG Acyclicity)."
+                    f"(Principle 11 \u2014 DAG Acyclicity)."
                 )
 
             row = CausalEdgeRow(
@@ -1092,44 +1103,79 @@ class ApexStorage:
             )
             session.add(row)
 
-    async def get_edges_for_node(self, node_id: str) -> list[CausalEdge]:
-        """Fetch all causal edges involving a given node (source or target).
+    async def get_edges_for_node(
+        self, node_id: str, *, tenant_context: str | None = None
+    ) -> list[CausalEdge]:
+        """Fetch all causal edges involving a given node (source or target),
+        scoped to tenant via JOIN with ASTNodeRow.
 
         Args:
             node_id: The node ID.
+            tenant_context: Required tenant ID for multi-tenant isolation.
 
         Returns:
-            A list of :class:`CausalEdge` objects.
+            A list of :class:`CausalEdge` objects belonging to the tenant.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
         """
+        tenant_context = self._require_tenant(tenant_context, "get_edges_for_node")
         async with self.session() as session:
-            stmt = select(CausalEdgeRow).where(
-                (CausalEdgeRow.source_node_id == node_id)
-                | (CausalEdgeRow.target_node_id == node_id)
+            stmt = (
+                select(CausalEdgeRow)
+                .join(
+                    ASTNodeRow,
+                    CausalEdgeRow.source_node_id == ASTNodeRow.node_id,
+                )
+                .where(
+                    (CausalEdgeRow.source_node_id == node_id)
+                    | (CausalEdgeRow.target_node_id == node_id),
+                    ASTNodeRow.tenant_id == tenant_context,
+                )
             )
             result = await session.execute(stmt)
             rows = result.scalars().all()
             return [_row_to_causal_edge(r) for r in rows]
 
-    async def get_all_edges(self) -> list[CausalEdge]:
-        """Fetch all causal edges across the graph.
+    async def get_all_edges(self, *, tenant_context: str | None = None) -> list[CausalEdge]:
+        """Fetch all causal edges across the graph, scoped to tenant.
+
+        Args:
+            tenant_context: Required tenant ID for multi-tenant isolation.
 
         Returns:
-            A list of all :class:`CausalEdge` objects.
+            A list of all :class:`CausalEdge` objects belonging to the tenant.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
         """
+        tenant_context = self._require_tenant(tenant_context, "get_all_edges")
         async with self.session() as session:
-            result = await session.execute(select(CausalEdgeRow))
+            stmt = (
+                select(CausalEdgeRow)
+                .join(
+                    ASTNodeRow,
+                    CausalEdgeRow.source_node_id == ASTNodeRow.node_id,
+                )
+                .where(ASTNodeRow.tenant_id == tenant_context)
+            )
+            result = await session.execute(stmt)
             rows = result.scalars().all()
             return [_row_to_causal_edge(r) for r in rows]
 
     # ── Page Index CRUD ────────────────────────────────────────────────────
 
-    async def save_page_index_entry(self, entry: dict[str, Any]) -> None:
+    async def save_page_index_entry(
+        self, entry: dict[str, Any], *, tenant_context: str | None = None
+    ) -> None:
         """Insert or update a page index entry.
 
         Args:
             entry: Dict with keys ``node_id``, ``doc_id``, ``term``,
                    and optionally ``page_number``.
+            tenant_context: Required tenant ID for multi-tenant isolation.
         """
+        tenant_context = self._require_tenant(tenant_context, "save_page_index_entry")
         async with self.session() as session:
             existing = await session.execute(
                 select(PageIndexEntryRow).where(
@@ -1140,17 +1186,27 @@ class ApexStorage:
             row = existing.scalar_one_or_none()
             if row is not None:
                 row.page_number = entry.get("page_number", row.page_number)
+                row.tenant_id = tenant_context
             else:
                 row = PageIndexEntryRow(
                     node_id=entry["node_id"],
                     doc_id=entry["doc_id"],
                     term=entry["term"],
                     page_number=entry.get("page_number"),
+                    tenant_id=tenant_context,
                 )
                 session.add(row)
 
-    async def save_page_index_entries(self, entries: list[dict[str, Any]]) -> None:
-        """Batch-insert page index entries."""
+    async def save_page_index_entries(
+        self, entries: list[dict[str, Any]], *, tenant_context: str | None = None
+    ) -> None:
+        """Batch-insert page index entries.
+
+        Args:
+            entries: List of dicts with ``node_id``, ``doc_id``, ``term``.
+            tenant_context: Required tenant ID for multi-tenant isolation.
+        """
+        tenant_context = self._require_tenant(tenant_context, "save_page_index_entries")
         async with self.session() as session:
             for entry in entries:
                 row = PageIndexEntryRow(
@@ -1158,15 +1214,30 @@ class ApexStorage:
                     doc_id=entry["doc_id"],
                     term=entry["term"],
                     page_number=entry.get("page_number"),
+                    tenant_id=tenant_context,
                 )
                 session.add(row)
 
-    async def get_page_index_entries(self, doc_id: str) -> list[dict[str, Any]]:
-        """Fetch all page index entries for a document, ordered by term."""
+    async def get_page_index_entries(
+        self, doc_id: str, *, tenant_context: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Fetch all page index entries for a document, scoped to tenant.
+
+        Args:
+            doc_id:  The document ID.
+            tenant_context: Required tenant ID for multi-tenant isolation.
+
+        Returns:
+            Matching PageIndexEntry dicts.
+        """
+        tenant_context = self._require_tenant(tenant_context, "get_page_index_entries")
         async with self.session() as session:
             stmt = (
                 select(PageIndexEntryRow)
-                .where(PageIndexEntryRow.doc_id == doc_id)
+                .where(
+                    PageIndexEntryRow.doc_id == doc_id,
+                    PageIndexEntryRow.tenant_id == tenant_context,
+                )
                 .order_by(PageIndexEntryRow.term)
             )
             result = await session.execute(stmt)
@@ -1184,7 +1255,7 @@ class ApexStorage:
     async def search_page_index(
         self, doc_id: str, query: str, *, tenant_context: str | None = None
     ) -> list[dict[str, Any]]:
-        """Full-text search over page index terms (case-insensitive).
+        """Full-text search over page index terms (case-insensitive), scoped to tenant.
 
         Uses FTS5 when available (SQLite), falls back to ILIKE.
 
@@ -1196,12 +1267,8 @@ class ApexStorage:
         Returns:
             Matching PageIndexEntry dicts.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError("tenant_context is required for search_page_index.")
+        tenant_context = self._require_tenant(tenant_context, "search_page_index")
         try:
-            # Try FTS5 first for full-text on page index
             from apex_rag.retrieval.search.fts5 import FTS5Search
 
             fts = FTS5Search(self)
@@ -1212,6 +1279,7 @@ class ApexStorage:
                     stmt = select(PageIndexEntryRow).where(
                         PageIndexEntryRow.node_id.in_(node_ids),
                         PageIndexEntryRow.doc_id == doc_id,
+                        PageIndexEntryRow.tenant_id == tenant_context,
                     )
                     result = await session.execute(stmt)
                     rows = result.scalars().all()
@@ -1232,6 +1300,7 @@ class ApexStorage:
                 select(PageIndexEntryRow)
                 .where(
                     PageIndexEntryRow.doc_id == doc_id,
+                    PageIndexEntryRow.tenant_id == tenant_context,
                     PageIndexEntryRow.term.ilike(f"%{query}%"),
                 )
                 .order_by(PageIndexEntryRow.term)
@@ -1309,13 +1378,7 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for list_document_ids. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "list_document_ids")
         async with self.session() as session:
             stmt = (
                 select(ASTNodeRow.doc_id).distinct().where(ASTNodeRow.tenant_id == tenant_context)
@@ -1323,14 +1386,23 @@ class ApexStorage:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
-    async def get_document_root_nodes(self, doc_id: str) -> list[ASTNode]:
-        """Fetch root-level nodes (parent_id is None) for a document."""
+    async def get_document_root_nodes(
+        self, doc_id: str, *, tenant_context: str | None = None
+    ) -> list[ASTNode]:
+        """Fetch root-level nodes (parent_id is None) for a document, scoped to tenant.
+
+        Args:
+            doc_id:  The document ID.
+            tenant_context: Required tenant ID for multi-tenant isolation.
+        """
+        tenant_context = self._require_tenant(tenant_context, "get_document_root_nodes")
         async with self.session() as session:
             stmt = (
                 select(ASTNodeRow)
                 .where(
                     ASTNodeRow.doc_id == doc_id,
                     ASTNodeRow.parent_id.is_(None),
+                    ASTNodeRow.tenant_id == tenant_context,
                 )
                 .order_by(ASTNodeRow.node_id)
             )
@@ -1361,21 +1433,13 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for search_nodes_global. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "search_nodes_global")
         try:
-            # Try FTS5 first
             from apex_rag.retrieval.search.fts5 import FTS5Search
 
             fts = FTS5Search(self)
             fts_results = await fts.search(query, limit=limit)
             if fts_results:
-                # Fetch full ASTNode objects from FTS results
                 node_ids = [r["node_id"] for r in fts_results]
                 async with self.session() as session:
                     stmt = select(ASTNodeRow).where(
@@ -1388,7 +1452,6 @@ class ApexStorage:
         except Exception:
             pass
 
-        # Fallback to ILIKE
         async with self.session() as session:
             stmt = (
                 select(ASTNodeRow)
@@ -1414,13 +1477,7 @@ class ApexStorage:
         Returns:
             Dict with keys: doc_id, total_nodes, max_depth, leaf_count.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for get_document_stats. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "get_document_stats")
         async with self.session() as session:
             stmt = select(ASTNodeRow).where(
                 ASTNodeRow.doc_id == doc_id,
@@ -1451,20 +1508,14 @@ class ApexStorage:
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
         """
-        if not tenant_context:
-            from apex_rag.enterprise.auth.access_control import MissingTenantContextError
-
-            raise MissingTenantContextError(
-                "tenant_context is required for delete_document. "
-                "All storage operations require a tenant context."
-            )
+        tenant_context = self._require_tenant(tenant_context, "delete_document")
         async with self.session() as session:
-            # Delete page index entries first (scoped to tenant)
             await session.execute(
-                sa_text("DELETE FROM apex_page_index WHERE doc_id = :did"),
-                {"did": doc_id},
+                sa_text(
+                    "DELETE FROM apex_page_index WHERE doc_id = :did AND tenant_id = :tid"
+                ),
+                {"did": doc_id, "tid": tenant_context},
             )
-            # Delete causal edges for nodes in this doc
             await session.execute(
                 sa_text(
                     "DELETE FROM apex_causal_edges WHERE source_node_id IN "
@@ -1472,7 +1523,6 @@ class ApexStorage:
                 ),
                 {"did": doc_id, "tid": tenant_context},
             )
-            # Delete temporal metadata
             await session.execute(
                 sa_text(
                     "DELETE FROM apex_temporal_metadata WHERE node_id IN "
@@ -1480,14 +1530,13 @@ class ApexStorage:
                 ),
                 {"did": doc_id, "tid": tenant_context},
             )
-            # Delete nodes (scoped to tenant)
             result = await session.execute(
                 delete(ASTNodeRow).where(
                     ASTNodeRow.doc_id == doc_id,
                     ASTNodeRow.tenant_id == tenant_context,
                 )
             )
-            return result.rowcount
+            return result.rowcount  # type: ignore[attr-defined, no-any-return]
 
     # ── Temporal Intelligence CRUD ──────────────────────────────────────────
 
@@ -1496,21 +1545,17 @@ class ApexStorage:
     ) -> None:
         """Persist a node version row."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(version_row)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_node_versions(
         self, node_id: str, session: AsyncSession | None = None
     ) -> list[NodeVersionRow]:
         """Fetch all versions of a node, ordered by version_number."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> list[NodeVersionRow]:
             stmt = (
                 select(NodeVersionRow)
                 .where(NodeVersionRow.node_id == node_id)
@@ -1519,17 +1564,14 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def get_node_version_as_of(
         self, node_id: str, as_of: datetime, session: AsyncSession | None = None
     ) -> NodeVersionRow | None:
         """Fetch the node version active/effective as of a specific datetime."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> NodeVersionRow | None:
             stmt = (
                 select(NodeVersionRow)
                 .where(
@@ -1542,29 +1584,44 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return res.scalars().first()
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def get_nodes_as_of(
-        self, doc_id: str, as_of: datetime, session: AsyncSession | None = None
+        self,
+        doc_id: str,
+        as_of: datetime,
+        *,
+        tenant_context: str | None = None,
+        session: AsyncSession | None = None,
     ) -> list[NodeVersionRow]:
-        """Fetch all active node versions for a document as of a specific datetime."""
+        """Fetch all active node versions for a document as of a specific datetime,
+        scoped to tenant.
 
-        async def _get(sess: AsyncSession):
+        Args:
+            doc_id:          The document ID.
+            as_of:           The target datetime.
+            tenant_context:  Required tenant ID for multi-tenant isolation.
+            session:         Optional existing async session.
+
+        Returns:
+            Active :class:`NodeVersionRow` objects.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        tenant_context = self._require_tenant(tenant_context, "get_nodes_as_of")
+
+        async def _get(sess: AsyncSession) -> list[NodeVersionRow]:
             stmt = select(NodeVersionRow).where(
                 NodeVersionRow.doc_id == doc_id,
+                NodeVersionRow.tenant_id == tenant_context,
                 NodeVersionRow.effective_from <= as_of,
                 (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of)),
             )
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def save_temporal_node(
         self, temporal_node: TemporalNodeRow, session: AsyncSession | None = None
@@ -1580,28 +1637,20 @@ class ApexStorage:
             session:       Optional existing session.
         """
 
-        async def _save(sess: AsyncSession):
-            # INSERT-only — never mutate existing rows
+        async def _save(sess: AsyncSession) -> None:
             sess.add(temporal_node)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_temporal_node(
         self, node_id: str, session: AsyncSession | None = None
     ) -> TemporalNodeRow | None:
         """Fetch temporal node context by node ID."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> TemporalNodeRow | None:
             return await sess.get(TemporalNodeRow, node_id)
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     # ── Audit Trail CRUD ───────────────────────────────────────────────────
 
@@ -1610,36 +1659,38 @@ class ApexStorage:
     ) -> None:
         """Persist an audit log record."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(audit_row)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_audit_logs(
-        self, tenant_id: str | None = None, session: AsyncSession | None = None
+        self, *, tenant_context: str | None = None, session: AsyncSession | None = None
     ) -> list[AuditLogRow]:
-        """Fetch audit logs, optionally filtered by tenant."""
+        """Fetch audit logs scoped to tenant.
 
-        async def _get(sess: AsyncSession):
-            if tenant_id:
-                stmt = (
-                    select(AuditLogRow)
-                    .where(AuditLogRow.tenant_id == tenant_id)
-                    .order_by(AuditLogRow.timestamp.desc())
-                )
-            else:
-                stmt = select(AuditLogRow).order_by(AuditLogRow.timestamp.desc())
+        Args:
+            tenant_context: Required tenant ID for multi-tenant isolation.
+            session:        Optional existing async session.
+
+        Returns:
+            Audit log entries for the given tenant.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        tenant_context = self._require_tenant(tenant_context, "get_audit_logs")
+
+        async def _get(sess: AsyncSession) -> list[AuditLogRow]:
+            stmt = (
+                select(AuditLogRow)
+                .where(AuditLogRow.tenant_id == tenant_context)
+                .order_by(AuditLogRow.timestamp.desc())
+            )
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     # ── Change History CRUD ────────────────────────────────────────────────
 
@@ -1648,21 +1699,17 @@ class ApexStorage:
     ) -> None:
         """Persist a change history record."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(change_row)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_change_history(
         self, entity_id: str, session: AsyncSession | None = None
     ) -> list[ChangeHistoryRow]:
         """Fetch change history for an entity, ordered by change time."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> list[ChangeHistoryRow]:
             stmt = (
                 select(ChangeHistoryRow)
                 .where(ChangeHistoryRow.entity_id == entity_id)
@@ -1671,10 +1718,7 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     # ── Timeline Events CRUD ───────────────────────────────────────────────
 
@@ -1683,21 +1727,17 @@ class ApexStorage:
     ) -> None:
         """Persist a timeline event."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(event_row)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_timeline_events(
         self, entity_id: str, session: AsyncSession | None = None
     ) -> list[TimelineEventRow]:
         """Fetch timeline events for an entity, ordered by event date."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> list[TimelineEventRow]:
             stmt = (
                 select(TimelineEventRow)
                 .where(TimelineEventRow.entity_id == entity_id)
@@ -1706,10 +1746,7 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     # ── Role/Field Permissions CRUD ────────────────────────────────────────
 
@@ -1718,21 +1755,17 @@ class ApexStorage:
     ) -> None:
         """Persist role permission rules."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(perm)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_role_permission(
         self, role: str, resource_type: str, action: str, session: AsyncSession | None = None
     ) -> bool:
         """Query if a role is allowed to perform action on a resource type."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> bool:
             stmt = select(RolePermissionRow.is_allowed).where(
                 RolePermissionRow.role == role,
                 RolePermissionRow.resource_type == resource_type,
@@ -1742,31 +1775,24 @@ class ApexStorage:
             val = res.scalar()
             return val if val is not None else False
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def save_field_permission(
         self, perm: FieldPermissionRow, session: AsyncSession | None = None
     ) -> None:
         """Persist field permission rules."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(perm)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_field_permission(
         self, role: str, resource_type: str, field_name: str, session: AsyncSession | None = None
     ) -> bool:
         """Query if a role is allowed to view/access a field of a resource type."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> bool:
             stmt = select(FieldPermissionRow.is_allowed).where(
                 FieldPermissionRow.role == role,
                 FieldPermissionRow.resource_type == resource_type,
@@ -1776,10 +1802,7 @@ class ApexStorage:
             val = res.scalar()
             return val if val is not None else False
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     # ── Custom Rules CRUD ──────────────────────────────────────────────────
 
@@ -1788,56 +1811,41 @@ class ApexStorage:
     ) -> None:
         """Persist a custom security rule."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(rule)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_custom_rule(
         self, name: str, session: AsyncSession | None = None
     ) -> CustomRuleRow | None:
         """Fetch a custom security rule by its name."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> CustomRuleRow | None:
             stmt = select(CustomRuleRow).where(CustomRuleRow.name == name)
             res = await sess.execute(stmt)
             return res.scalars().first()
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def delete_custom_rule(self, name: str, session: AsyncSession | None = None) -> None:
         """Delete a custom security rule by its name."""
 
-        async def _delete(sess: AsyncSession):
+        async def _delete(sess: AsyncSession) -> None:
             stmt = delete(CustomRuleRow).where(CustomRuleRow.name == name)
             await sess.execute(stmt)
 
-        if session is not None:
-            await _delete(session)
-        else:
-            async with self.session() as sess:
-                await _delete(sess)
+        await self._run_with_session(_delete, session)
 
     async def save_rule_assignment(
         self, assignment: RuleAssignmentRow, session: AsyncSession | None = None
     ) -> None:
         """Persist a custom rule assignment."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(assignment)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_rule_assignments(
         self,
@@ -1847,7 +1855,7 @@ class ApexStorage:
     ) -> Sequence[RuleAssignmentRow]:
         """Fetch custom rule assignments matching role and/or user_id."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> Sequence[RuleAssignmentRow]:
             stmt = select(RuleAssignmentRow)
             filters = []
             if role is not None:
@@ -1859,25 +1867,18 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return res.scalars().all()
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def delete_rule_assignment(
         self, assignment_id: int, session: AsyncSession | None = None
     ) -> None:
         """Delete a custom rule assignment by id."""
 
-        async def _delete(sess: AsyncSession):
+        async def _delete(sess: AsyncSession) -> None:
             stmt = delete(RuleAssignmentRow).where(RuleAssignmentRow.id == assignment_id)
             await sess.execute(stmt)
 
-        if session is not None:
-            await _delete(session)
-        else:
-            async with self.session() as sess:
-                await _delete(sess)
+        await self._run_with_session(_delete, session)
 
     # ── State Snapshots CRUD ───────────────────────────────────────────────
 
@@ -1886,21 +1887,17 @@ class ApexStorage:
     ) -> None:
         """Persist a state snapshot."""
 
-        async def _save(sess: AsyncSession):
+        async def _save(sess: AsyncSession) -> None:
             sess.add(snapshot_row)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_state_snapshot(
         self, doc_id: str, as_of: datetime, session: AsyncSession | None = None
     ) -> StateSnapshotRow | None:
         """Fetch state snapshot for document as of a specific date."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> StateSnapshotRow | None:
             stmt = (
                 select(StateSnapshotRow)
                 .where(StateSnapshotRow.doc_id == doc_id, StateSnapshotRow.snapshot_date <= as_of)
@@ -1909,10 +1906,7 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return res.scalars().first()
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     # ── Version Lineage CRUD ──────────────────────────────────────
 
@@ -1980,8 +1974,7 @@ class ApexStorage:
             ValueError: If the edge would create a cycle.
         """
 
-        async def _save(sess: AsyncSession):
-            # DAG cycle detection
+        async def _save(sess: AsyncSession) -> None:
             source_vid = lineage_row.source_version_id
             target_vid = lineage_row.target_version_id
             if target_vid and await self._detect_cycle_in_version_lineage(
@@ -1991,23 +1984,19 @@ class ApexStorage:
             ):
                 raise ValueError(
                     f"Cannot add version lineage {lineage_row.lineage_id}: "
-                    f"{source_vid} → {target_vid} would create a cycle.  "
+                    f"{source_vid} \u2192 {target_vid} would create a cycle.  "
                     f"Cycles are rejected at write time (Principle 11)."
                 )
             sess.add(lineage_row)
 
-        if session is not None:
-            await _save(session)
-        else:
-            async with self.session() as sess:
-                await _save(sess)
+        await self._run_with_session(_save, session)
 
     async def get_version_lineage(
         self, node_id: str, session: AsyncSession | None = None
     ) -> list[VersionLineageRow]:
         """Fetch version lineage entries for a node, ordered by creation time."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> list[VersionLineageRow]:
             stmt = (
                 select(VersionLineageRow)
                 .where(VersionLineageRow.node_id == node_id)
@@ -2016,17 +2005,14 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
     async def resolve_version_lineage_chain(
         self, node_id: str, session: AsyncSession | None = None
     ) -> list[VersionLineageRow]:
         """Traverse the full SUPERSEDES/REPLACED_BY chain to the latest version."""
 
-        async def _traverse(sess: AsyncSession):
+        async def _traverse(sess: AsyncSession) -> list[VersionLineageRow]:
             stmt = (
                 select(VersionLineageRow)
                 .where(VersionLineageRow.node_id == node_id)
@@ -2035,17 +2021,14 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _traverse(session)
-        async with self.session() as sess:
-            return await _traverse(sess)
+        return await self._run_with_session(_traverse, session)
 
     async def get_version_lineage_by_type(
         self, node_id: str, lineage_type: str, session: AsyncSession | None = None
     ) -> list[VersionLineageRow]:
         """Fetch version lineage entries filtered by type (e.g. SUPERSEDES, VERSION_OF)."""
 
-        async def _get(sess: AsyncSession):
+        async def _get(sess: AsyncSession) -> list[VersionLineageRow]:
             stmt = (
                 select(VersionLineageRow)
                 .where(
@@ -2057,14 +2040,11 @@ class ApexStorage:
             res = await sess.execute(stmt)
             return list(res.scalars().all())
 
-        if session is not None:
-            return await _get(session)
-        async with self.session() as sess:
-            return await _get(sess)
+        return await self._run_with_session(_get, session)
 
 
 # ═══════════════════════════════════════════════════════════════
-# Row → Model mappers
+# Row \u2192 Model mappers
 # ═══════════════════════════════════════════════════════════════
 
 

@@ -12,18 +12,16 @@ Covers:
 
 from __future__ import annotations
 
-import uuid
+import contextlib
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage
+from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.temporal.fact_lineage import FactLineageEngine, LineageValidator
 from apex_rag.temporal.fact_store import FactStore, TemporalFact
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -37,20 +35,16 @@ async def storage() -> AsyncGenerator[ApexStorage, None]:
     """
     import os
     import tempfile
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
     try:
         yield storage
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await storage.engine.dispose()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             os.unlink(tmp.name)
-        except Exception:
-            pass
 
 
 @pytest_asyncio.fixture
@@ -115,7 +109,9 @@ class TestLineageValidator:
 
     @pytest.mark.asyncio
     async def test_validate_edge_no_cycle(
-        self, validator: LineageValidator, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        validator: LineageValidator,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Adding A → D where D is new and has no parent should be valid.
 
@@ -127,18 +123,23 @@ class TestLineageValidator:
         lineage = seed_linear_lineage
         # Create a new fact with no parent — adding A→D should be valid
         d = TemporalFact(
-            subject="Test", predicate="is", object="new",
+            subject="Test",
+            predicate="is",
+            object="new",
             source_document_id="doc-123",
         )
         # D has no parent_fact_id, so adding A as D's parent should be acyclic
         await validator.validate_edge(
-            lineage["A"].fact_id, d.fact_id,
+            lineage["A"].fact_id,
+            d.fact_id,
         )
         # No exception = validated
 
     @pytest.mark.asyncio
     async def test_validate_edge_cycle_raises(
-        self, validator: LineageValidator, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        validator: LineageValidator,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Adding C → A would create a cycle because A is ancestor of C."""
         lineage = seed_linear_lineage
@@ -151,7 +152,9 @@ class TestLineageValidator:
 
     @pytest.mark.asyncio
     async def test_validate_edge_self_cycle(
-        self, validator: LineageValidator, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        validator: LineageValidator,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Adding a fact as its own parent should be rejected."""
         lineage = seed_linear_lineage
@@ -164,7 +167,9 @@ class TestLineageValidator:
 
     @pytest.mark.asyncio
     async def test_detect_cycle_in_linear_lineage(
-        self, validator: LineageValidator, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        validator: LineageValidator,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """A linear lineage A→B→C should have no cycles."""
         lineage = seed_linear_lineage
@@ -174,7 +179,9 @@ class TestLineageValidator:
 
     @pytest.mark.asyncio
     async def test_assert_acyclic_passes(
-        self, validator: LineageValidator, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        validator: LineageValidator,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """assert_acyclic should not raise for an acyclic lineage."""
         lineage = seed_linear_lineage
@@ -183,7 +190,8 @@ class TestLineageValidator:
 
     @pytest.mark.asyncio
     async def test_assert_acyclic_noop_for_isolated(
-        self, validator: LineageValidator,
+        self,
+        validator: LineageValidator,
     ) -> None:
         """An isolated fact (no parent) is always acyclic."""
         await validator.assert_acyclic("nonexistent")
@@ -198,11 +206,14 @@ class TestFactLineageEngineFindOrigin:
 
     @pytest.mark.asyncio
     async def test_find_origin_of_middle(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Origin of B should be A."""
         origin = await lineage.find_origin(
-            seed_linear_lineage["B"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["B"].fact_id,
+            tenant_context="tenant-a",
         )
         assert origin is not None
         assert origin.fact_id == seed_linear_lineage["A"].fact_id
@@ -210,43 +221,54 @@ class TestFactLineageEngineFindOrigin:
 
     @pytest.mark.asyncio
     async def test_find_origin_of_latest(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Origin of C should be A."""
         origin = await lineage.find_origin(
-            seed_linear_lineage["C"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["C"].fact_id,
+            tenant_context="tenant-a",
         )
         assert origin is not None
         assert origin.fact_id == seed_linear_lineage["A"].fact_id
 
     @pytest.mark.asyncio
     async def test_find_origin_of_root(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Origin of A should be A itself (no parent)."""
         origin = await lineage.find_origin(
-            seed_linear_lineage["A"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["A"].fact_id,
+            tenant_context="tenant-a",
         )
         assert origin is not None
         assert origin.fact_id == seed_linear_lineage["A"].fact_id
 
     @pytest.mark.asyncio
     async def test_find_origin_nonexistent(
-        self, lineage: FactLineageEngine,
+        self,
+        lineage: FactLineageEngine,
     ) -> None:
         """Nonexistent fact should return None."""
         origin = await lineage.find_origin(
-            "nonexistent", tenant_context="tenant-a",
+            "nonexistent",
+            tenant_context="tenant-a",
         )
         assert origin is None
 
     @pytest.mark.asyncio
     async def test_find_origin_missing_tenant(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Missing tenant_context should return None."""
         origin = await lineage.find_origin(
-            seed_linear_lineage["A"].fact_id, tenant_context=None,
+            seed_linear_lineage["A"].fact_id,
+            tenant_context=None,
         )
         assert origin is None
 
@@ -256,11 +278,14 @@ class TestFactLineageEngineDescendants:
 
     @pytest.mark.asyncio
     async def test_find_descendants_of_root(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """A's descendants should be B and C."""
         descendants = await lineage.find_descendants(
-            seed_linear_lineage["A"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["A"].fact_id,
+            tenant_context="tenant-a",
         )
         ids = {d.fact_id for d in descendants}
         assert seed_linear_lineage["B"].fact_id in ids
@@ -268,21 +293,27 @@ class TestFactLineageEngineDescendants:
 
     @pytest.mark.asyncio
     async def test_find_descendants_of_leaf(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """C (the leaf) should have no descendants."""
         descendants = await lineage.find_descendants(
-            seed_linear_lineage["C"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["C"].fact_id,
+            tenant_context="tenant-a",
         )
         assert descendants == []
 
     @pytest.mark.asyncio
     async def test_find_descendants_missing_tenant(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Missing tenant_context should return empty list."""
         descendants = await lineage.find_descendants(
-            seed_linear_lineage["A"].fact_id, tenant_context=None,
+            seed_linear_lineage["A"].fact_id,
+            tenant_context=None,
         )
         assert descendants == []
 
@@ -292,11 +323,14 @@ class TestFactLineageEngineHistory:
 
     @pytest.mark.asyncio
     async def test_find_fact_history(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """History of B should include A, B, C in chronological order."""
         history = await lineage.find_fact_history(
-            seed_linear_lineage["B"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["B"].fact_id,
+            tenant_context="tenant-a",
         )
         assert len(history) == 3
         assert history[0].fact_id == seed_linear_lineage["A"].fact_id
@@ -309,11 +343,14 @@ class TestFactLineageEngineSupersededChain:
 
     @pytest.mark.asyncio
     async def test_find_superseded_chain_linear(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """The superseded chain should follow parent_fact_id links."""
         chain = await lineage.find_superseded_chain(
-            seed_linear_lineage["A"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["A"].fact_id,
+            tenant_context="tenant-a",
         )
         # The superseded chain follows superseded_by links.
         # Since we used parent_fact_id (not superseded_by), the chain
@@ -326,11 +363,14 @@ class TestFactLineageEngineRelatedFacts:
 
     @pytest.mark.asyncio
     async def test_find_related_facts_by_document(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Related facts for A should include B and C (same document)."""
         related = await lineage.find_related_facts(
-            seed_linear_lineage["A"].fact_id, tenant_context="tenant-a",
+            seed_linear_lineage["A"].fact_id,
+            tenant_context="tenant-a",
         )
         ids = {r.fact_id for r in related}
         assert seed_linear_lineage["B"].fact_id in ids
@@ -338,10 +378,13 @@ class TestFactLineageEngineRelatedFacts:
 
     @pytest.mark.asyncio
     async def test_find_related_facts_missing_tenant(
-        self, lineage: FactLineageEngine, seed_linear_lineage: dict[str, TemporalFact],
+        self,
+        lineage: FactLineageEngine,
+        seed_linear_lineage: dict[str, TemporalFact],
     ) -> None:
         """Missing tenant_context should return empty list."""
         related = await lineage.find_related_facts(
-            seed_linear_lineage["A"].fact_id, tenant_context=None,
+            seed_linear_lineage["A"].fact_id,
+            tenant_context=None,
         )
         assert related == []

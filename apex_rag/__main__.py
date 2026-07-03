@@ -226,7 +226,7 @@ async def _cmd_global_query(args: argparse.Namespace) -> None:
 
     async with await ApexIndex.create(trace_enabled=args.verbose) as index:
         with spinner_context(text="Searching all documents…"):
-            result = await index.query_global(args.question, synthesize=True)
+            result = await index.query_global(args.question)
         if result:
             content = result.answer_text if hasattr(result, "answer_text") else str(result)
             format_success("Answer found:")

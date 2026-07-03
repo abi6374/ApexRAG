@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 import logging
 import re
@@ -46,6 +45,22 @@ class AccessControlAgent:
     mock-detection or test-specific branches in production code paths.
     """
 
+    # Default sensitive fields for content masking. Can be overridden per-instance
+    # for domain-specific requirements (e.g., medical, legal terminology).
+    SENSITIVE_FIELDS: list[str] = [
+        "Revenue",
+        "Profit Margin",
+        "Stock",
+        "Salary",
+        "Profit",
+        "Margin",
+        "Revenue Growth",
+        "EPS",
+        "EBITDA",
+        "Operating Income",
+        "Net Income",
+    ]
+
     def __init__(self, storage: ApexStorage) -> None:
         self.storage = storage
         self._policy_engine = PolicyEngine()
@@ -63,9 +78,7 @@ class AccessControlAgent:
             role=role, resource_type=resource_type, action=action, is_allowed=is_allowed
         )
         if hasattr(self.storage, "save_role_permission"):
-            res = self.storage.save_role_permission(row)
-            if inspect.isawaitable(res):
-                await res
+            await self.storage.save_role_permission(row)
 
     async def assign_field_permission(
         self, role: str, resource_type: str, field_name: str, is_allowed: bool
@@ -77,9 +90,7 @@ class AccessControlAgent:
             role=role, resource_type=resource_type, field_name=field_name, is_allowed=is_allowed
         )
         if hasattr(self.storage, "save_field_permission"):
-            res = self.storage.save_field_permission(row)
-            if inspect.isawaitable(res):
-                await res
+            await self.storage.save_field_permission(row)
 
     async def define_custom_rule(
         self,
@@ -218,27 +229,21 @@ class AccessControlAgent:
         """Query a role permission from the database."""
         if not hasattr(self.storage, "get_role_permission"):
             return False
-        res = self.storage.get_role_permission(role, resource_type, action)
-        if inspect.isawaitable(res):
-            return await res
+        res = await self.storage.get_role_permission(role, resource_type, action)
         return bool(res) if res is not None else False
 
     async def _get_field_permission(self, role: str, resource_type: str, field_name: str) -> bool:
         """Query a field permission from the database."""
         if not hasattr(self.storage, "get_field_permission"):
             return False
-        res = self.storage.get_field_permission(role, resource_type, field_name)
-        if inspect.isawaitable(res):
-            return await res
+        res = await self.storage.get_field_permission(role, resource_type, field_name)
         return bool(res) if res is not None else False
 
     async def _save_audit_log(self, audit_row: AuditLogRow) -> None:
         """Persist an audit log entry."""
         if not hasattr(self.storage, "save_audit_log"):
             return
-        res = self.storage.save_audit_log(audit_row)
-        if inspect.isawaitable(res):
-            await res
+        await self.storage.save_audit_log(audit_row)
 
     async def verify_tenant_access(self, context: TenantContext, doc_tenant_id: str) -> bool:
         """Enforces multi-tenant data isolation."""
@@ -353,7 +358,8 @@ class AccessControlAgent:
         # 2. Check custom action evaluators (registered via register_custom_execution)
         if action in self.custom_evaluators:
             res = self.custom_evaluators[action](context, resource_type)
-            if inspect.isawaitable(res):
+            # Support both sync and async callbacks
+            if hasattr(res, "__await__"):
                 return await res
             return bool(res)
 
@@ -378,9 +384,6 @@ class AccessControlAgent:
         if policy_applied:
             # PolicyEngine had applicable policies — its decision is authoritative
             return policy_result
-
-        if not policy_result:
-            return False
 
         # 5. Check explicit database role permissions if stored
         for role in context.roles:
@@ -430,10 +433,8 @@ class AccessControlAgent:
         for role in context.roles:
             if role in (Roles.TENANT_ADMIN, Roles.MANAGER):
                 return True
-            elif role == Roles.ANALYST:
-                # Explicit allowlist for Analyst
-                return True
-            elif role in (Roles.AUDITOR, Roles.VIEWER):
+            elif role in (Roles.ANALYST, Roles.AUDITOR, Roles.VIEWER):
+                # Analyst, Auditor, and Viewer can see most fields
                 return True
             elif role == Roles.GUEST and field_name in ("title", "summary", "public_metadata"):
                 # Guest allowlist: only title, summary, public_metadata
@@ -455,36 +456,14 @@ class AccessControlAgent:
 
         masked_content = content
 
-        # Guest allowlist: only title, summary, public_metadata
-
         for role in context.roles:
             if role == Roles.GUEST:
-                # Mask everything except allowed fields for Guest
-                sensitive_fields = [
-                    "Revenue",
-                    "Profit Margin",
-                    "Stock",
-                    "Salary",
-                    "Profit",
-                    "Margin",
-                    "Revenue Growth",
-                    "EPS",
-                    "EBITDA",
-                    "Operating Income",
-                    "Net Income",
-                ]
-                for field in sensitive_fields:
-                    pattern = rf"\b({field})\b\s*(?:=|\:|of|is)?\s*[\$\w\d\.\,\-%]+"
+                # Mask all known sensitive fields for Guest users
+                for field in self.SENSITIVE_FIELDS:
+                    # Match: "FieldName = value", "FieldName: value", "FieldName of value", "FieldName is value"
+                    pattern = rf"\b({re.escape(field)})\b\s*(?:=|\:|\bof\b|\bis\b)?\s*[\$€£\w\d\.\,\-%]+"
                     masked_content = re.sub(
                         pattern,
-                        r"\1 = [REDACTED]",
-                        masked_content,
-                        flags=re.IGNORECASE,
-                    )
-                    # Also mask standalone values that follow known sensitive keywords
-                    pattern_margin = r"\b(profit\s+margin)\b\s*(?:=|\:|of|is)?\s*[\$\w\d\.\,\-%]+"
-                    masked_content = re.sub(
-                        pattern_margin,
                         r"\1 = [REDACTED]",
                         masked_content,
                         flags=re.IGNORECASE,

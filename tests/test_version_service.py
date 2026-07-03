@@ -4,6 +4,7 @@ tests/test_version_service.py — Tests for the immutable TemporalVersionService
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 import uuid
@@ -49,6 +50,7 @@ class TestTemporalVersionService:
             is_current=True,
         )
         import asyncio
+
         result = asyncio.run(TemporalVersionService.verify_content_integrity(version))
         assert result is True
 
@@ -66,6 +68,7 @@ class TestTemporalVersionService:
             is_current=True,
         )
         import asyncio
+
         result = asyncio.run(TemporalVersionService.verify_content_integrity(version))
         assert result is False
 
@@ -76,14 +79,14 @@ class TestTemporalVersionServiceIntegration:
     @pytest.fixture
     def db_path(self) -> str:
         """Create a unique temp database file per test."""
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        return tmp.name
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            return tmp.name
 
     @pytest.fixture
     async def service(self, db_path: str) -> TemporalVersionService:
         """Create a service with a fresh SQLite database."""
         from apex_rag.ingestion.apex_storage import ApexStorage
+
         db_url = f"sqlite+aiosqlite:///{db_path}"
         storage = await ApexStorage.create(db_url)
         yield TemporalVersionService(storage)
@@ -93,30 +96,31 @@ class TestTemporalVersionServiceIntegration:
     async def seeded_service(self, db_path: str) -> TemporalVersionService:
         """Create a service with a parent AST node already inserted."""
         from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
+
         db_url = f"sqlite+aiosqlite:///{db_path}"
         storage = await ApexStorage.create(db_url)
 
         # Insert a parent ASTNode to satisfy FK constraints
         async with storage.session() as session:
-            session.add(ASTNodeRow(
-                node_id="00000000-0000-4000-a000-000000000001",
-                content="Test root",
-                node_type="PARAGRAPH",
-                depth=0,
-                doc_id="doc-001",
-                tenant_id="default",
-                children_json="[]",
-                embedding_json="[]",
-                ingestion_date=datetime.now(timezone.utc),
-            ))
+            session.add(
+                ASTNodeRow(
+                    node_id="00000000-0000-4000-a000-000000000001",
+                    content="Test root",
+                    node_type="PARAGRAPH",
+                    depth=0,
+                    doc_id="doc-001",
+                    tenant_id="default",
+                    children_json="[]",
+                    embedding_json="[]",
+                    ingestion_date=datetime.now(timezone.utc),
+                )
+            )
 
         yield TemporalVersionService(storage)
         await storage.dispose()
         # Cleanup temp file
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(db_path)
-        except OSError:
-            pass
 
     @pytest.mark.asyncio
     async def test_create_first_version(self, seeded_service, db_path) -> None:
@@ -136,17 +140,23 @@ class TestTemporalVersionServiceIntegration:
     async def test_version_increments(self, seeded_service, db_path) -> None:
         """Should increment version_number for subsequent versions."""
         v1 = await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content="V1", doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content="V1",
+            doc_id="doc-001",
         )
         assert v1.version_number == 1
 
         v2 = await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content="V2", doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content="V2",
+            doc_id="doc-001",
         )
         assert v2.version_number == 2
 
         v3 = await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content="V3", doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content="V3",
+            doc_id="doc-001",
         )
         assert v3.version_number == 3
 
@@ -154,13 +164,19 @@ class TestTemporalVersionServiceIntegration:
     async def test_immutable_history(self, seeded_service, db_path) -> None:
         """Verify that historical data is NEVER overwritten."""
         await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content='{"revenue": 100000}', doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content='{"revenue": 100000}',
+            doc_id="doc-001",
         )
         await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content='{"revenue": 120000}', doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content='{"revenue": 120000}',
+            doc_id="doc-001",
         )
         await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content='{"revenue": 150000}', doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content='{"revenue": 150000}',
+            doc_id="doc-001",
         )
 
         chain = await seeded_service.get_version_chain("00000000-0000-4000-a000-000000000001")
@@ -178,10 +194,14 @@ class TestTemporalVersionServiceIntegration:
     async def test_get_latest_version(self, seeded_service, db_path) -> None:
         """Should return the latest version."""
         await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content="V1", doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content="V1",
+            doc_id="doc-001",
         )
         await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content="V2", doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content="V2",
+            doc_id="doc-001",
         )
 
         latest = await seeded_service.get_latest_version("00000000-0000-4000-a000-000000000001")
@@ -193,7 +213,9 @@ class TestTemporalVersionServiceIntegration:
     async def test_content_hash_integrity(self, seeded_service, db_path) -> None:
         """Content hashes should match their content."""
         v1 = await seeded_service.create_version(
-            node_id="00000000-0000-4000-a000-000000000001", content="Revenue = 100,000", doc_id="doc-001",
+            node_id="00000000-0000-4000-a000-000000000001",
+            content="Revenue = 100,000",
+            doc_id="doc-001",
         )
 
         # Verify with static method
@@ -213,37 +235,44 @@ class TestTemporalVersionServiceIntegration:
 @pytest.mark.asyncio
 async def test_no_overwrite_guarantee_with_cleanup():
     """Standalone test: ensure no temp files leak."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    try:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
+
         db_url = f"sqlite+aiosqlite:///{tmp.name}"
         storage = await ApexStorage.create(db_url)
 
         async with storage.session() as session:
-            session.add(ASTNodeRow(
-                node_id="00000000-0000-4000-a000-000000000002",
-                content="Test",
-                node_type="PARAGRAPH",
-                depth=0,
-                doc_id="doc-test",
-                tenant_id="default",
-                children_json="[]",
-                embedding_json="[]",
-                ingestion_date=datetime.now(timezone.utc),
-            ))
+            session.add(
+                ASTNodeRow(
+                    node_id="00000000-0000-4000-a000-000000000002",
+                    content="Test",
+                    node_type="PARAGRAPH",
+                    depth=0,
+                    doc_id="doc-test",
+                    tenant_id="default",
+                    children_json="[]",
+                    embedding_json="[]",
+                    ingestion_date=datetime.now(timezone.utc),
+                )
+            )
 
         service = TemporalVersionService(storage)
 
         # Create 3 versions
-        v1 = await service.create_version(
-            node_id="00000000-0000-4000-a000-000000000002", content='{"val": 1}', doc_id="doc-test",
+        await service.create_version(
+            node_id="00000000-0000-4000-a000-000000000002",
+            content='{"val": 1}',
+            doc_id="doc-test",
         )
-        v2 = await service.create_version(
-            node_id="00000000-0000-4000-a000-000000000002", content='{"val": 2}', doc_id="doc-test",
+        await service.create_version(
+            node_id="00000000-0000-4000-a000-000000000002",
+            content='{"val": 2}',
+            doc_id="doc-test",
         )
-        v3 = await service.create_version(
-            node_id="00000000-0000-4000-a000-000000000002", content='{"val": 3}', doc_id="doc-test",
+        await service.create_version(
+            node_id="00000000-0000-4000-a000-000000000002",
+            content='{"val": 3}',
+            doc_id="doc-test",
         )
 
         chain = await service.get_version_chain("00000000-0000-4000-a000-000000000002")
@@ -256,5 +285,3 @@ async def test_no_overwrite_guarantee_with_cleanup():
         assert '{"val": 3}' in chain[2].content
 
         await storage.dispose()
-    finally:
-        os.unlink(tmp.name)

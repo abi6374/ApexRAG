@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -32,10 +32,10 @@ from apex_rag.providers import (
     OpenAIProvider,
 )
 
-
 # ═══════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════
+
 
 @pytest.fixture
 def mock_ollama_client() -> MagicMock:
@@ -104,7 +104,7 @@ def mock_openai_client() -> MagicMock:
         def __init__(self, tokens: list[str]):
             self._tokens = tokens
 
-        def __aiter__(self) -> "StreamWrapper":
+        def __aiter__(self) -> StreamWrapper:
             return self
 
         async def __anext__(self) -> Chunk:
@@ -115,9 +115,7 @@ def mock_openai_client() -> MagicMock:
     async def chat_create(**kwargs: Any) -> Any:
         if kwargs.get("stream"):
             return StreamWrapper(["Hello", " ", "from", " ", "OpenAI"])
-        return MagicMock(
-            choices=[MagicMock(message=MagicMock(content="Hello from OpenAI"))]
-        )
+        return MagicMock(choices=[MagicMock(message=MagicMock(content="Hello from OpenAI"))])
 
     client.chat = MagicMock()
     client.chat.completions = MagicMock()
@@ -146,7 +144,7 @@ def mock_groq_client() -> MagicMock:
         def __init__(self, tokens: list[str]):
             self._tokens = tokens
 
-        def __aiter__(self) -> "StreamWrapper":
+        def __aiter__(self) -> StreamWrapper:
             return self
 
         async def __anext__(self) -> Chunk:
@@ -157,9 +155,7 @@ def mock_groq_client() -> MagicMock:
     async def chat_create(**kwargs: Any) -> Any:
         if kwargs.get("stream"):
             return StreamWrapper(["Hello", " ", "from", " ", "Groq"])
-        return MagicMock(
-            choices=[MagicMock(message=MagicMock(content="Hello from Groq"))]
-        )
+        return MagicMock(choices=[MagicMock(message=MagicMock(content="Hello from Groq"))])
 
     client.chat = MagicMock()
     client.chat.completions = MagicMock()
@@ -176,7 +172,7 @@ def mock_anthropic_client() -> MagicMock:
         def __init__(self, tokens: list[str]):
             self._tokens = tokens
 
-        def __aiter__(self) -> "TextStream":
+        def __aiter__(self) -> TextStream:
             return self
 
         async def __anext__(self) -> str:
@@ -188,7 +184,7 @@ def mock_anthropic_client() -> MagicMock:
         def __init__(self, tokens: list[str]):
             self.text_stream = TextStream(tokens)
 
-        async def __aenter__(self) -> "StreamManager":
+        async def __aenter__(self) -> StreamManager:
             return self
 
         async def __aexit__(self, *args: Any) -> None:
@@ -213,6 +209,7 @@ def mock_anthropic_client() -> MagicMock:
 # Protocol Compliance
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestLLMProviderProtocol:
     """Verify all providers conform to the LLMProvider protocol."""
 
@@ -226,12 +223,15 @@ class TestLLMProviderProtocol:
         assert isinstance(GroqProvider(model="llama3-70b", api_key="gsk-test"), LLMProvider)
 
     def test_anthropic_is_llm_provider(self) -> None:
-        assert isinstance(AnthropicProvider(model="claude-3-5-sonnet", api_key="sk-ant-test"), LLMProvider)
+        assert isinstance(
+            AnthropicProvider(model="claude-3-5-sonnet", api_key="sk-ant-test"), LLMProvider
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
 # OllamaProvider
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestOllamaProvider:
     """Tests concrete Ollama provider with mocked client."""
@@ -243,49 +243,35 @@ class TestOllamaProvider:
         return p
 
     @pytest.mark.asyncio
-    async def test_stream_generate_yields_tokens(
-        self, provider: OllamaProvider
-    ) -> None:
+    async def test_stream_generate_yields_tokens(self, provider: OllamaProvider) -> None:
         chunks: list[str] = []
         async for chunk in provider.stream_generate("Hello"):
             chunks.append(chunk)
         assert chunks == ["Hello", " ", "from", " ", "Ollama"]
 
     @pytest.mark.asyncio
-    async def test_stream_generate_respects_params(
-        self, provider: OllamaProvider
-    ) -> None:
+    async def test_stream_generate_respects_params(self, provider: OllamaProvider) -> None:
         chunks: list[str] = []
-        async for chunk in provider.stream_generate(
-            "Hello", temperature=0.7, max_tokens=50
-        ):
+        async for chunk in provider.stream_generate("Hello", temperature=0.7, max_tokens=50):
             chunks.append(chunk)
         assert len(chunks) > 0
         assert "".join(chunks) == "Hello from Ollama"
 
     @pytest.mark.asyncio
-    async def test_stream_generate_with_images(
-        self, provider: OllamaProvider
-    ) -> None:
+    async def test_stream_generate_with_images(self, provider: OllamaProvider) -> None:
         chunks: list[str] = []
-        async for chunk in provider.stream_generate(
-            "Describe this", images=["base64img"]
-        ):
+        async for chunk in provider.stream_generate("Describe this", images=["base64img"]):
             chunks.append(chunk)
         assert len(chunks) > 0
 
     @pytest.mark.asyncio
-    async def test_embed_returns_vectors(
-        self, provider: OllamaProvider
-    ) -> None:
+    async def test_embed_returns_vectors(self, provider: OllamaProvider) -> None:
         vectors = await provider.embed(["text one", "text two"])
         assert len(vectors) == 2
         assert all(len(v) == 3 for v in vectors)
 
     @pytest.mark.asyncio
-    async def test_embed_uses_embed_model(
-        self, provider: OllamaProvider
-    ) -> None:
+    async def test_embed_uses_embed_model(self, provider: OllamaProvider) -> None:
         # Provider was created with embed_model defaulting to model
         assert provider.embed_model == "llama3.1"
         vectors = await provider.embed(["test"])
@@ -295,6 +281,7 @@ class TestOllamaProvider:
 # ═══════════════════════════════════════════════════════════════
 # OpenAIProvider
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestOpenAIProvider:
     """Tests concrete OpenAI provider with mocked client."""
@@ -306,44 +293,32 @@ class TestOpenAIProvider:
         return p
 
     @pytest.mark.asyncio
-    async def test_stream_generate_yields_tokens(
-        self, provider: OpenAIProvider
-    ) -> None:
+    async def test_stream_generate_yields_tokens(self, provider: OpenAIProvider) -> None:
         chunks: list[str] = []
         async for chunk in provider.stream_generate("Hello"):
             chunks.append(chunk)
         assert chunks == ["Hello", " ", "from", " ", "OpenAI"]
 
     @pytest.mark.asyncio
-    async def test_stream_generate_respects_params(
-        self, provider: OpenAIProvider
-    ) -> None:
+    async def test_stream_generate_respects_params(self, provider: OpenAIProvider) -> None:
         chunks: list[str] = []
-        async for chunk in provider.stream_generate(
-            "Hello", temperature=0.7, max_tokens=100
-        ):
+        async for chunk in provider.stream_generate("Hello", temperature=0.7, max_tokens=100):
             chunks.append(chunk)
         assert "".join(chunks) == "Hello from OpenAI"
 
     @pytest.mark.asyncio
-    async def test_embed_returns_vectors(
-        self, provider: OpenAIProvider
-    ) -> None:
+    async def test_embed_returns_vectors(self, provider: OpenAIProvider) -> None:
         vectors = await provider.embed(["text one", "text two"])
         assert len(vectors) == 2
         assert all(len(v) == 3 for v in vectors)
 
     @pytest.mark.asyncio
-    async def test_embed_maintains_input_order(
-        self, provider: OpenAIProvider
-    ) -> None:
+    async def test_embed_maintains_input_order(self, provider: OpenAIProvider) -> None:
         vectors = await provider.embed(["first", "second", "third"])
         assert len(vectors) == 3
 
     @pytest.mark.asyncio
-    async def test_generate_still_works(
-        self, provider: OpenAIProvider
-    ) -> None:
+    async def test_generate_still_works(self, provider: OpenAIProvider) -> None:
         result = await provider.generate("Hello")
         assert result == "Hello from OpenAI"
 
@@ -351,6 +326,7 @@ class TestOpenAIProvider:
 # ═══════════════════════════════════════════════════════════════
 # GroqProvider
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestGroqProvider:
     """Tests concrete Groq provider with mocked client."""
@@ -362,25 +338,19 @@ class TestGroqProvider:
         return p
 
     @pytest.mark.asyncio
-    async def test_stream_generate_yields_tokens(
-        self, provider: GroqProvider
-    ) -> None:
+    async def test_stream_generate_yields_tokens(self, provider: GroqProvider) -> None:
         chunks: list[str] = []
         async for chunk in provider.stream_generate("Hello"):
             chunks.append(chunk)
         assert chunks == ["Hello", " ", "from", " ", "Groq"]
 
     @pytest.mark.asyncio
-    async def test_embed_raises_not_implemented(
-        self, provider: GroqProvider
-    ) -> None:
+    async def test_embed_raises_not_implemented(self, provider: GroqProvider) -> None:
         with pytest.raises(NotImplementedError, match="does not support embeddings"):
             await provider.embed(["test"])
 
     @pytest.mark.asyncio
-    async def test_generate_still_works(
-        self, provider: GroqProvider
-    ) -> None:
+    async def test_generate_still_works(self, provider: GroqProvider) -> None:
         result = await provider.generate("Hello")
         assert result == "Hello from Groq"
 
@@ -388,6 +358,7 @@ class TestGroqProvider:
 # ═══════════════════════════════════════════════════════════════
 # AnthropicProvider
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestAnthropicProvider:
     """Tests concrete Anthropic provider with mocked client."""
@@ -399,25 +370,19 @@ class TestAnthropicProvider:
         return p
 
     @pytest.mark.asyncio
-    async def test_stream_generate_yields_tokens(
-        self, provider: AnthropicProvider
-    ) -> None:
+    async def test_stream_generate_yields_tokens(self, provider: AnthropicProvider) -> None:
         chunks: list[str] = []
         async for chunk in provider.stream_generate("Hello"):
             chunks.append(chunk)
         assert chunks == ["Hello", " ", "from", " ", "Anthropic"]
 
     @pytest.mark.asyncio
-    async def test_embed_raises_not_implemented(
-        self, provider: AnthropicProvider
-    ) -> None:
+    async def test_embed_raises_not_implemented(self, provider: AnthropicProvider) -> None:
         with pytest.raises(NotImplementedError, match="does not support embeddings"):
             await provider.embed(["test"])
 
     @pytest.mark.asyncio
-    async def test_generate_still_works(
-        self, provider: AnthropicProvider
-    ) -> None:
+    async def test_generate_still_works(self, provider: AnthropicProvider) -> None:
         result = await provider.generate("Hello")
         assert result == "Hello from Anthropic"
 
@@ -425,6 +390,7 @@ class TestAnthropicProvider:
 # ═══════════════════════════════════════════════════════════════
 # EvidenceSynthesizerAgent via stream_generate
 # ═══════════════════════════════════════════════════════════════
+
 
 @pytest.fixture
 def mock_streaming_llm() -> AsyncMock:
@@ -524,6 +490,7 @@ class TestSynthesizerStreaming:
 # Protocol Default Implementation
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestProtocolDefaults:
     """Verify the default implementations of stream_generate and embed."""
 
@@ -536,6 +503,7 @@ class TestProtocolDefaults:
     @pytest.mark.asyncio
     async def test_embed_default_raises(self) -> None:
         """Verifying NotImplementedError through a class that doesn't override embed."""
+
         class BareMinProvider:
             async def generate(self, prompt: str, **kwargs: Any) -> str:
                 return "response"

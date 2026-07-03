@@ -16,20 +16,17 @@ Covers:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage
+from apex_rag.ingestion.apex_storage import ApexStorage
 from apex_rag.ingestion.fact_pipeline import FactJobRow, FactPipeline
 from apex_rag.models.unified_models import ASTNode, NodeType
 from apex_rag.temporal.fact_extractor import FactExtractor
 from apex_rag.temporal.fact_store import FactStore
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -42,9 +39,9 @@ async def storage() -> AsyncGenerator[ApexStorage, None]:
     creation that gracefully handles SQLite's lack of INDEX IF NOT EXISTS.
     """
     import tempfile
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        storage = await ApexStorage.create(f"sqlite+aiosqlite:///{tmp.name}")
     yield storage
 
 
@@ -115,7 +112,9 @@ class TestEnqueue:
     """Enqueue creates PENDING jobs."""
 
     @pytest.mark.asyncio
-    async def test_enqueue_creates_pending_job(self, pipeline: FactPipeline, storage: ApexStorage) -> None:
+    async def test_enqueue_creates_pending_job(
+        self, pipeline: FactPipeline, storage: ApexStorage
+    ) -> None:
         nodes = [make_node("Revenue was $40M.")]
         job_id = await pipeline.enqueue_document("doc-1", nodes, tenant_id="tenant-a")
         assert job_id is not None
@@ -124,7 +123,8 @@ class TestEnqueue:
 
     @pytest.mark.asyncio
     async def test_enqueue_returns_different_job_ids_for_different_docs(
-        self, pipeline: FactPipeline,
+        self,
+        pipeline: FactPipeline,
     ) -> None:
         nodes_a = [make_node("Revenue was $40M.", doc_id="doc-a")]
         nodes_b = [make_node("Expenses were $20M.", doc_id="doc-b")]
@@ -138,7 +138,8 @@ class TestIdempotency:
 
     @pytest.mark.asyncio
     async def test_enqueue_idempotent_for_same_content(
-        self, pipeline: FactPipeline,
+        self,
+        pipeline: FactPipeline,
     ) -> None:
         nodes = [make_node("Revenue was $40M.")]
         job1 = await pipeline.enqueue_document("doc-id", nodes, tenant_id="tenant-a")
@@ -148,7 +149,8 @@ class TestIdempotency:
 
     @pytest.mark.asyncio
     async def test_different_content_different_job(
-        self, pipeline: FactPipeline,
+        self,
+        pipeline: FactPipeline,
     ) -> None:
         nodes1 = [make_node("Revenue was $40M.")]
         nodes2 = [make_node("Revenue was $60M.")]
@@ -211,7 +213,9 @@ class TestProcessPending:
 
     @pytest.mark.asyncio
     async def test_process_job_with_metrics_content(
-        self, pipeline: FactPipeline, storage: ApexStorage,
+        self,
+        pipeline: FactPipeline,
+        storage: ApexStorage,
     ) -> None:
         """Extract metrics from document content."""
         node = make_node("Revenue was $50M. Profit was $10M. Headcount is 500.")
@@ -241,19 +245,25 @@ class TestRetryAndDeadLetter:
         await pipeline.enqueue_document("test-doc", [node], tenant_id="tenant-a")
 
         # Make extractor raise by patching it
-        with patch.object(pipeline._extractor, "extract_from_node", side_effect=ValueError("Extraction failed")):
+        with patch.object(
+            pipeline._extractor, "extract_from_node", side_effect=ValueError("Extraction failed")
+        ):
             results = await pipeline.process_pending_jobs()
             assert len(results) >= 1
             assert results[0]["status"] == "FAILED"
 
     @pytest.mark.asyncio
-    async def test_dead_letter_after_max_retries(self, pipeline: FactPipeline, storage: ApexStorage) -> None:
+    async def test_dead_letter_after_max_retries(
+        self, pipeline: FactPipeline, storage: ApexStorage
+    ) -> None:
         node = make_node("Test content")
         await storage.save_node(node, tenant_context="tenant-a")
 
         job_id = await pipeline.enqueue_document("test-doc", [node], tenant_id="tenant-a")
 
-        with patch.object(pipeline._extractor, "extract_from_node", side_effect=ValueError("Extraction failed")):
+        with patch.object(
+            pipeline._extractor, "extract_from_node", side_effect=ValueError("Extraction failed")
+        ):
             for _ in range(pipeline.max_retries):  # Hit max retries
                 await pipeline.process_pending_jobs()
 
@@ -262,14 +272,18 @@ class TestRetryAndDeadLetter:
         assert status["status"] == "DEAD_LETTER"
 
     @pytest.mark.asyncio
-    async def test_retry_dead_letter_jobs(self, pipeline: FactPipeline, storage: ApexStorage) -> None:
+    async def test_retry_dead_letter_jobs(
+        self, pipeline: FactPipeline, storage: ApexStorage
+    ) -> None:
         """retry_dead_letter_jobs resets DEAD_LETTER jobs to PENDING."""
         node = make_node("Test content")
         await storage.save_node(node, tenant_context="tenant-a")
 
         await pipeline.enqueue_document("test-doc", [node], tenant_id="tenant-a")
 
-        with patch.object(pipeline._extractor, "extract_from_node", side_effect=ValueError("Extraction failed")):
+        with patch.object(
+            pipeline._extractor, "extract_from_node", side_effect=ValueError("Extraction failed")
+        ):
             for _ in range(pipeline.max_retries):
                 await pipeline.process_pending_jobs()
 

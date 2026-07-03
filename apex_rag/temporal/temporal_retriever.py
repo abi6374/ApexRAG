@@ -25,7 +25,7 @@ class TemporalRetriever:
     def __init__(self, storage: ApexStorage) -> None:
         self.storage = storage
 
-    async def _get_latest_nodes_rows(self, doc_id: str) -> list:
+    async def _get_latest_nodes_rows(self, doc_id: str) -> list[NodeVersionRow]:
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -36,11 +36,11 @@ class TemporalRetriever:
                     NodeVersionRow.doc_id == doc_id, NodeVersionRow.is_current
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 
-    async def _get_nodes_as_of_rows(self, doc_id: str, as_of: datetime) -> list:
+    async def _get_nodes_as_of_rows(self, doc_id: str, as_of: datetime) -> list[NodeVersionRow]:
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -53,37 +53,29 @@ class TemporalRetriever:
                     (NodeVersionRow.effective_to.is_(None) | (NodeVersionRow.effective_to > as_of)),
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 
     async def _get_node_version_as_of(self, node_id: str, as_of: datetime) -> Any:
-        import inspect
-
         if not hasattr(self.storage, "get_node_version_as_of"):
             return None
-        res = self.storage.get_node_version_as_of(node_id, as_of)
-        if inspect.isawaitable(res):
-            res = await res
+        res = await self.storage.get_node_version_as_of(node_id, as_of)
         if type(res).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return None
         return res
 
-    async def _get_node_versions(self, node_id: str) -> list:
-        import inspect
-
+    async def _get_node_versions(self, node_id: str) -> list[NodeVersionRow]:
         if not hasattr(self.storage, "get_node_versions"):
             return []
-        res = self.storage.get_node_versions(node_id)
-        if inspect.isawaitable(res):
-            res = await res
+        res = await self.storage.get_node_versions(node_id)
         if type(res).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         return res or []
 
     async def _get_nodes_in_range_rows(
         self, doc_id: str, start_date: datetime, end_date: datetime
-    ) -> list:
+    ) -> list[NodeVersionRow]:
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -99,11 +91,11 @@ class TemporalRetriever:
                     ),
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 
-    async def _get_nodes_before_rows(self, doc_id: str, before_date: datetime) -> list:
+    async def _get_nodes_before_rows(self, doc_id: str, before_date: datetime) -> list[NodeVersionRow]:
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -114,11 +106,11 @@ class TemporalRetriever:
                     NodeVersionRow.doc_id == doc_id, NodeVersionRow.effective_from < before_date
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 
-    async def _get_nodes_after_rows(self, doc_id: str, after_date: datetime) -> list:
+    async def _get_nodes_after_rows(self, doc_id: str, after_date: datetime) -> list[NodeVersionRow]:
         if type(self.storage).__name__ in ("MagicMock", "Mock", "AsyncMock"):
             return []
         if not hasattr(self.storage, "session"):
@@ -129,7 +121,7 @@ class TemporalRetriever:
                     NodeVersionRow.doc_id == doc_id, NodeVersionRow.effective_from > after_date
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                return list(result.scalars().all())
         except Exception:
             return []
 

@@ -34,16 +34,18 @@ pip install apex-rag[vectors]
 from apex_rag import ApexIndex
 
 async with await ApexIndex.create() as index:
-    result = await index.query(
+    # Setting the domain parameter to 'financial' or 'analytical' automatically 
+    # enables hybrid search under the hood!
+    answer = await index.query(
         "What was the revenue in Q3?",
         doc_id,
-        hybrid=True,  # Enable hybrid
+        domain="financial",
     )
 ```
 
 ## How It Works
 
-When `hybrid=True`, the query flows through:
+When hybrid search is enabled, the query flows through:
 
 1. **Vector Similarity** (40% weight) — Sentence embeddings via
    `all-MiniLM-L6-v2` compute semantic similarity between the query and all
@@ -66,13 +68,17 @@ You can customize the weights for each component:
 ```python
 from apex_rag.search import HybridSearch
 
-searcher = HybridSearch(storage, embeddings=embeddings)
+# Retrieve the storage and embedder from ApexIndex internals
+storage = index._storage
+embedder = index._embedder
+
+searcher = HybridSearch(storage, embeddings=embedder)
 ranked = await searcher.hybrid_rank(
-    query,
-    doc_id,
-    vector_weight=0.5,
+    query=query,
+    doc_id=doc_id,
+    vector_weight=0.4,
     keyword_weight=0.3,
-    structural_weight=0.2,
+    structural_weight=0.3,
 )
 ```
 
@@ -81,10 +87,9 @@ ranked = await searcher.hybrid_rank(
 Vector search also powers cross-document retrieval:
 
 ```python
-result = await index.query_global(
+answer = await index.query_global(
     "What is our total R&D spend?",
-    hybrid=True,
-    synthesize=True,
+    domain="financial",
 )
 ```
 
@@ -95,10 +100,10 @@ the top-3 candidates.
 
 | Scenario | Vector | Keyword | Agentic | Recommendation |
 |----------|--------|---------|---------|----------------|
-| Simple fact lookup | ✅ | ✅ | ✅ | `hybrid=True` for speed |
-| Complex analytical query | ❌ | ❌ | ✅ | Agentic-only for precision |
-| Large document (100+ pages) | ✅ | ✅ | ✅ | Hybrid with `hybrid=True` |
-| No internet/GPU | ❌ | ✅ | ✅ | Agentic + FTS5 (no vectors) |
+| Simple fact lookup | ✅ | ✅ | ✅ | Set ``domain="financial"`` for speed |
+| Complex analytical query | ❌ | ❌ | ✅ | Agentic-only (default) for precision |
+| Large document (100+ pages) | ✅ | ✅ | ✅ | Hybrid with ``domain="analytical"`` |
+| No internet/GPU | ❌ | ✅ | ✅ | Agentic + FTS5 (no vectors needed) |
 
 ## Performance Impact
 

@@ -92,7 +92,6 @@ class RoleAwareRetriever:
         tenant_context: TenantContext,
         *,
         as_of: datetime | None = None,
-        allowed_roles: list[str] | None = None,  # noqa: ARG002
     ) -> RoleAwareResult:
         """Run the full role-aware retrieval pipeline.
 
@@ -101,7 +100,6 @@ class RoleAwareRetriever:
             doc_id:          Target document ID.
             tenant_context:  The :class:`TenantContext` for the requesting user.
             as_of:           Optional — retrieve state as of this datetime.
-            allowed_roles:   Optional override for allowed roles.
 
         Returns:
             A :class:`RoleAwareResult` with filtered packets and audit trail.
@@ -249,7 +247,7 @@ class RoleAwareRetriever:
         Returns:
             A :class:`RoleAwareResult` with aggregated results.
         """
-        all_docs = await self._storage.list_document_ids()
+        all_docs = await self._storage.list_document_ids(tenant_context=tenant_context.tenant_id)
         combined_packets: list[EvidencePacket] = []
         total_blocked = 0
 
