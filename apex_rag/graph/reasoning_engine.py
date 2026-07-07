@@ -48,7 +48,7 @@ class GraphReasoningEngine:
         res = self.storage.get_edges_for_node(node_id)
         if inspect.isawaitable(res):
             return await res
-        return [] if type(res).__name__ in ("MagicMock", "Mock") else res
+        return []  # Unexpected sync result
 
     async def _get_node(self, node_id: str) -> ASTNode | None:
         import inspect
@@ -58,7 +58,7 @@ class GraphReasoningEngine:
         res = self.storage.get_node(node_id)
         if inspect.isawaitable(res):
             return await res
-        return None if type(res).__name__ in ("MagicMock", "Mock") else res
+        return None  # Unexpected sync result
 
     async def build_reasoning_chain(
         self,
@@ -91,12 +91,10 @@ class GraphReasoningEngine:
         # Uses the storage if it supports the full ApexStorage interface;
         # for protocol-only storage (e.g. mocks), tenant validation is skipped
         # and relies on the persistence layer's write-time validation.
-        if tenant_id:
-            storage = getattr(self, "storage", None)
-            if storage is not None and hasattr(storage, "session"):
+        if tenant_id and self.storage is not None and hasattr(self.storage, "session"):
                 from apex_rag.enterprise.auth.tenant_validator import TenantIsolationValidator
 
-                validator = TenantIsolationValidator(storage)
+                validator = TenantIsolationValidator(self.storage)
                 node_ids = [n.node_id for n in seed_nodes]
                 await validator.assert_tenant_graph_traversal(tenant_id, node_ids)
         chain_edges: list[CausalEdge] = []

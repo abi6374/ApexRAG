@@ -49,8 +49,9 @@ class CausalRetriever:
         # chain is a list of CausalEdges forming a reasoning path
     """
 
-    def __init__(self, storage: StorageProvider) -> None:
+    def __init__(self, storage: StorageProvider, *, tenant_context: str | None = None) -> None:
         self._storage = storage
+        self._tenant_context = tenant_context
 
     # ── Public API ─────────────────────────────────────────────────────
 
@@ -79,10 +80,11 @@ class CausalRetriever:
         """
         all_edges: list[CausalEdge] = []
         seen_edge_ids: set[str] = set()
-        visited_nodes: set[str] = {n.node_id for n in seed_nodes}
-
+        # Each seed gets its own BFS exploration space to avoid sibling seeds
+        # prematurely marking each other as visited (reducing edge coverage).
+        # Edge deduplication is handled by seen_edge_ids.
         for seed in seed_nodes:
-            chain = await self._bfs(seed, visited_nodes, max_depth)
+            chain = await self._bfs(seed, {seed.node_id}, max_depth)
             for edge in chain:
                 if edge.edge_id not in seen_edge_ids:
                     seen_edge_ids.add(edge.edge_id)
@@ -133,7 +135,7 @@ class CausalRetriever:
             if len(path) >= max_depth:
                 continue
 
-            edges = await self._storage.get_edges_for_node(current_id, tenant_context="default")
+            edges = await self._storage.get_edges_for_node(current_id, tenant_context=self._tenant_context)
             for edge in edges:
                 # Determine the next node (the one *not* equal to current)
                 next_id: str | None = None
@@ -188,7 +190,7 @@ class CausalRetriever:
                 if nid in already_visited:
                     continue
                 already_visited.add(nid)
-                edges = await self._storage.get_edges_for_node(nid, tenant_context="default")
+                edges = await self._storage.get_edges_for_node(nid, tenant_context=self._tenant_context)
                 for edge in edges:
                     if edge.edge_id not in seen_edges:
                         seen_edges.add(edge.edge_id)
@@ -228,7 +230,7 @@ class CausalRetriever:
             if depth >= max_depth:
                 continue
 
-            causal_edges = await self._storage.get_edges_for_node(current_id, tenant_context="default")
+            causal_edges = await self._storage.get_edges_for_node(current_id, tenant_context=self._tenant_context)
 
             for edge in causal_edges:
                 # Only follow non-contrary edges (support edges)

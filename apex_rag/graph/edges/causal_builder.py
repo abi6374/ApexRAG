@@ -128,7 +128,7 @@ class CausalGraphBuilder:
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    "Tenant validation skipped in CausalGraphBuilder: %s",
+                    "Tenant validation skipped in CausalGraphBuilder",
                     exc_info=True,
                 )
         coros: list[asyncio.Task[list[GraphEdge]]] = []
@@ -324,9 +324,6 @@ class CausalGraphBuilder:
         is analysed (max ``_llm_max_pairs``).
         """
         edges: list[GraphEdge] = []
-
-        if self._llm is None:
-            return edges
 
         if self._llm is None:
             return edges
