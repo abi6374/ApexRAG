@@ -217,12 +217,11 @@ class TenantIsolationValidator:
                         )
         except PermissionError:
             raise
-        except Exception as exc:
-            logger.warning(
-                "Tenant isolation check skipped for %s.%s: %s",
+        except Exception:
+            logger.exception(
+                "Tenant isolation check failed unexpectedly for %s.%s",
                 table_name,
                 row_id,
-                exc,
             )
 
     # ── Table schema helpers ──────────────────────────────────────────────

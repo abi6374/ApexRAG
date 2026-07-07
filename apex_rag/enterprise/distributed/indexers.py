@@ -30,6 +30,7 @@ from datetime import timedelta
 from typing import Any
 
 from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.enterprise.distributed.interfaces import DistributedIndexer
 
 logger = logging.getLogger("apex_rag.enterprise.distributed.indexers")
 
@@ -80,7 +81,7 @@ class JobRecord:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class CeleryIndexer:
+class CeleryIndexer(DistributedIndexer):
     """
     Distributed indexer backed by Celery + Redis/SQS.
 
@@ -143,7 +144,7 @@ class CeleryIndexer:
             self._redis = r
             return r
         except Exception as exc:
-            logger.debug("Redis status store unavailable: %s", exc)
+            logger.warning("Redis status store unavailable: %s", exc)
             return None
 
     async def queue_ingestion(
@@ -262,7 +263,7 @@ class CeleryIndexer:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class RedisQueueIndexer:
+class RedisQueueIndexer(DistributedIndexer):
     """
     Distributed indexer backed by a Redis list (lightweight queue).
 
@@ -292,7 +293,7 @@ class RedisQueueIndexer:
             self._redis = r
             return r
         except Exception as exc:
-            logger.debug("Redis connection failed: %s", exc)
+            logger.warning("Redis connection failed: %s", exc)
             return None
 
     async def queue_ingestion(

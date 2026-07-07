@@ -53,14 +53,10 @@ class MultiLanguageCodeParser(DocumentParser):
 
     # -- Python Parser --
     def _parse_python(self, code: str, root: ASTNode, file_path: str) -> None:
-        # Regex heuristics for functions, classes, imports
+        # Regex heuristics for functions and classes
         func_pattern = re.compile(r"^\s*def\s+(?P<name>\w+)\s*\(", re.MULTILINE)
         class_pattern = re.compile(
             r"^\s*class\s+(?P<name>\w+)(?:\((?P<base>\w+)\))?:", re.MULTILINE
-        )
-        re.compile(
-            r"^\s*(?:import\s+(?P<imp1>\w+)|from\s+(?P<from>\w+)\s+import\s+(?P<imp2>\w+))",
-            re.MULTILINE,
         )
 
         for match in func_pattern.finditer(code):
@@ -174,9 +170,6 @@ class MultiLanguageCodeParser(DocumentParser):
     def _parse_rust(self, code: str, root: ASTNode, file_path: str) -> None:
         fn_pattern = re.compile(r"^\s*(?:pub\s+)?fn\s+(?P<name>\w+)\s*\(", re.MULTILINE)
         struct_pattern = re.compile(r"^\s*(?:pub\s+)?struct\s+(?P<name>\w+)", re.MULTILINE)
-        re.compile(
-            r"^\s*(?:pub\s+)?impl(?:\s+for\s+(?P<trait>\w+))?\s+for\s+(?P<name>\w+)", re.MULTILINE
-        )
 
         for match in fn_pattern.finditer(code):
             node = ASTNode(

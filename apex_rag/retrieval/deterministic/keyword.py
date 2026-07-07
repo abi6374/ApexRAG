@@ -82,6 +82,8 @@ class KeywordDeterministicRetriever(DeterministicRetriever):
         for child in node.children:
             if isinstance(child, ASTNode):
                 nodes.extend(self._flatten_ast(child))
+            # String children (node IDs) are skipped — they are not in-memory nodes
+            # and require a separate DB fetch for full resolution
         return nodes
 
     def filter_candidates(

@@ -263,7 +263,12 @@ class ASTNavigationAgent:
             match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
             data = json.loads(match.group(0)) if match else json.loads(raw.strip())
             return data.get("chosen_id"), data.get("fallback_id")
-        except Exception:
+        except (json.JSONDecodeError, AttributeError) as exc:
+            logger.warning(
+                "[NAVIGATE] Failed to parse LLM navigation response: %s. Raw: %.200s",
+                exc,
+                raw,
+            )
             return None, None
 
     async def _db_to_ast(self, session: Any, db_node: ASTNodeRow) -> UnifiedASTNode:

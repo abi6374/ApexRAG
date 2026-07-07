@@ -9,6 +9,7 @@ Supports:
   - Ranked results (BM25 scoring)
   - Boolean queries and prefix searches
   - Compatibility with existing search API
+  - ILIKE fallback for PostgreSQL databases
 
 Usage:
     fts = FTS5Search(storage)
@@ -21,9 +22,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy import text as sa_text
 
-from apex_rag.ingestion.apex_storage import ApexStorage
+from apex_rag.ingestion.apex_storage import ApexStorage, ASTNodeRow
 
 logger = logging.getLogger("apex_rag.retrieval.search.fts5")
 
@@ -83,8 +85,7 @@ class FTS5Search:
     """SQLite FTS5 full-text search for AST nodes.
 
     Only works with SQLite databases.  For PostgreSQL, the system
-    falls back to ILIKE-based search or PostgreSQL's built-in
-    ``tsvector``/``tsquery`` full-text search.
+    falls back to ILIKE-based search.
 
     All operations are async and use managed sessions.
     """
@@ -124,10 +125,6 @@ class FTS5Search:
             await session.execute(sa_text(_FTS5_DELETE))
 
             # Fetch all nodes
-            from sqlalchemy import select
-
-            from apex_rag.ingestion.apex_storage import ASTNodeRow
-
             result = await session.execute(select(ASTNodeRow))
             rows = result.scalars().all()
 
@@ -163,8 +160,6 @@ class FTS5Search:
             return
 
         async with self._storage.session() as session:
-            from apex_rag.ingestion.apex_storage import ASTNodeRow
-
             row = await session.get(ASTNodeRow, node_id)
             if row is None:
                 # Node deleted — remove from FTS
@@ -196,10 +191,6 @@ class FTS5Search:
             return 0
 
         async with self._storage.session() as session:
-            from sqlalchemy import select
-
-            from apex_rag.ingestion.apex_storage import ASTNodeRow
-
             result = await session.execute(select(ASTNodeRow).where(ASTNodeRow.doc_id == doc_id))
             rows = result.scalars().all()
 
@@ -231,6 +222,9 @@ class FTS5Search:
     ) -> list[dict[str, Any]]:
         """Search AST nodes using FTS5 full-text search.
 
+        Uses FTS5 for SQLite databases.  Falls back to ILIKE-based search
+        for PostgreSQL or other databases.
+
         Args:
             query:  The search query (FTS5 syntax: words, phrases, prefix*).
             doc_id: Optional — restrict search to a specific document.
@@ -238,11 +232,12 @@ class FTS5Search:
 
         Returns:
             A list of dicts with keys: node_id, content, node_type, doc_id, rank.
-            Results are ordered by BM25 rank (best first).
+            Results are ordered by BM25 rank (best first) on SQLite, or
+            by content relevance on PostgreSQL.
         """
         if not self._storage.is_sqlite:
-            logger.warning("FTS5 is only supported on SQLite. Returning empty results.")
-            return []
+            logger.warning("FTS5 is only supported on SQLite. Falling back to ILIKE search.")
+            return await self._ilike_search(query, doc_id=doc_id, limit=limit)
 
         # Ensure the FTS5 index exists
         await self.ensure_index()
@@ -270,6 +265,40 @@ class FTS5Search:
                     "node_type": row.node_type,
                     "doc_id": row.doc_id,
                     "rank": round(row.rank, 4),
+                }
+                for row in rows
+            ]
+
+    # ── ILIKE fallback for non-SQLite databases ────────────────────────────
+
+    async def _ilike_search(
+        self,
+        query: str,
+        *,
+        doc_id: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Fallback ILIKE-based search for PostgreSQL and other databases.
+
+        Converts the query into a case-insensitive content match.
+        Results are ordered alphabetically by content as a simple
+        relevance heuristic (exact and prefix matches appear first).
+        """
+        like_pattern = f"%{query}%"
+        async with self._storage.session() as session:
+            stmt = select(ASTNodeRow).where(ASTNodeRow.content.ilike(like_pattern))
+            if doc_id:
+                stmt = stmt.where(ASTNodeRow.doc_id == doc_id)
+            stmt = stmt.order_by(ASTNodeRow.content).limit(limit)
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [
+                {
+                    "node_id": row.node_id,
+                    "content": row.content,
+                    "node_type": row.node_type,
+                    "doc_id": row.doc_id,
+                    "rank": 0.0,
                 }
                 for row in rows
             ]

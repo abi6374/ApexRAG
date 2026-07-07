@@ -24,6 +24,12 @@ import logging
 import random
 from typing import Any
 
+from apex_rag.retrieval.conformal.calibrator import (
+    ConformalCalibrator,
+    MondorianConformalCalibrator,
+)
+from apex_rag.retrieval.conformal.scorer import NonconformityScorer
+
 logger = logging.getLogger("apex_rag.conformal.coverage")
 
 
@@ -77,8 +83,8 @@ class CoverageVerifier:
 
     def __init__(
         self,
-        calibrator: Any,
-        scorer: Any,
+        calibrator: ConformalCalibrator | MondorianConformalCalibrator,
+        scorer: NonconformityScorer,
         n_test: int = 500,
         tolerance: float = 0.02,
         seed: int = 42,

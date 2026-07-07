@@ -4,13 +4,11 @@ import uuid
 
 from apex_rag.core.ast.models import ASTNode, ASTNodeMetadata
 from apex_rag.core.protocols.interfaces import DocumentParser
-from apex_rag.graph.edges.models import GraphEdge
 
 
 class PythonCodeParser(DocumentParser):
     """
-    Parses Python source code into the Universal Document AST and extracts GraphEdges
-    for function calls and class definitions.
+    Parses Python source code into the Universal Document AST.
     """
 
     async def parse(self, file_path: str, **kwargs: typing.Any) -> ASTNode:
@@ -69,10 +67,12 @@ class PythonCodeParser(DocumentParser):
 
         return root
 
-    def extract_edges(self, _root: ASTNode) -> list[GraphEdge]:
+    def extract_edges(self, _root: ASTNode) -> list:
         """
-        Walks the AST (if we had fully mapped the AST.walk) to find function calls.
-        For demonstration, we mock extraction of a DEPENDS_ON edge.
+        Placeholder for AST-based edge extraction.
+
+        Intended to walk the parsed AST and discover function call edges
+        (CALLS, IMPORTS, DEPENDS_ON). Currently returns an empty list;
+        implement with a full AST walker when call-graph analysis is needed.
         """
-        edges: list[GraphEdge] = []
-        return edges
+        return []

@@ -96,7 +96,7 @@ class AccessControlAgent:
         self,
         name: str,
         rule_type: str,
-        expression: str,  # noqa: ARG002
+        expression: str | None = None,  # noqa: ARG002
         description: str | None = None,  # noqa: ARG002
     ) -> None:
         """
@@ -107,16 +107,20 @@ class AccessControlAgent:
         security reasons. This method now logs a deprecation warning and
         returns without storing anything.
 
+        The ``expression`` and ``description`` parameters are accepted for
+        backward compatibility but are ignored.
+
         Prefer ``define_policy_rule()`` with deterministic operators (EQ, NE,
         GT, LT, IN, NOT_IN, CONTAINS, STARTS_WITH, ENDS_WITH).
         """
+        _ = expression  # Accepted for backward compatibility
+        _ = description  # Accepted for backward compatibility
         logger.warning(
             "define_custom_rule() with rule_type '%s' is deprecated. "
             "Use define_policy_rule() instead. Rule '%s' not stored.",
             rule_type,
             name,
         )
-        return
 
     # ── Custom action evaluators ────────────────────────────────────────────
 
