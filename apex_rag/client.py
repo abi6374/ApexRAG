@@ -363,7 +363,9 @@ class ApexIndex:
                         }
                     )
             if page_entries:
-                result = self._storage.save_page_index_entries(page_entries)
+                result = self._storage.save_page_index_entries(
+                    page_entries, tenant_context="default"
+                )
                 if inspect.isawaitable(result):
                     await result
 
@@ -496,7 +498,9 @@ class ApexIndex:
                         }
                     )
             if page_entries:
-                result = self._storage.save_page_index_entries(page_entries)
+                result = self._storage.save_page_index_entries(
+                    page_entries, tenant_context="default"
+                )
                 if inspect.isawaitable(result):
                     await result
 

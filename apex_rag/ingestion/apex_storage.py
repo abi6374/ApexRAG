@@ -182,6 +182,12 @@ class KnowledgeEdgeRow(ApexBase):
     document, fact, temporal, version, citation, reasoning, policy, entity.
     Each row carries ``projections_json`` indicating which DAG(s) it belongs to.
 
+    Entity/citation DAG edges may reference entity names (e.g. ``entity:gdpr``)
+    as source/target node IDs rather than real AST node UUIDs.  For this reason
+    ``source_node_id`` and ``target_node_id`` do **not** carry a foreign key
+    constraint to ``apex_ast_nodes``.  Application-level cascade deletion is
+    handled in :meth:`ApexStorage.delete_document`.
+
     Backward compatible — ``CausalEdgeRow`` is an alias for this class.
     """
 
@@ -189,14 +195,12 @@ class KnowledgeEdgeRow(ApexBase):
 
     edge_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     source_node_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
+        String(255),
         nullable=False,
         index=True,
     )
     target_node_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
+        String(255),
         nullable=False,
         index=True,
     )
