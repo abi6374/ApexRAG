@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.4] — 2026-07-03
+## [1.0.4] — 2026-07-08
+
+### Added
+- Published stable release to PyPI as `apex-rag==1.0.4`.
+- Full `README.md` rewrite with complete API reference, CLI docs, enterprise usage examples, LangChain integration guide, and environment variable reference.
+- `.pypirc` publishing workflow documented in `PUBLISHING.md`.
 
 ### Changed
-- Version bump to satisfy PyPI deployment branch protection rule and trigger a fresh release pipeline.
+- `README.md` updated throughout to reflect v1.0.4 and the stable `EnterpriseClient` API introduced in v1.0.3.
+- Badge links updated to reflect current PyPI version.
 
 ## [1.0.3] — 2026-06-28
 

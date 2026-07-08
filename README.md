@@ -1,85 +1,116 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ApexRAG-v1.0.3-6366f1?style=for-the-badge" alt="ApexRAG">
-  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue?style=for-the-badge" alt="Python Version Support">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
-  <a href="https://pepy.tech/projects/apex-rag"><img src="https://static.pepy.tech/personalized-badge/apex-rag?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
+  <img src="https://img.shields.io/badge/ApexRAG-v1.0.4-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.4">
+  <img src="https://img.shields.io/pypi/v/apex-rag?style=for-the-badge&color=6366f1" alt="PyPI Version">
+  <img src="https://img.shields.io/pypi/pyversions/apex-rag?style=for-the-badge" alt="Python Versions">
+  <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License">
+  <a href="https://pepy.tech/projects/apex-rag"><img src="https://static.pepy.tech/personalized-badge/apex-rag?period=total&units=INTERNATIONAL_SYSTEM&left_color=black&right_color=6366f1&left_text=downloads" alt="PyPI Downloads"></a>
+</p>
+
+<h1 align="center">⚡ ApexRAG</h1>
+
+<p align="center">
+  <strong>High-Accuracy Structural Retrieval Infrastructure for Production AI.</strong><br>
+  <em>Stop guessing with vectors. Start navigating with agents.</em>
 </p>
 
 <p align="center">
-  <strong>The High-Accuracy, Local-First Structural Retrieval Infrastructure.</strong><br>
-  <em>Stop guessing with vectors. Start navigating with agents.</em>
+  <a href="https://pypi.org/project/apex-rag/">PyPI</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-api-reference">API Reference</a> •
+  <a href="#-cli-interface">CLI</a> •
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 ---
 
-## 🚀 Overview
+## 🔍 What is ApexRAG?
 
-**ApexRAG** is a **Multi-Agent, Structural Reasoning Engine** built for precise enterprise document reasoning and RAG deployments.
+**ApexRAG** is a **Multi-Agent, Structural Reasoning Engine** designed for precise enterprise document retrieval and production RAG deployments.
 
-Traditional RAG relies entirely on flat vector proximity search, chopping documents into arbitrary chunks. This approach destroys the document's logical hierarchy (like headings, sections, table boundaries, and document structures), leading to loss of context and hallucinations. 
+Traditional RAG pipelines rely on flat vector proximity — slicing documents into arbitrary chunks, destroying their logical hierarchy (headings, sections, tables, cross-references). This leads to **lost context** and **hallucinations**.
 
-ApexRAG resolves this by converting files into a strict **Universal Document AST (Abstract Syntax Tree)** and using an Orchestrator of specialized LLM Agents (Planner, Navigator, Critic) to explicitly navigate the document structure to retrieve exact, verifiable answers with rigorous confidence guarantees.
+ApexRAG solves this by:
 
-```mermaid
-graph TD
-    A[Document: PDF/MD/Code] -->|ApexParser| B[Universal AST Nodes]
-    B -->|SemanticModelBuilder| C[Semantic Signposts]
-    B -->|CausalGraphBuilder| D[Causal Knowledge Graph]
-    B & C & D -->|ApexStorage| E[(Database: SQLite/PG)]
-    
-    F[User Query] -->|QueryPlannerAgent| G[Sub-queries Plan]
-    G -->|ASTNavigationAgent| H[AST Tree Exploration & Verify]
-    H -->|EvaluationCriticAgent| I[Verify & Synthesize Answer]
-    I -->|ConformalPrediction| J[ApexAnswer with Confidence]
+1. **Parsing documents into a Universal AST** — a strict hierarchical tree that preserves every structural relationship.
+2. **Running a coordinated LLM Agent loop** — Planner → Navigator → Critic — that explicitly traverses the AST to find verifiable answers.
+3. **Guaranteeing confidence** — every answer comes with a statistically grounded coverage guarantee via Conformal Prediction.
+
+```
+Document (PDF/MD/Code/Image)
+        │
+        ▼ ApexParser
+  Universal AST Nodes ──► Semantic Signposts ──► Causal Knowledge Graph
+        │
+        ▼ ApexStorage (SQLite / PostgreSQL)
+
+User Query
+        │
+        ▼ QueryPlannerAgent  →  ASTNavigationAgent  →  EvaluationCriticAgent
+                                                              │
+                                                              ▼
+                                                  ApexAnswer + Confidence Score
 ```
 
 ---
 
-## 🏗️ The 3-Phase Architecture
+## 🏗️ Architecture
 
-### Phase 1: Structural Foundation
-- **Universal Document AST:** Parsed documents are structured into hierarchical trees (`ASTNode`), preserving exact paragraph-to-heading structures.
-- **Deterministic Retrievers:** Initial filtering uses keyword density, FTS5, and structural heading overlap to locate candidate nodes before any LLM calls.
-- **Strict Verification:** A `StrictLeafVerifier` engine empirically checks if a found node actually answers the query, serving as a firewall against hallucinations.
+### Phase 1 — Structural Foundation
 
-### Phase 2: Structural Reasoning Engine
-- **Multi-Agent Orchestrator:** Complex queries are broken down, navigated, and reviewed by a coordination loop:
-    - **Planner Agent:** Deconstructs complex, multi-hop queries into discrete sub-queries.
-    - **Navigator Agent:** Explores the AST tree and Semantic Map signposts to retrieve context for each sub-query.
-    - **Critic Agent:** Evaluates and audits retrieved context to ensure all sub-queries are addressed before synthesizing the final response.
-- **Structural Retrieval Graph (SRG):** Nodes have typed relations (e.g., `REFERENCES_TABLE`, `SUPERSEDES`), enabling non-linear reasoning.
+| Component | Description |
+|---|---|
+| **Universal Document AST** | Documents are parsed into typed `ASTNode` trees, preserving exact paragraph-to-heading and table-to-caption structures. |
+| **Deterministic Pre-Retrieval** | Keyword density scoring, FTS5 full-text search, and structural heading overlap narrow candidates before any LLM call — keeping costs low. |
+| **StrictLeafVerifier** | An empirical verification engine that checks whether a retrieved node actually answers the query, acting as a firewall against hallucinated evidence. |
 
-### Phase 3: Enterprise Ecosystem Platform
-- **Multi-Tenant RBAC:** Core SQLAlchemy models enforce strict data boundaries via `tenant_id` context.
-- **Distributed Ingestion:** A `DistributedIndexer` allows scaling document parsing across workers using Redis or Celery queues.
-- **Code Intelligence:** Includes a `PythonCodeParser` that extracts ASTs from source code files to enable precise code reasoning.
-- **OpenTelemetry:** Distributed tracing tracks every agent action (`[PLANNING]`, `[NAVIGATING]`) in production.
+### Phase 2 — Structural Reasoning Engine
+
+| Agent | Role |
+|---|---|
+| **Planner Agent** | Deconstructs complex, multi-hop queries into discrete sub-queries. |
+| **Navigator Agent** | Traverses AST nodes and Semantic Map signposts to retrieve grounded context for each sub-query. |
+| **Critic Agent** | Audits and scores the retrieved context, enforcing completeness before the final answer is synthesized. |
+
+The **Structural Retrieval Graph (SRG)** connects nodes via typed semantic edges (`REFERENCES_TABLE`, `SUPERSEDES`, `CAUSED_BY`), enabling non-linear multi-hop reasoning.
+
+### Phase 3 — Enterprise Ecosystem
+
+- **Multi-Tenant RBAC** — SQLAlchemy models enforce strict data boundaries via `tenant_id`. All queries are automatically scoped.
+- **Temporal Querying** — Query any document *as it was* at a specific point in time. Compare states across versions.
+- **Distributed Ingestion** — A `DistributedIndexer` scales document parsing across workers via Redis or Celery queues.
+- **Code Intelligence** — `PythonCodeParser` extracts ASTs from `.py` source files for precise code reasoning.
+- **OpenTelemetry Tracing** — Every agent action (`[PLANNING]`, `[NAVIGATING]`, `[EVALUATING]`) is traced and exportable to any OTLP backend.
 
 ---
 
 ## 📦 Installation
 
-Install the stable core library from PyPI:
-
 ```bash
 pip install apex-rag
 ```
 
-To install with specific features or optional dependencies:
+Install with optional feature extras:
 
 ```bash
-# Install with all extensions (web API, extra LLM SDKs, Postgres support)
+# All features
 pip install "apex-rag[all]"
 
-# Install specific features
-pip install "apex-rag[anthropic,groq,ollama]"  # Extra LLM Providers
-pip install "apex-rag[gemini]"                  # Google Gemini
-pip install "apex-rag[web]"                     # FastAPI server & CLI REPL
-pip install "apex-rag[telemetry]"               # OpenTelemetry exporter
-pip install "apex-rag[vectors]"                 # Vector embeddings (sentence-transformers)
-pip install "apex-rag[postgres]"                # PostgreSQL backend
+# Extra LLM providers
+pip install "apex-rag[anthropic]"    # Anthropic Claude
+pip install "apex-rag[groq]"         # Groq (ultra-fast inference)
+pip install "apex-rag[ollama]"       # Ollama (local models)
+pip install "apex-rag[gemini]"       # Google Gemini
+
+# Infrastructure
+pip install "apex-rag[web]"          # FastAPI REST server + Gradio UI
+pip install "apex-rag[postgres]"     # PostgreSQL backend (asyncpg)
+pip install "apex-rag[vectors]"      # Dense vector embeddings (sentence-transformers)
+pip install "apex-rag[telemetry]"    # OpenTelemetry OTLP exporter
+pip install "apex-rag[docling]"      # Advanced document parsing (Docling)
 ```
 
+**Requirements:** Python 3.10, 3.11, 3.12, or 3.13
 
 ---
 
@@ -90,139 +121,194 @@ import asyncio
 from apex_rag import ApexIndex
 
 async def main():
-    # 1. Initialize ApexIndex (defaults to Ollama local Llama3.1)
-    # Or use OpenAI: await ApexIndex.create(provider="openai", model="gpt-4o")
+    # Initialize with any supported LLM provider
     async with await ApexIndex.create(provider="openai", model="gpt-4o") as index:
-        
-        # 2. Ingest document (converts to AST, builds graph, embeds)
-        doc_id = await index.ingest("annual_report.pdf")
-        print(f"Ingested document with ID: {doc_id}")
-        
-        # 3. Query (runs Planner -> Navigator -> Critic agent loop)
-        answer = await index.query("What is the Q3 revenue change?", doc_id)
-        
-        # 4. View results & metadata
-        print("\n--- Answer ---")
-        print(answer.answer_text)
-        print(f"Confidence Guarantee: {answer.coverage_guarantee * 100:.1f}%")
-        print(f"Number of supporting packets: {answer.prediction_set_size}")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        # Ingest a document — converts to AST, builds graph, indexes
+        doc_id = await index.ingest("annual_report.pdf")
+        print(f"Ingested: {doc_id}")
+
+        # Query — runs Planner → Navigator → Critic agent loop
+        answer = await index.query("What was the Q3 revenue change?", doc_id)
+
+        print(answer.answer_text)
+        print(f"Confidence: {answer.coverage_guarantee * 100:.1f}%")
+        print(f"Supporting evidence packets: {answer.prediction_set_size}")
+
+asyncio.run(main())
+```
+
+### Supported LLM Providers
+
+```python
+# OpenAI (default)
+await ApexIndex.create(provider="openai", model="gpt-4o")
+
+# Anthropic Claude
+await ApexIndex.create(provider="anthropic", model="claude-3-5-sonnet-20241022")
+
+# Groq (fast inference)
+await ApexIndex.create(provider="groq", model="llama-3.1-70b-versatile")
+
+# Ollama (local, no API key)
+await ApexIndex.create(provider="ollama", model="llama3.1")
+
+# Google Gemini
+await ApexIndex.create(provider="gemini", model="gemini-1.5-pro")
 ```
 
 ---
 
-## 📖 Complete API Usage Guide
+## 📖 API Reference
 
-### 1. Advanced Ingestion Options
-
-You can ingest raw files, markdown text, or batches of files concurrently:
+### Ingestion
 
 ```python
-# Ingest raw text/markdown directly
+# Ingest a file (PDF, DOCX, MD, TXT, Python source, images)
+doc_id = await index.ingest("financial_report.pdf")
+
+# Ingest raw markdown/text directly
 doc_id = await index.ingest_text(
-    text="# Q3 Report\nRevenue grew by 15%.\n## Performance\nDetail notes...",
-    doc_id="report_q3"
+    text="# Q3 Report\nRevenue grew by 15%.\n## Details\n...",
+    doc_id="report_q3_2025"
 )
 
-# Batch Ingestion of files and texts concurrently
+# Concurrent batch ingestion
 doc_ids = await index.ingest_many([
-    ("doc_1", "annual_report.pdf"),
-    ("doc_2", "## Release Notes\nNo downtime recorded.")
+    ("finance_q3", "q3_report.pdf"),
+    ("release_v2", "## Release Notes\nNo downtime recorded."),
 ])
 ```
 
-### 2. Answer Token Streaming
-
-Stream reasoning responses token-by-token for responsive client interfaces:
+### Querying
 
 ```python
+# Standard agentic query
+answer = await index.query("What is the net profit margin?", doc_id)
+
+# Domain-tuned hybrid search (enables FTS5 + LLM with domain-specific freshness decay)
+answer = await index.query("Current pricing", doc_id, domain="financial")
+# Available domains: "general" (default), "financial", "legal", "analytical"
+
+# Global query across all indexed documents
+results = await index.query_global("Summarize all revenue figures")
+
+# Streaming — token-by-token response
 async for token in index.stream_query("Compare Q2 and Q3 revenue", doc_id):
     print(token, end="", flush=True)
 ```
 
-### 3. Enterprise Temporal (Time-Travel) Querying
+### Document Inspection
 
-Query the document repository as of a specific point in time or compare states across versions:
+```python
+# Get the full AST tree for a document
+tree = await index.get_tree(doc_id)
+
+# List all indexed documents
+docs = await index.list_documents()
+
+# Get document metadata
+info = await index.get_document_info(doc_id)
+
+# Delete a document and all its data
+await index.delete(doc_id)
+```
+
+### Causal Graph
+
+```python
+import networkx as nx
+
+# Retrieve the causal knowledge graph built during ingestion
+graph: nx.DiGraph = await index.get_causal_graph()
+
+for source, target, data in graph.edges(data=True):
+    print(f"[{source}] --({data['type']})--> [{target}]  strength={data['strength']}")
+```
+
+---
+
+## 🏢 Enterprise Features
+
+Enterprise features are accessed via the `index.enterprise` property.
+
+### Temporal Querying (Time Travel)
 
 ```python
 from datetime import datetime, timezone
 
-# Query the state of a document as it was on a specific date
-result = await index.temporal_query(
-    question="What is the active product pricing?",
+enterprise = index.enterprise
+
+# Query the document as it was on a specific date
+result = await enterprise.temporal_query(
+    question="What was the active product pricing?",
     doc_id=doc_id,
     as_of=datetime(2025, 6, 1, tzinfo=timezone.utc)
 )
-print(result["result"])  # The resolved text answer
+print(result["result"])      # Resolved answer
 print(result["provenance"])  # Version history metadata
 
-# Compare document/metric states between two points in time
-comparison = await index.temporal_compare(
-    question="Check pricing changes",
+# Compare two points in time
+comparison = await enterprise.temporal_compare(
+    question="How did pricing change?",
     doc_id=doc_id,
     date_a=datetime(2025, 1, 1, tzinfo=timezone.utc),
     date_b=datetime(2025, 6, 1, tzinfo=timezone.utc)
 )
 ```
 
-### 4. Enterprise RBAC & Role-Aware Querying
-
-Restrict retrieval context dynamically based on user identity, roles, and tenants:
+### Role-Based Access Control (RBAC)
 
 ```python
 from apex_rag import TenantContext
 
-# Setup Tenant and Role credentials
 tenant_ctx = TenantContext(
     tenant_id="enterprise-co",
     user_id="user_948",
     roles=["FinanceManager"]
 )
 
-# Execute role-aware query (performs masking and node access validation)
-answer = await index.role_aware_query(
-    question="Summarize executive bonuses",
+# Query is automatically scoped to the user's accessible nodes
+answer = await enterprise.role_aware_query(
+    question="Summarize executive compensation",
     doc_id=doc_id,
     tenant_context=tenant_ctx
 )
 print(answer.answer_text)
 ```
 
-### 5. Causal Graph Reasoning
-
-Extract the underlying causal relationship graph constructed automatically during ingestion:
+### Version History
 
 ```python
-import networkx as nx
+# Get version history for a specific node
+history = await enterprise.get_version_history(node_id)
 
-# Retrieve full causal knowledge graph
-graph: nx.DiGraph = await index.get_causal_graph()
-
-# Inspect graph relationships
-for source, target, data in graph.edges(data=True):
-    print(f"[{source}] --({data['type']})--> [{target}] (Strength: {data['strength']})")
+# Get full version lineage
+lineage = await enterprise.get_version_lineage(node_id)
 ```
 
 ---
 
 ## 🛠️ CLI Interface
 
-ApexRAG includes a powerful command-line interface to manage files, test queries, and run the API server.
-
 ```bash
-# Start the FastAPI REST API server
+# Start the FastAPI REST API server (requires apex-rag[web])
 python -m apex_rag serve --port 8000
 
-# Ingest a file from the CLI
-python -m apex_rag ingest financial_report.pdf --doc-id finance-2025
+# Ingest a file
+python -m apex_rag ingest financial_report.pdf --doc-id finance-q3
 
 # Query an ingested document
-python -m apex_rag query finance-2025 "Compare Q2 and Q3 revenue"
+python -m apex_rag query finance-q3 "Compare Q2 and Q3 revenue"
 
-# Stream query response
-python -m apex_rag stream finance-2025 "What is our tax rate?"
+# Stream a query response
+python -m apex_rag stream finance-q3 "What is our effective tax rate?"
+
+# List all indexed documents
+python -m apex_rag list
+
+# Get document info
+python -m apex_rag info finance-q3
 
 # Open interactive REPL session
 python -m apex_rag repl
@@ -233,18 +319,92 @@ python -m apex_rag doctor
 
 ---
 
-## 📦 CI/CD & Automated Publishing
+## 🔗 LangChain Integration
 
-ApexRAG leverages automated GitHub Actions workflows to test code and manage deployments cleanly:
-- **Comprehensive Testing:** Unit tests, lint verification, and wheel build checks run automatically on every pull request across Python `3.10`, `3.11`, and `3.12`.
-- **Manual Versioning & Clean Deployment:**
-  1. Bump version locally in `pyproject.toml` (e.g. from `1.0.3` to `1.0.4`).
-  2. Push the commit to the `main` branch.
-  3. The CI/CD pipeline inspects the remote repository using `git ls-remote` to see if a release tag for this version exists.
-  4. If the version is new, the pipeline tags the commit (e.g., `v1.0.4`), pushes the tag back to the remote repository, builds sdist & wheel packages, and deploys it to PyPI automatically.
-  5. If the version hasn't changed, it exits cleanly without creating unnecessary bot commits or duplicate builds.
+```python
+from apex_rag.integrations.langchain import ApexRAGRetriever
+from langchain.chains import RetrievalQA
+from langchain_openai import ChatOpenAI
+
+retriever = ApexRAGRetriever(index=index, doc_id=doc_id)
+
+chain = RetrievalQA.from_chain_type(
+    llm=ChatOpenAI(model="gpt-4o"),
+    retriever=retriever
+)
+
+result = chain.invoke({"query": "What are the key financial risks?"})
+print(result["result"])
+```
+
+---
+
+## ⚙️ Configuration
+
+ApexRAG is configured via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `APEX_DB_URL` | `sqlite+aiosqlite:///./apex_rag.db` | Database connection URL |
+| `APEX_DATA_DIR` | `.` | Data directory for file storage |
+| `APEX_API_KEY` | `None` | API key for endpoint authentication |
+| `APEX_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
+| `APEX_RATE_LIMIT` | `60/minute` | Request rate limit |
+| `APEX_MAX_UPLOAD_MB` | `50` | Max upload file size in MB |
+| `APEX_LOG_FORMAT` | `rich` | Log format: `rich` or `json` |
+| `APEX_LOG_LEVEL` | `INFO` | Log level |
+| `APEX_TRACE_ENABLED` | `true` | Enable agent navigation trace output |
+| `APEX_DB_POOL_SIZE` | `10` | Database connection pool size |
+| `APEX_DB_MAX_OVERFLOW` | `20` | Max overflow connections |
+| `APEX_OLLAMA_TIMEOUT` | `120` | Ollama request timeout (seconds) |
+
+---
+
+## 📄 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+### v1.0.4 — Latest
+- Stable release aligned with git tag `v1.0.4`.
+
+### v1.0.3
+- **`EnterpriseClient`** introduced — temporal queries, RBAC, and version history extracted from `ApexIndex` into `index.enterprise`.
+- **API stabilization** — dead parameters removed, exports cleaned to 11 public symbols.
+- **Circular import fix** — lazy import on `ApexIndex.enterprise`.
+
+### v1.0.0
+- Production-stable release.
+- Conformal Prediction confidence guarantees.
+- Structural Retrieval Graph (SRG) with typed semantic edges.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+# Clone and set up dev environment
+git clone https://github.com/abi6374/apexrag.git
+cd apexrag
+python -m venv .venv && .venv\Scripts\activate  # Windows
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Lint
+ruff check .
+```
 
 ---
 
 ## 📄 License
-MIT License. Copyright (c) 2026.
+
+MIT License — Copyright © 2026 G S Abinivas. See [LICENSE](LICENSE) for full text.
+
+---
+
+<p align="center">
+  Built with ❤️ by <a href="https://github.com/abi6374">G S Abinivas</a>
+</p>
