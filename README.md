@@ -2,6 +2,7 @@
   <img src="https://img.shields.io/badge/ApexRAG-v1.0.3-6366f1?style=for-the-badge" alt="ApexRAG">
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue?style=for-the-badge" alt="Python Version Support">
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License">
+  <a href="https://pepy.tech/projects/apex-rag"><img src="https://static.pepy.tech/personalized-badge/apex-rag?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
 </p>
 
 <p align="center">
