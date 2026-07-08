@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ApexRAG Index — {{ doc_id }}</title>
 {{ common_styles }}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
 .page-header { display:flex; align-items:center; gap:16px; padding: 28px 40px 0; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
 .back-btn { color: var(--accent); text-decoration:none; font-size:.9rem; }
@@ -24,7 +25,8 @@
 
 /* Tabs */
 .tabs { display: flex; gap: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
-.tab { padding: 8px 4px; color: var(--muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; }
+.tab { padding: 8px 4px; color: var(--muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; user-select: none; }
+.tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
@@ -61,6 +63,25 @@
 .trace-line.result { border-left-color: var(--grad); margin-top: 12px; padding: 12px; background: rgba(99,102,241,0.1); border-radius: 4px; }
 .trace-timestamp { color: var(--muted); font-size: 0.7rem; margin-right: 8px; }
 
+/* DAG Tab */
+.dag-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.dag-toolbar select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; color: var(--text); font-size: 0.85rem; outline: none; cursor: pointer; }
+.dag-toolbar select:focus { border-color: var(--accent); }
+.dag-toolbar label { font-size: 0.85rem; font-weight: 600; }
+.dag-btn { background: var(--accent); color: white; border: none; border-radius: 6px; padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+.dag-btn:hover { opacity: 0.85; }
+.dag-btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.dag-btn-outline:hover { border-color: var(--accent); color: var(--accent); opacity: 1; }
+.dag-stats { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+.dag-stats strong { color: var(--accent); }
+.dag-canvas { width: 100%; height: 520px; background: #0a0a0f; border: 1px solid var(--border); border-radius: 12px; position: relative; overflow: hidden; }
+.dag-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9rem; gap: 8px; }
+.dag-loading .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.dag-legend { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.dag-legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--muted); }
+.dag-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
 /* Alpha index */
 .alpha-letter { font-size:1.1rem; font-weight:800; color:var(--accent); margin:16px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }
 .alpha-entry { display:flex; align-items:baseline; gap:8px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04); }
@@ -93,6 +114,7 @@
     <div class="tabs">
       <div class="tab active" onclick="switchTab('tree')">Decision Tree</div>
       <div class="tab" onclick="switchTab('query')">Agentic Query</div>
+      <div class="tab" onclick="switchTab('dag')">🕸️ Graph</div>
     </div>
     
     <div id="tree-content" class="tab-content active">
@@ -112,6 +134,39 @@
         <div class="trace-line" style="color:var(--muted)">The agent's reasoning trace will appear here in real-time.</div>
       </div>
     </div>
+
+    <div id="dag-content" class="tab-content">
+      <div class="panel-title">🕸️ Knowledge Graph <span>Visualization</span></div>
+      <div class="dag-toolbar">
+        <label for="docDagProjection">Projection:</label>
+        <select id="docDagProjection">
+          <option value="document">Document</option>
+          <option value="entity">Entity</option>
+          <option value="citation">Citation</option>
+          <option value="temporal">Temporal</option>
+          <option value="version">Version</option>
+          <option value="policy">Policy</option>
+          <option value="fact">Fact</option>
+          <option value="reasoning">Reasoning</option>
+        </select>
+        <button class="dag-btn" onclick="loadDocDAG()">Load</button>
+        <button class="dag-btn dag-btn-outline" onclick="resetDocDAG()">Reset View</button>
+        <button class="dag-btn dag-btn-outline" onclick="toggleDocDAGPhysics()" id="docDagPhysicsBtn">Pause Physics</button>
+        <span class="dag-stats">Nodes: <strong id="docDagNodeCount">—</strong> &nbsp; Edges: <strong id="docDagEdgeCount">—</strong></span>
+      </div>
+      <div class="dag-canvas" id="docDagCanvas">
+        <div class="dag-loading" id="docDagLoading">
+          <div class="spinner"></div>
+          <span>Select a projection and click Load</span>
+        </div>
+      </div>
+      <div class="dag-legend">
+        <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#6366f1"></div> Heading</div>
+        <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#34d399"></div> Content</div>
+        <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#f59e0b"></div> Code/Table</div>
+        <div class="dag-legend-item"><span style="color:var(--muted)">→</span> Edge type label</div>
+      </div>
+    </div>
   </div>
 
   <div class="index-panel">
@@ -128,13 +183,14 @@ const DOC_ID = "{{ doc_id }}";
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  
-  if (tab === 'tree') {
-    document.querySelector('.tab:nth-child(1)').classList.add('active');
-    document.getElementById('tree-content').classList.add('active');
-  } else {
-    document.querySelector('.tab:nth-child(2)').classList.add('active');
-    document.getElementById('query-content').classList.add('active');
+  const tabs = document.querySelectorAll('.tab');
+  const contents = ['tree-content', 'query-content', 'dag-content'];
+  const idx = { tree: 0, query: 1, dag: 2 }[tab] || 0;
+  tabs[idx].classList.add('active');
+  document.getElementById(contents[idx]).classList.add('active');
+  // Auto-load DAG if switching to that tab for the first time
+  if (tab === 'dag' && !window._dagLoaded) {
+    setTimeout(loadDocDAG, 100);
   }
 }
 
@@ -256,6 +312,140 @@ async function runQuery() {
     btn.disabled = false;
     log.scrollTop = log.scrollHeight;
   }
+}
+
+// ── Document DAG Visualization ─────────────────────────────────────
+
+let docDagNetwork = null;
+let docDagPhysicsRunning = true;
+
+function getNodeColor(node) {
+  const type = (node.node_type || '').toUpperCase();
+  if (type === 'HEADING') return '#6366f1';
+  if (type === 'PARAGRAPH' || type === 'LEAF') return '#34d399';
+  if (type === 'CODE' || type === 'TABLE') return '#f59e0b';
+  if (type === 'IMAGE' || type === 'LIST') return '#06b6d4';
+  return '#6b6e8a';
+}
+
+function getNodeSize(node) {
+  const type = (node.node_type || '').toUpperCase();
+  if (type === 'HEADING') return 28;
+  if (type === 'PARAGRAPH') return 18;
+  if (type === 'CODE') return 22;
+  if (type === 'TABLE') return 24;
+  return 16;
+}
+
+function getNodeShape(node) {
+  const type = (node.node_type || '').toUpperCase();
+  if (type === 'HEADING') return 'star';
+  if (type === 'CODE') return 'box';
+  if (type === 'TABLE') return 'diamond';
+  return 'dot';
+}
+
+function getEdgeColor(type) {
+  const t = (type || '').toUpperCase();
+  if (t === 'SUPPORTS' || t === 'REFINES') return '#34d399';
+  if (t === 'CONTRADICTS' || t === 'OVERRIDES') return '#ef4444';
+  if (t === 'REFERENCES' || t === 'CITES') return '#f59e0b';
+  if (t === 'SUCCESSOR' || t === 'PREDECESSOR' || t === 'VERSION_OF') return '#06b6d4';
+  if (t === 'DEPENDS_ON' || t === 'REQUIRES') return '#a855f7';
+  if (t === 'REASONING_CHAIN' || t === 'DERIVES_FROM' || t === 'INFERS') return '#f97316';
+  return '#6b6e8a';
+}
+
+async function loadDocDAG() {
+  window._dagLoaded = true;
+  const projection = document.getElementById('docDagProjection').value;
+  const loadingEl = document.getElementById('docDagLoading');
+
+  loadingEl.style.display = 'flex';
+  loadingEl.innerHTML = '<div class="spinner"></div><span>Loading ' + projection + ' graph...</span>';
+
+  try {
+    const resp = await fetch('/documents/' + DOC_ID + '/graph/' + projection + '?limit=500');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    if (!data.edges || data.edges.length === 0) {
+      loadingEl.style.display = 'flex';
+      loadingEl.innerHTML = '⚠️ No ' + projection + ' edges found for this document.';
+      document.getElementById('docDagNodeCount').textContent = '0';
+      document.getElementById('docDagEdgeCount').textContent = '0';
+      return;
+    }
+
+    loadingEl.style.display = 'none';
+
+    const nodes = new vis.DataSet(data.nodes.map(n => ({
+      id: n.id,
+      label: n.label || n.id.substring(0, 8),
+      title: '<b>' + (n.label || n.id.substring(0, 8)) + '</b><br>Type: ' + (n.node_type || 'unknown') + '<br>Page: ' + (n.page_number || '—') + '<br>ID: ' + n.id,
+      color: { background: getNodeColor(n), border: '#2a2a3a' },
+      shape: getNodeShape(n),
+      size: getNodeSize(n),
+      font: { color: '#e2e4f0', size: 11, strokeWidth: 0 },
+      borderWidth: 1.5,
+    })));
+
+    const edges = new vis.DataSet(data.edges.map(e => ({
+      id: e.id,
+      from: e.source,
+      to: e.target,
+      label: e.type,
+      title: '<b>' + e.type + '</b><br>Strength: ' + e.strength.toFixed(2),
+      color: { color: getEdgeColor(e.type), highlight: '#fff', hover: '#fff' },
+      width: Math.max(1, Math.min(4, e.strength * 3)),
+      font: { color: '#6b6e8a', size: 9, strokeWidth: 0, align: 'middle' },
+      arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+      smooth: { type: 'continuous' },
+    })));
+
+    const container = document.getElementById('docDagCanvas');
+    const options = {
+      nodes: { borderWidthSelected: 2.5 },
+      edges: { smooth: { type: 'continuous' } },
+      physics: {
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 180, springConstant: 0.04, damping: 0.6 },
+        stabilization: { iterations: 100 },
+      },
+      interaction: { hover: true, tooltipDelay: 100, navigationButtons: true, keyboard: true },
+      layout: { improvedLayout: true },
+    };
+
+    if (docDagNetwork) docDagNetwork.destroy();
+    docDagNetwork = new vis.Network(container, { nodes, edges }, options);
+    docDagPhysicsRunning = true;
+    document.getElementById('docDagPhysicsBtn').textContent = 'Pause Physics';
+
+    docDagNetwork.once('stabilizationIterationsDone', () => {
+      docDagNetwork.setOptions({ physics: false });
+      docDagPhysicsRunning = false;
+      document.getElementById('docDagPhysicsBtn').textContent = 'Start Physics';
+    });
+
+    document.getElementById('docDagNodeCount').textContent = data.node_count;
+    document.getElementById('docDagEdgeCount').textContent = data.edge_count;
+
+  } catch (err) {
+    loadingEl.style.display = 'flex';
+    loadingEl.innerHTML = '⚠️ Error: ' + err.message;
+  }
+}
+
+function resetDocDAG() {
+  if (docDagNetwork) docDagNetwork.fit({ animation: { duration: 300, easingFunction: 'easeOutQuad' } });
+}
+
+function toggleDocDAGPhysics() {
+  if (!docDagNetwork) return;
+  const btn = document.getElementById('docDagPhysicsBtn');
+  docDagPhysicsRunning = !docDagPhysicsRunning;
+  docDagNetwork.setOptions({ physics: docDagPhysicsRunning });
+  btn.textContent = docDagPhysicsRunning ? 'Pause Physics' : 'Start Physics';
 }
 </script>
 </body></html>

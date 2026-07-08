@@ -47,6 +47,11 @@ from apex_rag.agents.planner.agent import QueryPlannerAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.exceptions import DocumentNotFoundError
+from apex_rag.graph.dags.citation_dag import CitationDagBuilder
+from apex_rag.graph.dags.document_dag import DocumentDagBuilder
+from apex_rag.graph.dags.entity_dag import EntityDagBuilder
+from apex_rag.graph.dags.policy_dag import PolicyDagBuilder
+from apex_rag.graph.dags.temporal_dag import TemporalDagBuilder
 from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 from apex_rag.ingestion.apex_parser import ApexParser
 from apex_rag.ingestion.apex_storage import ApexStorage
@@ -56,7 +61,9 @@ from apex_rag.ingestion.semantic_model_builder import SemanticModelBuilder
 from apex_rag.models.unified_models import (  # noqa: F401
     ApexAnswer,
     ASTNode,
+    DagProjection,
     EvidencePacket,
+    KnowledgeEdge,
     NodeType,
 )
 from apex_rag.observability.accuracy_tracker import accuracy_tracker
@@ -206,6 +213,12 @@ class ApexIndex:
         temporal_auditor = TemporalAuditAgent()
         conformal_wrapper = ConformalWrapperAgent(coverage_level=0.90)
 
+        # ── Planning Pipeline Agents (Knowledge, Role, Temporal) ──────
+        from apex_rag.agents.planner.knowledge import KnowledgePlannerAgent
+        from apex_rag.agents.planner.role import RolePlannerAgent
+        from apex_rag.agents.planner.temporal import TemporalPlannerAgent
+        from apex_rag.graph.dags.reasoning_dag import ReasoningDagBuilder
+
         orchestrator = ApexOrchestrator(
             planner=planner,
             navigator=navigator,
@@ -213,6 +226,10 @@ class ApexIndex:
             synthesizer=synthesizer,
             temporal_auditor=temporal_auditor,
             conformal_wrapper=conformal_wrapper,
+            reasoning_dag_builder=ReasoningDagBuilder(storage),
+            knowledge_planner=KnowledgePlannerAgent(),
+            role_planner=RolePlannerAgent(),
+            temporal_planner=TemporalPlannerAgent(),
         )
 
         return cls(
@@ -293,7 +310,47 @@ class ApexIndex:
             for edge in edges:
                 await self._storage.save_causal_edge(edge.to_causal_edge())
 
-            # 6. Page Index Generation (Book-style index for headings)
+            # 6. Knowledge DAG Builders (deterministic edge generation)
+            document_builder = DocumentDagBuilder(self._storage)
+            doc_edges = await document_builder.build(
+                nodes, doc_id=resolved_doc_id, tenant_id="default"
+            )
+            for edge in doc_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            entity_builder = EntityDagBuilder(self._storage)
+            entity_edges = await entity_builder.build(
+                nodes, doc_id=resolved_doc_id, tenant_id="default"
+            )
+            for edge in entity_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            citation_builder = CitationDagBuilder(self._storage)
+            citation_edges = await citation_builder.build(
+                nodes, doc_id=resolved_doc_id, tenant_id="default"
+            )
+            for edge in citation_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            temporal_builder = TemporalDagBuilder(self._storage)
+            temporal_edges = await temporal_builder.build(
+                nodes, doc_id=resolved_doc_id, tenant_id="default"
+            )
+            for edge in temporal_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            policy_builder = PolicyDagBuilder(self._storage)
+            policy_edges = await policy_builder.build(
+                nodes, doc_id=resolved_doc_id, tenant_id="default"
+            )
+            for edge in policy_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            # FactDAG is populated asynchronously by the FactPipeline after fact extraction.
+
+            # ReasoningDAG is built at query time via ApexOrchestrator.
+
+            # 7. Page Index Generation (Book-style index for headings)
             page_entries = []
             for node in nodes:
                 if node.node_type == NodeType.HEADING:
@@ -310,12 +367,16 @@ class ApexIndex:
                 if inspect.isawaitable(result):
                     await result
 
-            # 7. Non-blocking fact extraction (enqueue, don't await processing)
+            # 8. Non-blocking fact extraction (enqueue, trigger processing)
             pipeline = self._get_fact_pipeline()
             await pipeline.enqueue_document(resolved_doc_id, nodes, tenant_id="default")
 
+            # Fire-and-forget: trigger immediate fact processing for this document
+            # (FactDAG edges are built inside _process_single_job)
+            asyncio.create_task(pipeline.process_pending_jobs(max_jobs=5))
+
             logger.info(
-                "Ingested document %s: %d nodes (fact extraction enqueued)",
+                "Ingested document %s: %d nodes (fact extraction enqueued, job triggered)",
                 resolved_doc_id,
                 len(nodes),
             )
@@ -371,10 +432,56 @@ class ApexIndex:
             # 4. Causal Edge Discovery
             edges = await self._graph_builder.build_all(nodes)
 
-            # 5. Persistence (Save nodes first to satisfy foreign keys)
+            # 5a. Persistence (Save nodes first to satisfy foreign keys)
             await self._storage.save_nodes(nodes, tenant_context="default")
             for edge in edges:
                 await self._storage.save_causal_edge(edge.to_causal_edge())
+
+            # 5b. EntityDAG — entity extraction and linking
+            entity_builder = EntityDagBuilder(self._storage)
+            entity_edges = await entity_builder.build(
+                nodes, doc_id=doc_id, tenant_id="default"
+            )
+            for edge in entity_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            # 5c. CitationDAG — citation and cross-reference linking
+            citation_builder = CitationDagBuilder(self._storage)
+            citation_edges = await citation_builder.build(
+                nodes, doc_id=doc_id, tenant_id="default"
+            )
+            for edge in citation_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            # 5d. DocumentDAG — structural tree edges
+            document_builder = DocumentDagBuilder(self._storage)
+            doc_edges = await document_builder.build(
+                nodes, doc_id=doc_id, tenant_id="default"
+            )
+            for edge in doc_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            # 5e. TemporalDAG — chronological ordering edges
+            temporal_builder = TemporalDagBuilder(self._storage)
+            temporal_edges = await temporal_builder.build(
+                nodes, doc_id=doc_id, tenant_id="default"
+            )
+            for edge in temporal_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            # 5f. PolicyDAG — policy/regulation extraction edges
+            policy_builder = PolicyDagBuilder(self._storage)
+            policy_edges = await policy_builder.build(
+                nodes, doc_id=doc_id, tenant_id="default"
+            )
+            for edge in policy_edges:
+                await self._storage.save_knowledge_edge(edge)
+
+            # 5g. FactDAG — fact relationship edges (requires pipeline facts)
+            # Facts are extracted asynchronously via the FactPipeline — FactDAG
+            # edges will be populated as a background job after fact extraction.
+
+            # 5h. ReasoningDAG is built at query time via ApexOrchestrator.
 
             # 6. Page Index Generation (Book-style index for headings)
             page_entries = []
@@ -393,12 +500,15 @@ class ApexIndex:
                 if inspect.isawaitable(result):
                     await result
 
-            # 7. Non-blocking fact extraction (enqueue, don't await processing)
+            # 7. Non-blocking fact extraction (enqueue, trigger processing)
             pipeline = self._get_fact_pipeline()
             await pipeline.enqueue_document(doc_id, nodes, tenant_id="default")
 
+            # Fire-and-forget: trigger immediate fact processing for this document
+            asyncio.create_task(pipeline.process_pending_jobs(max_jobs=5))
+
             logger.info(
-                "Ingested text %s: %d nodes (fact extraction enqueued)",
+                "Ingested text %s: %d nodes (fact extraction enqueued, job triggered)",
                 doc_id,
                 len(nodes),
             )
@@ -437,6 +547,7 @@ class ApexIndex:
         ablation_mode: bool = False,
         event_queue: asyncio.Queue[Any] | None = None,
         tenant_context: TenantContext | None = None,
+        external_trace_id: str | None = None,
     ) -> ApexAnswer:
         """
         Query the index with a mathematically rigorous confidence guarantee.
@@ -447,6 +558,8 @@ class ApexIndex:
             coverage: Target conformal coverage level (e.g. 0.90).
             domain:   Strategic domain for freshness decay ("legal", "financial", etc.).
             ablation_mode: Run in Baseline C mode (AST only).
+            external_trace_id: Optional trace_id for external SSE listeners
+                               to receive real-time trace events.
 
         Returns:
             An :class:`ApexAnswer` containing the text, evidence, and coverage info.
@@ -463,6 +576,7 @@ class ApexIndex:
             domain=domain,
             ablation_mode=ablation_mode,
             tenant_context=tenant_context,
+            external_trace_id=external_trace_id,
         )
 
         if answer is None:
@@ -562,6 +676,87 @@ class ApexIndex:
         return best_answer
 
     # -- Research & Explainability API --------------------------------------
+
+    async def get_edges_by_projection(
+        self,
+        projection: str | DagProjection,
+        *,
+        doc_id: str | None = None,
+        node_id: str | None = None,
+        limit: int = 500,
+    ) -> list[KnowledgeEdge]:
+        """Fetch knowledge edges filtered by DAG projection tag.
+
+        Args:
+            projection: DAG projection tag (e.g. ``"entity"``, ``"citation"``,
+                        or a :class:`DagProjection` enum value).
+            doc_id:     Optional — restrict to edges for a specific document.
+            node_id:    Optional — restrict to edges involving a specific node.
+            limit:      Maximum results (default 500).
+
+        Returns:
+            A list of :class:`KnowledgeEdge` objects matching the projection.
+
+        Example:
+            >>> entity_edges = await index.get_edges_by_projection("entity")
+            >>> citation_edges = await index.get_edges_by_projection(
+            ...     DagProjection.CITATION, doc_id="doc-123"
+            ... )
+        """
+        proj_str = projection.value if isinstance(projection, DagProjection) else projection
+        return await self._storage.get_edges_by_projection(
+            proj_str,
+            doc_id=doc_id,
+            node_id=node_id,
+            tenant_context="default",
+            limit=limit,
+        )
+
+    async def get_projection_graph(
+        self,
+        projection: str | DagProjection,
+        *,
+        doc_id: str | None = None,
+        node_id: str | None = None,
+        limit: int = 500,
+    ) -> nx.DiGraph:
+        """Construct a NetworkX graph from edges matching a DAG projection.
+
+        Same filtering as :meth:`get_edges_by_projection`, but returns a
+        NetworkX :class:`nx.DiGraph` for traversal and visualization.
+
+        Args:
+            projection: DAG projection tag (string or enum value).
+            doc_id:     Optional document filter.
+            node_id:    Optional node filter.
+            limit:      Maximum edges.
+
+        Returns:
+            A :class:`nx.DiGraph` with edges annotated with metadata.
+        """
+        edges = await self.get_edges_by_projection(
+            projection,
+            doc_id=doc_id,
+            node_id=node_id,
+            limit=limit,
+        )
+        graph = nx.DiGraph()
+        for edge in edges:
+            graph.add_edge(
+                edge.source_node_id,
+                edge.target_node_id,
+                edge_id=edge.edge_id,
+                type=edge.edge_type,
+                strength=edge.strength,
+                evidence=edge.evidence,
+                projections=edge.projections,
+            )
+        logger.info(
+            "Projection graph '%s': %d edges",
+            projection if isinstance(projection, str) else projection.value,
+            len(edges),
+        )
+        return graph
 
     async def get_causal_graph(self) -> nx.DiGraph:
         """

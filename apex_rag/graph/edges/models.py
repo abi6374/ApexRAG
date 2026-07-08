@@ -12,7 +12,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from apex_rag.models.unified_models import CausalEdge, EdgeType
+from apex_rag.models.unified_models import EdgeType, KnowledgeEdge
+
+# Backward-compatible alias — CausalEdge is now KnowledgeEdge
+from apex_rag.models.unified_models import KnowledgeEdge as CausalEdge
 
 # ── Extended relation types beyond the base EdgeType ─────────────────
 
@@ -55,9 +58,12 @@ class GraphEdge(BaseModel):
     """A lightweight, serialisable relationship between two ASTNodes.
 
     This is the high-level edge model used by the :class:`CausalGraphBuilder`
-    and :class:`CausalRetriever`.  It mirrors the core :class:`CausalEdge`
+    and :class:`CausalRetriever`.  It mirrors the core :class:`KnowledgeEdge`
     but allows a wider ``relation_type`` vocabulary and carries an optional
     ``metadata`` dict for SRG extensions.
+
+    Supports DAG projections via the ``projections`` field — edges can
+    belong to one or more DAGs (e.g. ``["document"]``, ``["entity", "citation"]``).
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -67,6 +73,10 @@ class GraphEdge(BaseModel):
     strength: float = Field(default=0.5, ge=0.0, le=1.0)
     evidence: str = Field(default="", description="Human-readable reasoning")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    projections: list[str] = Field(
+        default_factory=lambda: ["document"],
+        description="DAG projection tags for the Knowledge DAG",
+    )
 
     # ── Converters ─────────────────────────────────────────────────────
 
@@ -76,20 +86,34 @@ class GraphEdge(BaseModel):
         The ``edge_type`` is narrowed to the base :class:`EdgeType`; any
         SRG-specific type (e.g. ``REFERENCES_TABLE``) is stored as
         ``SUPPORTS`` in the core causal layer.
+
+        Note:
+            This alias calls :meth:`to_knowledge_edge` — ``CausalEdge``
+            is now a backward-compatible alias for ``KnowledgeEdge``.
+        """
+        return self.to_knowledge_edge()
+
+    def to_knowledge_edge(self) -> KnowledgeEdge:
+        """Convert this :class:`GraphEdge` to a persistence-ready :class:`KnowledgeEdge`.
+
+        Preserves the ``projections`` field so edges can be tagged with
+        their DAG membership.  SRG-specific types (e.g. ``REFERENCES_TABLE``)
+        fall back to ``SUPPORTS``.
         """
         try:
             causal_type = EdgeType(self.relation_type.value)
         except ValueError:
-            # Fall back for SRG-only types
             causal_type = EdgeType.SUPPORTS
 
-        return CausalEdge(
+        return KnowledgeEdge(
             edge_id=self.id,
             source_node_id=self.source_id,
             target_node_id=self.target_id,
             edge_type=causal_type,
             strength=self.strength,
             evidence=self.evidence,
+            projections=self.projections,
+            metadata=self.metadata,
         )
 
     @classmethod
@@ -102,4 +126,6 @@ class GraphEdge(BaseModel):
             relation_type=RelationType.from_edge_type(edge.edge_type),
             strength=edge.strength,
             evidence=edge.evidence,
+            projections=getattr(edge, "projections", ["document"]),
+            metadata=getattr(edge, "metadata", {}),
         )

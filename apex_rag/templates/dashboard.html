@@ -5,14 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ApexRAG — Dashboard</title>
 {{ common_styles }}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
 .hero {{ text-align:center; padding: 40px 20px 20px; }}
 .hero-logo {{ font-size: 3rem; margin-bottom: 8px; }}
 .hero h1 {{ font-size: 2.2rem; font-weight: 800; background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0; }}
 .hero p {{ color: var(--muted); margin-top: 10px; font-size: 1.05rem; }}
 .container {{ max-width: 1200px; margin: 0 auto; padding: 0 40px 60px; }}
-.section-title {{ font-size: 1.2rem; font-weight: 700; margin: 40px 0 20px; display: flex; align-items: center; gap: 12px; }}
+.section-title {{ font-size: 1.15rem; font-weight: 700; margin: 36px 0 16px; display: flex; align-items: center; gap: 12px; }}
 .section-title span {{ background: var(--accent); color: white; border-radius: 4px; padding: 2px 8px; font-size: 0.8rem; }}
+.section-title .badge-orange {{ background: #f59e0b; }}
+.section-title .badge-green {{ background: #10b981; }}
 .docs-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }}
 .doc-card {{ display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; text-decoration: none; color: inherit; transition: all .2s; cursor: pointer; }}
 .doc-card:hover {{ border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(99,102,241,.15); }}
@@ -27,18 +30,41 @@
 .api-btn:hover {{ border-color: var(--accent); background: rgba(99,102,241,.08); }}
 
 /* Global Query */
-.global-query-wrap {{ background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 40px; }}
+.global-query-wrap {{ background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 16px; }}
 .query-box {{ display: flex; gap: 12px; margin-bottom: 24px; }}
 .query-input {{ flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; color: var(--text); font-size: 1rem; outline: none; }}
 .query-input:focus {{ border-color: var(--accent); }}
 .query-btn {{ background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0 32px; font-weight: 700; cursor: pointer; }}
 .query-btn:disabled {{ opacity: 0.5; }}
-.trace-container {{ background: #000; border-radius: 12px; padding: 20px; font-family: monospace; font-size: 0.85rem; height: 300px; overflow-y: auto; border: 1px solid var(--border); }}
+.trace-container {{ background: #000; border-radius: 12px; padding: 20px; font-family: monospace; font-size: 0.85rem; height: 280px; overflow-y: auto; border: 1px solid var(--border); }}
 .trace-line {{ margin-bottom: 6px; border-left: 2px solid #333; padding-left: 12px; }}
 .trace-line.global_start {{ border-left-color: #a855f7; font-weight: bold; }}
 .trace-line.global_chosen {{ border-left-color: #06b6d4; }}
 .trace-line.enter {{ border-left-color: var(--accent); }}
 .trace-line.result {{ border-left-color: var(--leaf); background: rgba(52, 211, 153, 0.05); padding: 10px; }}
+
+/* DAG Visualization */
+.dag-card {{ background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }}
+.dag-toolbar {{ display: flex; align-items: center; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }}
+.dag-toolbar label {{ font-size: 0.85rem; font-weight: 600; color: var(--text); }}
+.dag-select {{ background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; color: var(--text); font-size: 0.85rem; outline: none; cursor: pointer; }}
+.dag-select:focus {{ border-color: var(--accent); }}
+.dag-btn {{ background: var(--accent); color: white; border: none; border-radius: 6px; padding: 6px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: opacity .15s; }}
+.dag-btn:hover {{ opacity: 0.85; }}
+.dag-btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
+.dag-btn-outline {{ background: transparent; border: 1px solid var(--border); color: var(--text); }}
+.dag-btn-outline:hover {{ border-color: var(--accent); color: var(--accent); opacity: 1; }}
+.dag-stats {{ margin-left: auto; display: flex; gap: 16px; font-size: 0.8rem; color: var(--muted); }}
+.dag-stats span {{ white-space: nowrap; }}
+.dag-stats strong {{ color: var(--accent); font-weight: 700; }}
+.dag-canvas {{ width: 100%; height: 520px; background: #0a0a0f; position: relative; }}
+.dag-canvas .dag-loading {{ position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9rem; gap: 8px; }}
+.dag-canvas .dag-loading .spinner {{ width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+.dag-legend {{ display: flex; gap: 16px; padding: 12px 24px; border-top: 1px solid var(--border); flex-wrap: wrap; }}
+.dag-legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--muted); }}
+.dag-legend-swatch {{ width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
+.dag-error {{ color: #ef4444; padding: 16px 24px; font-size: 0.85rem; display: none; }}
 </style>
 </head>
 <body>
@@ -72,11 +98,53 @@
     <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(this.files[0])">
   </div>
 
+  <div class="section-title">🕸️ Knowledge Graph <span class="badge-orange">Visualization</span></div>
+  <div class="dag-card">
+    <div class="dag-toolbar">
+      <label for="dagProjection">Projection:</label>
+      <select id="dagProjection" class="dag-select">
+        <option value="document">Document</option>
+        <option value="entity">Entity</option>
+        <option value="citation">Citation</option>
+        <option value="temporal">Temporal</option>
+        <option value="version">Version</option>
+        <option value="policy">Policy</option>
+        <option value="fact">Fact</option>
+        <option value="reasoning">Reasoning</option>
+      </select>
+      <button id="dagLoadBtn" class="dag-btn" onclick="loadDAG()">Load Graph</button>
+      <button class="dag-btn dag-btn-outline" onclick="resetDAGView()">Reset View</button>
+      <button class="dag-btn dag-btn-outline" onclick="toggleDAGPhysics()" id="dagPhysicsBtn">Pause Physics</button>
+      <div class="dag-stats" id="dagStats">
+        <span>Nodes: <strong id="dagNodeCount">—</strong></span>
+        <span>Edges: <strong id="dagEdgeCount">—</strong></span>
+      </div>
+    </div>
+    <div class="dag-canvas" id="dagCanvas">
+      <div class="dag-loading" id="dagLoading">
+        <div class="spinner"></div>
+        <span>Select a projection and click Load Graph</span>
+      </div>
+    </div>
+    <div class="dag-error" id="dagError"></div>
+    <div class="dag-legend">
+      <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#6366f1"></div> Root / Heading</div>
+      <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#34d399"></div> Content Leaf</div>
+      <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#f59e0b"></div> Entity / Citation</div>
+      <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#06b6d4"></div> Temporal / Version</div>
+      <div class="dag-legend-item"><div class="dag-legend-swatch" style="background:#ef4444"></div> Policy / Fact</div>
+      <div class="dag-legend-item"><span style="color:var(--muted)">—</span> Edge label = edge type</div>
+    </div>
+  </div>
+
   <div class="section-title">📄 Indexed Documents <span>{{ doc_count }}</span></div>
   <div class="docs-grid">{{ cards_html }}</div>
 </div>
 
 <script>
+let dagNetwork = null;
+let dagPhysicsRunning = true;
+
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
 
@@ -196,5 +264,156 @@ async function runGlobalQuery() {
     log.scrollTop = log.scrollHeight;
   }
 }
+
+// ── DAG Visualization ──────────────────────────────────────────────
+
+function getNodeColor(node) {
+  const type = (node.node_type || '').toUpperCase();
+  if (type === 'HEADING') return '#6366f1';
+  if (type === 'PARAGRAPH' || type === 'LEAF') return '#34d399';
+  if (type === 'CODE' || type === 'TABLE') return '#f59e0b';
+  if (type === 'IMAGE' || type === 'LIST') return '#06b6d4';
+  return '#6b6e8a';
+}
+
+function getNodeSize(node) {
+  const type = (node.node_type || '').toUpperCase();
+  if (type === 'HEADING') return 28;
+  if (type === 'PARAGRAPH') return 18;
+  if (type === 'CODE') return 22;
+  if (type === 'TABLE') return 24;
+  return 16;
+}
+
+function getNodeShape(node) {
+  const type = (node.node_type || '').toUpperCase();
+  if (type === 'HEADING') return 'star';
+  if (type === 'CODE') return 'box';
+  if (type === 'TABLE') return 'diamond';
+  return 'dot';
+}
+
+function getEdgeColor(type) {
+  const t = (type || '').toUpperCase();
+  if (t === 'SUPPORTS' || t === 'REFINES') return '#34d399';
+  if (t === 'CONTRADICTS' || t === 'OVERRIDES') return '#ef4444';
+  if (t === 'REFERENCES' || t === 'CITES') return '#f59e0b';
+  if (t === 'SUCCESSOR' || t === 'PREDECESSOR' || t === 'VERSION_OF') return '#06b6d4';
+  if (t === 'DEPENDS_ON' || t === 'REQUIRES') return '#a855f7';
+  if (t === 'REASONING_CHAIN' || t === 'DERIVES_FROM' || t === 'INFERS') return '#f97316';
+  return '#6b6e8a';
+}
+
+async function loadDAG() {
+  const projection = document.getElementById('dagProjection').value;
+  const loadBtn = document.getElementById('dagLoadBtn');
+  const errorEl = document.getElementById('dagError');
+  const loadingEl = document.getElementById('dagLoading');
+
+  loadBtn.disabled = true;
+  errorEl.style.display = 'none';
+  loadingEl.style.display = 'flex';
+  loadingEl.innerHTML = '<div class="spinner"></div><span>Loading ' + projection + ' graph...</span>';
+
+  try {
+    const resp = await fetch('/graph/' + projection + '?limit=800');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+    const data = await resp.json();
+
+    if (!data.edges || data.edges.length === 0) {
+      loadingEl.style.display = 'flex';
+      loadingEl.innerHTML = '⚠️ No edges found for projection "' + projection + '". Ingest a document first.';
+      loadBtn.disabled = false;
+      document.getElementById('dagNodeCount').textContent = '0';
+      document.getElementById('dagEdgeCount').textContent = '0';
+      return;
+    }
+
+    loadingEl.style.display = 'none';
+
+    const nodes = new vis.DataSet(data.nodes.map(n => ({
+      id: n.id,
+      label: n.label || n.id.substring(0, 8),
+      title: '<b>' + (n.label || n.id.substring(0, 8)) + '</b><br>Type: ' + (n.node_type || 'unknown') + '<br>Page: ' + (n.page_number || '—') + '<br>ID: ' + n.id,
+      color: { background: getNodeColor(n), border: '#2a2a3a' },
+      shape: getNodeShape(n),
+      size: getNodeSize(n),
+      font: { color: '#e2e4f0', size: 11, strokeWidth: 0 },
+      borderWidth: 1.5,
+    })));
+
+    const edges = new vis.DataSet(data.edges.map(e => ({
+      id: e.id,
+      from: e.source,
+      to: e.target,
+      label: e.type,
+      title: '<b>' + e.type + '</b><br>Strength: ' + e.strength.toFixed(2) + '<br>' + (e.evidence || ''),
+      color: { color: getEdgeColor(e.type), highlight: '#fff', hover: '#fff' },
+      width: Math.max(1, Math.min(4, e.strength * 3)),
+      font: { color: '#6b6e8a', size: 9, strokeWidth: 0, align: 'middle' },
+      arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+      smooth: { type: 'continuous' },
+    })));
+
+    const container = document.getElementById('dagCanvas');
+    const options = {
+      nodes: { borderWidthSelected: 2.5 },
+      edges: { smooth: { type: 'continuous' } },
+      physics: {
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 180, springConstant: 0.04, damping: 0.6 },
+        stabilization: { iterations: 100 },
+      },
+      interaction: {
+        hover: true,
+        tooltipDelay: 100,
+        navigationButtons: true,
+        keyboard: true,
+      },
+      layout: { improvedLayout: true },
+    };
+
+    if (dagNetwork) dagNetwork.destroy();
+    dagNetwork = new vis.Network(container, { nodes, edges }, options);
+    dagPhysicsRunning = true;
+    document.getElementById('dagPhysicsBtn').textContent = 'Pause Physics';
+
+    dagNetwork.once('stabilizationIterationsDone', () => {
+      dagNetwork.setOptions({ physics: false });
+      dagPhysicsRunning = false;
+      document.getElementById('dagPhysicsBtn').textContent = 'Start Physics';
+    });
+
+    // Update stats
+    document.getElementById('dagNodeCount').textContent = data.node_count;
+    document.getElementById('dagEdgeCount').textContent = data.edge_count;
+
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    errorEl.textContent = 'Error loading graph: ' + err.message;
+    errorEl.style.display = 'block';
+  } finally {
+    loadBtn.disabled = false;
+  }
+}
+
+function resetDAGView() {
+  if (dagNetwork) {
+    dagNetwork.fit({ animation: { duration: 300, easingFunction: 'easeOutQuad' } });
+  }
+}
+
+function toggleDAGPhysics() {
+  if (!dagNetwork) return;
+  const btn = document.getElementById('dagPhysicsBtn');
+  dagPhysicsRunning = !dagPhysicsRunning;
+  dagNetwork.setOptions({ physics: dagPhysicsRunning });
+  btn.textContent = dagPhysicsRunning ? 'Pause Physics' : 'Start Physics';
+}
+
+// Load default projection on page load
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(loadDAG, 300);
+});
 </script>
 </body></html>

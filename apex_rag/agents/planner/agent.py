@@ -21,6 +21,16 @@ You are an expert Query Planning Agent. Your task is to analyze a user query and
 
 2. Decompose the query into a logical sequence of sub-queries.
 
+3. For each sub-query, identify key **entities** (people, companies, metrics, terms).
+
+4. Determine the **structural domain** of the query — what kind of document structure
+   is likely to contain the answer (e.g. "financial" for balance sheets, "legal" for
+   contracts, "technical" for specifications, "code" for source code, "medical" for
+   clinical data, "general" for general prose).
+
+5. Suggest **expected node types** that would likely contain the answer.
+   Possible types: PARAGRAPH, TABLE, CODE, LIST, HEADING, IMAGE.
+
 User Query: "{query}"
 
 Respond ONLY with valid JSON in this format:
@@ -30,6 +40,12 @@ Respond ONLY with valid JSON in this format:
     "Sub-query 1",
     "Sub-query 2"
   ],
+  "entity_hints": {{
+    "Sub-query 1": ["entity1", "entity2"],
+    "Sub-query 2": ["entity3"]
+  }},
+  "structural_domain": "<domain or null>",
+  "expected_node_types": ["<TYPE>", "<TYPE>"],
   "reasoning": "Reasoning for classification and sub-query plan"
 }}
 """
@@ -88,6 +104,24 @@ class QueryPlannerAgent(QueryPlanner):
             }
             if query_type not in valid_types:
                 data["query_type"] = "FACTUAL"
+
+            # Normalize entity_hints (keys must match sub_queries)
+            entity_hints = data.get("entity_hints", {})
+            if not isinstance(entity_hints, dict):
+                data["entity_hints"] = {}
+            else:
+                # Only keep hints for sub-queries that actually exist
+                hint_keys = set(entity_hints.keys())
+                sq_set = set(sub_queries)
+                for key in hint_keys - sq_set:
+                    del entity_hints[key]
+
+            # Normalize expected_node_types
+            node_types = data.get("expected_node_types", [])
+            valid_node_types = {"PARAGRAPH", "TABLE", "CODE", "LIST", "HEADING", "IMAGE"}
+            data["expected_node_types"] = [
+                nt.upper() for nt in node_types if nt.upper() in valid_node_types
+            ]
 
             return data
         except Exception:

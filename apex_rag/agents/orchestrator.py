@@ -21,6 +21,10 @@ import json
 import time
 import uuid
 
+from apex_rag.agents.planner.knowledge import KnowledgePlannerAgent
+from apex_rag.agents.planner.models import EnrichedPlan, PlanningContext
+from apex_rag.agents.planner.role import RolePlannerAgent
+from apex_rag.agents.planner.temporal import TemporalPlannerAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 from apex_rag.core.cache import QueryCache
 from apex_rag.core.protocols.interfaces import CriticAgent, QueryPlanner
@@ -93,6 +97,10 @@ class Orchestrator:
         conformal_predictor: ConformalPredictor | None = None,
         max_iterations: int = _DEFAULT_MAX_ITERATIONS,
         trace: ReasoningTrace | None = None,
+        # ── Planning Pipeline (optional) ───────────────────────────
+        knowledge_planner: KnowledgePlannerAgent | None = None,
+        role_planner: RolePlannerAgent | None = None,
+        temporal_planner: TemporalPlannerAgent | None = None,
     ) -> None:
         self.planner = planner
         self.navigator = navigator
@@ -106,6 +114,10 @@ class Orchestrator:
         self.max_iterations = max_iterations
         self.trace = trace or ReasoningTrace(enabled=True)
         self._query_cache = QueryCache()
+        # ── Planning Pipeline ───────────────────────────────────────
+        self.knowledge_planner = knowledge_planner or KnowledgePlannerAgent()
+        self.role_planner = role_planner or RolePlannerAgent()
+        self.temporal_planner = temporal_planner or TemporalPlannerAgent()
 
     async def _check_query_cache(
         self,
@@ -214,34 +226,43 @@ class Orchestrator:
                 iters,
             )
 
-            # 1. Plan (with missing context if applicable)
+            # 1. Run the full planning pipeline
             enriched_query = query
             if missing_context:
                 enriched_query = f"{query}\n\n[Previous attempt missing: {missing_context}]"
 
-            # Use plan_query if available to support classification
-            query_type = "FACTUAL"
-            from apex_rag.agents.planner.agent import QueryPlannerAgent
+            plan = await self._run_planning_pipeline(
+                enriched_query,
+                tenant_context=tenant_context,
+                doc_id=doc_id,
+                domain="general",
+            )
 
-            if isinstance(self.planner, QueryPlannerAgent) and hasattr(self.planner, "plan_query"):
-                planner_data = await self.planner.plan_query(enriched_query)
-                query_type = planner_data.get("query_type", "FACTUAL")
-                sub_queries = planner_data.get("sub_queries", [query])
-            else:
-                sub_queries = await self.planner.plan(enriched_query)
+            sub_queries = plan.sub_queries
+            query_type = plan.query_type
 
             state_machine.transition_to(
                 RetrievalState.PLAN_GENERATED,
-                {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type},
+                {
+                    "sub_queries": sub_queries,
+                    "iteration": iteration,
+                    "query_type": query_type,
+                    "plan": plan.to_dict(),
+                },
             )
             trace_manager.publish(
                 trace_id,
                 "reasoning",
                 "PLAN_GENERATED",
-                {"sub_queries": sub_queries, "iteration": iteration, "query_type": query_type},
+                {
+                    "sub_queries": sub_queries,
+                    "iteration": iteration,
+                    "query_type": query_type,
+                    "plan": plan.to_dict(),
+                },
             )
 
-            # 2. Navigate
+            # 2. Navigate (with enriched plan)
             state_machine.transition_to(RetrievalState.NAVIGATION_RUNNING)
             trace_manager.publish(
                 trace_id, "navigation", "NAVIGATION_RUNNING", {"iteration": iteration}
@@ -629,6 +650,63 @@ class Orchestrator:
             metrics_service.record_tenant_query(tenant_context.tenant_id)
 
         return result
+
+    # ── Planning Pipeline ────────────────────────────────────────────
+
+    async def _run_planning_pipeline(
+        self,
+        query: str,
+        *,
+        tenant_context: TenantContext | None = None,
+        doc_id: str = "",
+        domain: str = "general",
+    ) -> EnrichedPlan:
+        """Run the full planning pipeline: QueryPlanner → KnowledgePlanner →
+        RolePlanner → TemporalPlanner.
+
+        Each stage enriches the plan with additional constraints.  The final
+        plan is returned to ``execute_query()`` for navigation.
+
+        Args:
+            query:          The user's natural-language query.
+            tenant_context: Optional tenant context for role planning.
+            doc_id:         Target document ID (for temporal lookups).
+            domain:         Strategic domain for freshness decay.
+
+        Returns:
+            An :class:`EnrichedPlan` with all stages applied.
+        """
+        from apex_rag.agents.planner.agent import QueryPlannerAgent
+
+        # Stage 1: QueryPlannerAgent — classification + decomposition
+        if isinstance(self.planner, QueryPlannerAgent) and hasattr(self.planner, "plan_query"):
+            planner_data = await self.planner.plan_query(query)
+        else:
+            planner_data = {
+                "query_type": "FACTUAL",
+                "sub_queries": await self.planner.plan(query),
+                "reasoning": "Legacy planner",
+            }
+
+        plan = EnrichedPlan.from_planner_data(planner_data)
+
+        # Build planning context for subsequent stages
+        ctx = PlanningContext(
+            tenant_context=tenant_context,
+            doc_id=doc_id,
+            domain=domain,
+        )
+
+        # Stage 2: KnowledgePlannerAgent — entity hints, domain mapping
+        plan = await self.knowledge_planner.process(plan, ctx)
+
+        # Stage 3: RolePlannerAgent — retrieval preferences, visibility
+        plan = await self.role_planner.process(plan, ctx)
+
+        # Stage 4: TemporalPlannerAgent — date scope, version filters
+        plan = await self.temporal_planner.process(plan, ctx)
+
+        return plan
 
     # ── Internal helpers ──────────────────────────────────────────────
 

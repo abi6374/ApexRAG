@@ -43,6 +43,25 @@ class QueryPlanner(Protocol):
     async def plan(self, query: str) -> list[str]: ...
 
 
+class RichQueryPlanner(QueryPlanner, Protocol):
+    """
+    Extended protocol for planners that return enriched plan data.
+
+    In addition to ``plan()`` (backward compatible), provides
+    ``plan_query()`` which returns a structured dict with:
+        query_type, sub_queries, reasoning, entity_hints,
+        structural_domain, expected_node_types
+
+    This is the protocol used by the multi-stage planning pipeline
+    (QueryPlannerAgent → KnowledgePlannerAgent → RolePlannerAgent →
+     TemporalPlannerAgent).
+    """
+
+    async def plan_query(self, query: str) -> dict[str, Any]:
+        """Return a structured plan with classification and enrichment."""
+        ...
+
+
 class CriticAgent(Protocol):
     """
     Protocol for the Critic Agent.

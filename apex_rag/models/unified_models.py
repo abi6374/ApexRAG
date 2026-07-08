@@ -32,6 +32,23 @@ class NodeType(str, Enum):
     IMAGE = "IMAGE"
 
 
+class DagProjection(str, Enum):
+    """DAG projection tags for the unified Knowledge Edge store.
+
+    Each edge in the ``apex_knowledge_edges`` table carries one or more
+    projection tags indicating which DAG(s) it participates in.
+    """
+
+    DOCUMENT = "document"
+    FACT = "fact"
+    TEMPORAL = "temporal"
+    VERSION = "version"
+    CITATION = "citation"
+    REASONING = "reasoning"
+    POLICY = "policy"
+    ENTITY = "entity"
+
+
 class EdgeType(str, Enum):
     """Typed relationships in the Causal Knowledge Graph."""
 
@@ -206,15 +223,19 @@ class TemporalMetadata(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────
-# Causal Edge
+# Knowledge Edge (unified DAG edge with projection support)
 # ─────────────────────────────────────────────────────────────
 
 
-class CausalEdge(BaseModel):
-    """A typed, directed relationship between two ASTNodes.
+class KnowledgeEdge(BaseModel):
+    """A typed, directed relationship between two nodes, with DAG projection support.
 
-    Edges form the Causal Knowledge Graph that the CausalRetriever
-    traverses to build answer chains.
+    This is the **unified edge model** for all 8 Knowledge DAG projections.
+    Every edge carries one or more projection tags (e.g. ``["document"]``,
+    ``["entity", "citation"]``) indicating which DAG(s) it belongs to.
+
+    Edges form the Knowledge Graph that the ``CausalRetriever`` (soon
+    ``KnowledgeGraphRetriever``) traverses to build evidence chains.
 
     Attributes:
         edge_id:         Globally unique identifier (UUID4 string).
@@ -225,6 +246,9 @@ class CausalEdge(BaseModel):
         evidence:        Human‑readable reasoning for why this edge
                          was created (e.g. LLM justification).
         discovered_at:   Timestamp of edge creation.
+        projections:     DAG projection tags this edge belongs to
+                         (e.g. ``["document"]``, ``["entity", "citation"]``).
+        metadata:        Optional key-value metadata for the edge.
     """
 
     edge_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -234,6 +258,14 @@ class CausalEdge(BaseModel):
     strength: float = Field(default=0.5, ge=0.0, le=1.0)
     evidence: str = ""
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    projections: list[str] = Field(
+        default_factory=lambda: ["document"],
+        description="DAG projection tags (e.g. ['document'], ['entity', 'citation'])",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary metadata key-value pairs for the edge",
+    )
 
     @field_validator("edge_id")
     @classmethod
@@ -254,6 +286,17 @@ class CausalEdge(BaseModel):
         return v
 
     model_config = ConfigDict(use_enum_values=True)
+
+
+# ── Backward-compatible alias ──────────────────────────────────────────
+
+CausalEdge = KnowledgeEdge
+"""Backward-compatible alias for :class:`KnowledgeEdge`.
+
+``CausalEdge`` is now :class:`KnowledgeEdge` with the same fields plus
+``projections`` and ``metadata``.  All existing code that imports
+``CausalEdge`` continues to work transparently.
+"""
 
 
 # ─────────────────────────────────────────────────────────────

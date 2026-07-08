@@ -46,6 +46,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from apex_rag.graph.dags.fact_dag import FactDagBuilder
 from apex_rag.ingestion.apex_storage import ApexBase, ApexStorage
 from apex_rag.models.unified_models import ASTNode
 from apex_rag.temporal.fact_extractor import FactExtractor
@@ -323,6 +324,23 @@ class FactPipeline:
                     all_facts,
                     tenant_context=tenant_id,
                 )
+
+                # Build FactDAG edges from extracted facts
+                fact_dag_builder = FactDagBuilder(self._storage)
+                fact_edges = await fact_dag_builder.build(
+                    all_facts,
+                    doc_id=doc_id,
+                    tenant_id=tenant_id,
+                )
+                if fact_edges:
+                    for edge in fact_edges:
+                        await self._storage.save_knowledge_edge(edge)
+                    logger.info(
+                        "FactDAG: %d edges from job %s (%d facts)",
+                        len(fact_edges),
+                        job_id,
+                        len(all_facts),
+                    )
 
             # Mark as COMPLETED
             async with self._storage.session() as session:

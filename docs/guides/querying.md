@@ -82,6 +82,69 @@ Each evidence packet in `evidence_packets` contains:
 | `confidence` | `float` | Retrieval/verification confidence (0–1) |
 | `freshness_score` | `float` | Freshness score (0–1) |
 
+## Knowledge Graph Queries
+
+ApexRAG builds **8 Knowledge DAGs** during ingestion and query time. You can query these edges programmatically:
+
+```python
+from apex_rag.models.unified_models import DagProjection
+
+# Get all entity edges for a document
+entity_edges = await index.get_edges_by_projection("entity", doc_id=doc_id)
+
+# Get citation edges across all documents
+citation_edges = await index.get_edges_by_projection(
+    DagProjection.CITATION
+)
+
+# Get reasoning edges from the last query
+reasoning_edges = await index.get_edges_by_projection(
+    "reasoning", doc_id=doc_id, limit=100
+)
+```
+
+### As a NetworkX Graph
+
+```python
+import networkx as nx
+
+# Build a NetworkX graph from any projection
+graph: nx.DiGraph = await index.get_projection_graph(
+    "reasoning", doc_id=doc_id
+)
+
+for source, target, data in graph.edges(data=True):
+    print(f"{source} --({data['type']})--> {target}  ({data['strength']:.2f})")
+```
+
+### Global Graph API
+
+All 8 DAG projections are available via the REST API with enriched node metadata (content labels, node_type, page_number):
+
+```bash
+# All edges for a specific document
+curl http://localhost:8000/documents/doc-123/graph
+
+# Filtered by DAG projection
+curl http://localhost:8000/documents/doc-123/graph/reasoning
+curl http://localhost:8000/documents/doc-123/graph/entity
+
+# Across ALL documents
+curl http://localhost:8000/graph
+curl http://localhost:8000/graph/citation
+```
+
+Each graph node includes:
+```json
+{
+  "id": "uuid4...",
+  "label": "Quarterly Revenue Growth Q3 2025",
+  "group": "node",
+  "node_type": "HEADING",
+  "page_number": 42
+}
+```
+
 ## Subtree Search
 
 To restrict navigation to a specific subtree, incorporate the target
@@ -139,6 +202,22 @@ answer = await index.query(
 Hybrid search enriches the agent's navigation with semantic hints, making it
 faster and more accurate for complex queries.
 
+## Streaming with ReasoningDAG
+
+The `/query/stream/reasoning-graph` SSE endpoint streams real-time agent traces
+during query execution, then delivers the full ReasoningDAG as a JSON graph:
+
+```bash
+curl -X POST http://localhost:8000/query/stream/reasoning-graph \
+  -H "Content-Type: application/json" \
+  -d '{"doc_id":"doc-123","question":"What is Q3 revenue?"}'
+```
+
+SSE events:
+- `trace` — Real-time agent navigation step
+- `reasoning_graph` — Full `{nodes, edges}` JSON graph after query completes
+- `result` — Final answer text with coverage metrics
+
 ## Enterprise Features
 
 Enterprise capabilities — temporal versioning, RBAC, and audit trails — are
@@ -162,13 +241,6 @@ result = await enterprise.temporal_query(
     as_of=datetime(2025, 1, 15, tzinfo=timezone.utc),
 )
 
-# State over a date range
-result = await enterprise.temporal_query(
-    "Show the revenue trend", doc_id,
-    start_date=datetime(2025, 1, 1),
-    end_date=datetime(2025, 3, 31),
-)
-
 # Compare two points in time
 result = await enterprise.temporal_compare(
     "Compare revenue", doc_id,
@@ -181,14 +253,10 @@ result = await enterprise.temporal_compare(
 
 ```python
 # Get full version history for a specific node
-versions = await enterprise.get_version_history(node_id)
-for v in versions:
-    print(f"v{v['version_number']}: {v['effective_from']} → {v['effective_to']}")
+history = await enterprise.get_version_history(node_id)
 
 # Trace the supersession chain
 lineage = await enterprise.get_version_lineage(node_id)
-for entry in lineage:
-    print(f"{entry['lineage_type']}: {entry['source_version_id']} → {entry['target_version_id']}")
 ```
 
 ### Role-Aware Query (RBAC)
@@ -211,15 +279,6 @@ answer = await enterprise.role_aware_query(
 
 print(answer.answer_text)
 # Only content the 'Analyst' role is authorized to see is returned
-```
-
-### Service Access
-
-You can also access individual enterprise services directly:
-
-```python
-resolver = enterprise.version_resolver
-history = await resolver.get_version_history(node_id)
 ```
 
 ## Streaming (Real-time)

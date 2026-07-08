@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ApexRAG-v1.0.4-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.4">
+  <img src="https://img.shields.io/badge/ApexRAG-v1.0.5-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.5">
   <img src="https://img.shields.io/pypi/v/apex-rag?style=for-the-badge&color=6366f1" alt="PyPI Version">
   <img src="https://img.shields.io/pypi/pyversions/apex-rag?style=for-the-badge" alt="Python Versions">
   <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License">
@@ -56,25 +56,54 @@ User Query
 
 ## 🏗️ Architecture
 
-### Phase 1 — Structural Foundation
+### Core Pipeline
 
-| Component | Description |
-|---|---|
-| **Universal Document AST** | Documents are parsed into typed `ASTNode` trees, preserving exact paragraph-to-heading and table-to-caption structures. |
-| **Deterministic Pre-Retrieval** | Keyword density scoring, FTS5 full-text search, and structural heading overlap narrow candidates before any LLM call — keeping costs low. |
-| **StrictLeafVerifier** | An empirical verification engine that checks whether a retrieved node actually answers the query, acting as a firewall against hallucinated evidence. |
+```
+Document (PDF/MD/Code/Image)
+        │
+        ▼ ApexParser
+  Universal AST Nodes ──► Semantic Signposts ──► Causal + 8 Knowledge DAGs
+        │
+        ▼ ApexStorage (SQLite / PostgreSQL)
 
-### Phase 2 — Structural Reasoning Engine
+User Query
+        │
+        ▼ QueryPlannerAgent  →  ASTNavigationAgent  →  EvaluationCriticAgent
+                                                              │
+                                              ┌───────────────┴───────────────┐
+                                              ▼                               ▼
+                                    TemporalAuditAgent              ConformalWrapperAgent
+                                              │                               │
+                                              └───────────────┬───────────────┘
+                                                              ▼
+                                                    EvidenceSynthesizerAgent
+                                                              │
+                                                              ▼
+                                                  ApexAnswer + Coverage Guarantee
+                                                              │
+                                                              ▼
+                                                  ReasoningDagBuilder
+                                                  (saves trace → KnowledgeEdge store)
+```
 
-| Agent | Role |
-|---|---|
-| **Planner Agent** | Deconstructs complex, multi-hop queries into discrete sub-queries. |
-| **Navigator Agent** | Traverses AST nodes and Semantic Map signposts to retrieve grounded context for each sub-query. |
-| **Critic Agent** | Audits and scores the retrieved context, enforcing completeness before the final answer is synthesized. |
+### 8 Knowledge DAG Projections
 
-The **Structural Retrieval Graph (SRG)** connects nodes via typed semantic edges (`REFERENCES_TABLE`, `SUPERSEDES`, `CAUSED_BY`), enabling non-linear multi-hop reasoning.
+Every document is automatically analyzed into **8 typed knowledge graphs** during ingestion and query time:
 
-### Phase 3 — Enterprise Ecosystem
+| DAG | Builder | Edges Created | Phase |
+|-----|---------|---------------|-------|
+| **DocumentDAG** | `DocumentDagBuilder` | REFINES, SUPPORTS — structural tree relationships | Ingestion |
+| **EntityDAG** | `EntityDagBuilder` | Named entity extraction and linking | Ingestion |
+| **CitationDAG** | `CitationDagBuilder` | Citation and cross-reference links | Ingestion |
+| **TemporalDAG** | `TemporalDagBuilder` | SUCCESSOR, PREDECESSOR, VALID_DURING — chronological ordering | Ingestion |
+| **VersionDAG** | `VersionDagBuilder` | VERSION_OF, SUPERSEDES, REPLACED_BY — version lineage | Version creation |
+| **PolicyDAG** | `PolicyDagBuilder` | GOVERNS — policy/regulation extraction | Ingestion |
+| **FactDAG** | `FactDagBuilder` | SUPPORTS, CONTRADICTS, SAME_TOPIC — fact relationships | Fact pipeline |
+| **ReasoningDAG** | `ReasoningDagBuilder` | REASONING_CHAIN, DERIVES_FROM, INFERS, USES — query-time traces | Query time |
+
+All edges use the unified `KnowledgeEdge` model and are queryable via `GET /graph/{projection}`.
+
+### Enterprise Ecosystem
 
 - **Multi-Tenant RBAC** — SQLAlchemy models enforce strict data boundaries via `tenant_id`. All queries are automatically scoped.
 - **Temporal Querying** — Query any document *as it was* at a specific point in time. Compare states across versions.
@@ -214,16 +243,51 @@ info = await index.get_document_info(doc_id)
 await index.delete(doc_id)
 ```
 
-### Causal Graph
+### Knowledge Graph (DAG Projections)
 
 ```python
-import networkx as nx
+# Get edges filtered by DAG projection (entity, citation, reasoning, etc.)
+entity_edges = await index.get_edges_by_projection("entity", doc_id=doc_id)
 
-# Retrieve the causal knowledge graph built during ingestion
-graph: nx.DiGraph = await index.get_causal_graph()
+# Or as a NetworkX graph for traversal
+import networkx as nx
+graph: nx.DiGraph = await index.get_projection_graph(
+    "reasoning", doc_id=doc_id
+)
 
 for source, target, data in graph.edges(data=True):
-    print(f"[{source}] --({data['type']})--> [{target}]  strength={data['strength']}")
+    print(f"[{source}] --({data['type']})--> [{target}]")
+
+# Full causal graph (all edges)
+graph = await index.get_causal_graph()
+```
+
+### REST API — Graph Visualization
+
+```bash
+# All edges for a document (with enriched node labels)
+curl http://localhost:8000/documents/doc-123/graph
+
+# Filtered by DAG projection
+curl http://localhost:8000/documents/doc-123/graph/reasoning
+
+# Global graph across all documents
+curl http://localhost:8000/graph
+curl http://localhost:8000/graph/entity
+```
+
+### SSE Streaming with ReasoningDAG
+
+```bash
+# Stream query with real-time agent traces + final ReasoningDAG
+curl -X POST http://localhost:8000/query/stream/reasoning-graph \
+  -H "Content-Type: application/json" \
+  -d '{"doc_id":"doc-123","question":"What is Q3 revenue?"}'
+
+# Returns SSE events:
+# data: {"event":"trace","trace":{...}}   ← real-time agent trace
+# data: {"event":"reasoning_graph",...}     ← full {nodes, edges} graph
+# data: {"event":"result",...}              ← final answer
 ```
 
 ---
@@ -364,7 +428,17 @@ ApexRAG is configured via environment variables:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-### v1.0.4 — Latest
+### v1.0.5 — Latest
+- **8 Knowledge DAG Projections** — Document, Entity, Citation, Temporal, Version, Policy, Fact, and Reasoning DAGs with unified `KnowledgeEdge` store.
+- **ReasoningDAG** — Orchestrator trace events captured and persisted as typed reasoning edges (REASONING_CHAIN, DERIVES_FROM, INFERS, USES).
+- **SSE Streaming with ReasoningDAG** — `POST /query/stream/reasoning-graph` streams real-time agent traces + final ReasoningDAG JSON graph.
+- **Global Graph API** — `GET /graph` and `GET /graph/{projection}` for cross-document knowledge graph visualization.
+- **Node Label Resolution** — Graph nodes show actual content text instead of truncated UUIDs, plus `node_type` and `page_number`.
+- **DAG Visualization** — Dashboard and document view both include vis-network interactive graph visualization tab.
+- **Batch Node Lookup** — `get_nodes_batch()` on ApexStorage for efficient multi-node queries.
+- **REST API Documentation** — Full `docs/rest-api.md` with all 29 endpoints documented.
+
+### v1.0.4
 - Stable release aligned with git tag `v1.0.4`.
 
 ### v1.0.3

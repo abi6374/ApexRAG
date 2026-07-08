@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apex_rag.graph.dags.version_dag import VersionDagBuilder
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
     NodeVersionRow,
@@ -295,7 +296,36 @@ class TemporalVersionService:
             doc_id,
             tenant_id,
         )
+
+        # Build VersionDAG edges
+        await self._build_version_dag(
+            new_version, latest, node_id, doc_id, tenant_id, session
+        )
+
         return new_version
+
+    async def _build_version_dag(
+        self,
+        new_version: NodeVersionRow,
+        previous_version: NodeVersionRow | None,
+        node_id: str,  # noqa: ARG002
+        doc_id: str,
+        tenant_id: str,
+        session: AsyncSession,
+    ) -> None:
+        """Build VersionDAG edges after creating a new version."""
+        version_rows = [new_version]
+        if previous_version:
+            version_rows.append(previous_version)
+
+        builder = VersionDagBuilder(self._storage)
+        edges = await builder.build_from_versions(
+            version_rows,
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+        )
+        for edge in edges:
+            await self._storage.save_knowledge_edge(edge, session=session)
 
     @staticmethod
     async def verify_content_integrity(version: NodeVersionRow) -> bool:

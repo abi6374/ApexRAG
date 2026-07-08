@@ -100,14 +100,10 @@ nav:
     - Ingesting Documents: guides/ingestion.md
     - Querying with Agentic Navigation: guides/querying.md
     - Hybrid Search: guides/hybrid-search.md
-    - Batch Ingestion: guides/batch-ingestion.md
-    - REST API: guides/rest-api.md
-    - Monitoring: guides/monitoring.md
+  - REST API: rest-api.md
   - API Reference:
     - ApexIndex: api/apex-index.md
-    - Navigation: api/navigation.md
     - Storage: api/storage.md
-    - Providers: api/providers.md
     - Exceptions: api/exceptions.md
     - Search: api/search.md
   - Architecture: ARCHITECTURE.md

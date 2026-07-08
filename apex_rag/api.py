@@ -28,6 +28,11 @@ Endpoints:
     POST /query/stream              -> Streamed query (SSE)
     POST /query/global              -> Query across all documents
     POST /query/global/stream       -> Streamed global query (SSE)
+    POST /query/stream/reasoning-graph -> Stream query with real-time ReasoningDAG edges (SSE)
+    GET  /documents/{doc_id}/graph  -> All knowledge edges as graph JSON
+    GET  /documents/{doc_id}/graph/{projection} -> Edges filtered by DAG projection
+    GET  /graph                      -> Global graph across all documents
+    GET  /graph/{projection}         -> Global graph filtered by DAG projection
 """
 
 from __future__ import annotations
@@ -55,7 +60,7 @@ from apex_rag.exceptions import (
     DocumentNotFoundError,
     FileValidationError,
 )
-from apex_rag.models.unified_models import ApexAnswer
+from apex_rag.models.unified_models import ApexAnswer, KnowledgeEdge
 from apex_rag.navigation import NavigationResult
 from apex_rag.observability.accuracy_tracker import accuracy_tracker
 from apex_rag.observability.metrics_service import metrics_service
@@ -530,6 +535,92 @@ async def get_page_index(doc_id: str) -> dict[str, Any]:
     return {"doc_id": doc_id, "entry_count": len(entries), "entries": entries}
 
 
+@app.get("/documents/{doc_id}/graph", tags=["Documents"])
+async def get_document_graph(
+    doc_id: str,
+    limit: int = Query(default=500, description="Maximum number of edges"),
+) -> dict[str, Any]:
+    """Return ALL knowledge edges for a document as a JSON graph.
+
+    Returns a graph structure with ``nodes`` (deduplicated from edge sources/targets
+    and enriched with content labels from the AST nodes table) and ``edges`` arrays,
+    suitable for frontend visualization libraries like vis-network, cytoscape.js, or d3.js.
+    """
+    idx = get_index()
+    edges = await idx.get_edges_by_projection(
+        "document", doc_id=doc_id, limit=limit
+    )
+    return await _build_graph_response(edges, doc_id=doc_id, idx=idx)
+
+
+@app.get("/documents/{doc_id}/graph/{projection}", tags=["Documents"])
+async def get_document_projection_graph(
+    doc_id: str,
+    projection: str,
+    limit: int = Query(default=500, description="Maximum number of edges"),
+) -> dict[str, Any]:
+    """Return knowledge edges for a document filtered by DAG projection tag.
+
+    Projections: ``entity``, ``citation``, ``document``, ``temporal``,
+    ``version``, ``policy``, ``fact``, ``reasoning``.
+
+    Example: ``GET /documents/doc-123/graph/reasoning`` returns the ReasoningDAG.
+
+    Returns a graph structure with ``nodes`` (enriched with content labels
+    from the AST nodes table) and ``edges`` arrays.
+    """
+    idx = get_index()
+    edges = await idx.get_edges_by_projection(
+        projection, doc_id=doc_id, limit=limit
+    )
+    return await _build_graph_response(edges, doc_id=doc_id, projection=projection, idx=idx)
+
+
+# ---------------------------------------------------------------------------
+# Routes — Global Graph
+# ---------------------------------------------------------------------------
+
+
+@app.get("/graph", tags=["Graph"])
+async def get_global_graph(
+    limit: int = Query(default=1000, description="Maximum number of edges"),
+) -> dict[str, Any]:
+    """Return ALL knowledge edges across all documents as a combined JSON graph.
+
+    Aggregates edges from every indexed document into a single graph structure
+    with ``nodes`` (deduplicated and enriched with content labels from the AST
+    nodes table) and ``edges`` arrays.
+
+    Compatible with vis-network, cytoscape.js, and d3.js for global knowledge
+    graph visualization.
+    """
+    idx = get_index()
+    # Omit doc_id to fetch edges across all documents
+    edges = await idx.get_edges_by_projection(
+        "document", limit=limit
+    )
+    return await _build_graph_response(edges, idx=idx)
+
+
+@app.get("/graph/{projection}", tags=["Graph"])
+async def get_global_projection_graph(
+    projection: str,
+    limit: int = Query(default=1000, description="Maximum number of edges"),
+) -> dict[str, Any]:
+    """Return knowledge edges across all documents filtered by DAG projection tag.
+
+    Projections: ``entity``, ``citation``, ``document``, ``temporal``,
+    ``version``, ``policy``, ``fact``, ``reasoning``.
+
+    Example: ``GET /graph/entity`` returns all entity edges across all documents.
+    """
+    idx = get_index()
+    edges = await idx.get_edges_by_projection(
+        projection, limit=limit
+    )
+    return await _build_graph_response(edges, projection=projection, idx=idx)
+
+
 @app.post("/documents/{doc_id}/search", tags=["Documents"])
 async def search_index(
     doc_id: str,
@@ -688,6 +779,78 @@ async def _stream_llm_sse(
 # ---------------------------------------------------------------------------
 
 
+async def _build_graph_response(
+    edges: list[KnowledgeEdge],
+    *,
+    doc_id: str | None = None,
+    projection: str | None = None,
+    idx: ApexIndex | None = None,
+) -> dict[str, Any]:
+    """Convert KnowledgeEdges to a JSON graph structure for frontend viz.
+
+    Produces ``nodes`` (deduplicated from edge source/target IDs with
+    content labels resolved from the AST nodes table) and ``edges`` arrays,
+    compatible with vis-network, cytoscape.js, d3.js.
+    Each edge includes type, strength, evidence, and projection info.
+    """
+    node_ids: set[str] = set()
+    edge_list: list[dict[str, Any]] = []
+
+    for edge in edges:
+        node_ids.add(edge.source_node_id)
+        node_ids.add(edge.target_node_id)
+        edge_list.append({
+            "id": edge.edge_id,
+            "source": edge.source_node_id,
+            "target": edge.target_node_id,
+            "type": edge.edge_type if isinstance(edge.edge_type, str) else edge.edge_type.value,
+            "strength": edge.strength,
+            "evidence": edge.evidence[:200] if edge.evidence else "",
+            "projections": edge.projections,
+        })
+
+    # Resolve full node metadata from the AST nodes table
+    node_meta: dict[str, dict[str, Any]] = {}
+    if idx and node_ids:
+        try:
+            nodes = await idx._storage.get_nodes_batch(
+                list(node_ids), tenant_context="default"
+            )
+            for nid, node in nodes.items():
+                node_meta[nid] = {
+                    # First 80 chars of content as a human-readable label
+                    "label": node.content[:80] if node.content else nid[:8],
+                    "node_type": node.node_type.value if hasattr(node.node_type, "value") else str(node.node_type),
+                    "page_number": node.page_number,
+                }
+        except Exception:
+            logger.warning("Failed to resolve node metadata for graph response", exc_info=True)
+
+    nodes = [
+        {
+            "id": nid,
+            "label": node_meta.get(nid, {}).get("label", nid[:8]),
+            "group": "node",
+            "node_type": node_meta.get(nid, {}).get("node_type"),
+            "page_number": node_meta.get(nid, {}).get("page_number"),
+        }
+        for nid in sorted(node_ids)
+    ]
+
+    result: dict[str, Any] = {
+        "nodes": nodes,
+        "edges": edge_list,
+        "edge_count": len(edge_list),
+        "node_count": len(nodes),
+    }
+    if doc_id:
+        result["doc_id"] = doc_id
+    if projection:
+        result["projection"] = projection
+
+    return result
+
+
 def _to_query_response(
     result: NavigationResult | ApexAnswer | str | None,
     *,
@@ -831,6 +994,176 @@ async def query_orchestrate_stream(req: OrchestrateStreamRequest) -> StreamingRe
     """
     return StreamingResponse(
         _stream_orchestrated_sse(req.question, req.doc_id, tenant_id=req.tenant_id),
+        media_type="text/event-stream",
+    )
+
+
+# ---------------------------------------------------------------------------
+# ReasoningDAG Streaming (SSE)
+# ---------------------------------------------------------------------------
+
+
+async def _stream_reasoning_graph_sse(
+    question: str,
+    doc_id: str,
+    *,
+    tenant_id: str = "default",  # noqa: ARG001
+) -> AsyncGenerator[str, None]:
+    """
+    SSE generator that streams real-time trace events and ReasoningDAG edges.
+
+    Flow:
+        1. Creates a shared ``trace_id`` and registers a trace listener.
+        2. Runs the query with the same ``trace_id`` so all
+           ``trace_manager.publish()`` calls dispatch to our listener.
+        3. Polls both the event queue and the trace queue concurrently,
+           yielding SSE ``trace`` events in real-time as the orchestrator
+           navigates the document tree.
+        4. When the query finishes, fetches the newly-built ReasoningDAG
+           edges from storage and yields them as a single ``reasoning_graph``
+           event containing the full ``{nodes, edges}`` JSON structure.
+        5. Yields a final ``result`` event with the answer text and metrics.
+
+    SSE event types:
+        ``start``           — query started (doc_id, question)
+        ``trace``           — individual trace event from the orchestrator
+        ``reasoning_graph`` — full ReasoningDAG as {nodes, edges} JSON graph
+        ``result``          — final answer text and coverage metrics
+        ``error``           — error occurred
+    """
+    idx = get_index()
+    trace_id = f"trace-{int(time.time() * 1000)}-reasoning-dag"
+
+    # Register trace listener for real-time events
+    trace_queue = trace_manager.register_listener(trace_id)
+    event_queue: asyncio.Queue[Any] = asyncio.Queue()
+
+    # Start the query in a background task — it will use our trace_id
+    # because ApexIndex.query() passes external_trace_id → orchestrator.run()
+    query_task = asyncio.create_task(
+        idx.query(
+            question,
+            doc_id,
+            event_queue=event_queue,
+            external_trace_id=trace_id,
+        )
+    )
+
+    try:
+        while True:
+            coros: list[asyncio.Task[Any]] = [
+                asyncio.create_task(event_queue.get()),
+                query_task,
+            ]
+            if trace_queue:
+                coros.append(asyncio.create_task(trace_queue.get()))
+
+            done, _ = await asyncio.wait(
+                coros,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Flush event queue (start, done events)
+            while not event_queue.empty():
+                event = await event_queue.get()
+                yield f"data: {json.dumps(event)}\n\n"
+
+            # Flush trace queue (real-time orchestrator traces)
+            if trace_queue:
+                while not trace_queue.empty():
+                    event = await trace_queue.get()
+                    yield f"data: {json.dumps({'event': 'trace', 'trace': event})}\n\n"
+
+            if query_task.done():
+                # Query completed — get the answer
+                answer = query_task.result()
+
+                # Build and stream the ReasoningDAG graph (fetched from storage)
+                # The orchestrator already built and saved edges during run().
+                try:
+                    reasoning_edges = await idx.get_edges_by_projection(
+                        "reasoning", doc_id=doc_id, limit=500
+                    )
+                    if reasoning_edges:
+                        graph_data = await _build_graph_response(
+                            reasoning_edges, doc_id=doc_id, projection="reasoning", idx=idx
+                        )
+                        yield f"data: {json.dumps({'event': 'reasoning_graph', **graph_data})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'event': 'reasoning_graph', 'edges': [], 'nodes': [], 'edge_count': 0, 'node_count': 0})}\n\n"
+                except Exception as exc:
+                    logger.warning("Failed to fetch reasoning edges for SSE: %s", exc)
+
+                # Stream final result
+                if answer and answer.answer_text:
+                    final_data: dict[str, Any] = {
+                        "event": "result",
+                        "found": True,
+                        "content": answer.answer_text,
+                        "coverage_guarantee": answer.coverage_guarantee,
+                        "prediction_set_size": answer.prediction_set_size,
+                        "latency_ms": answer.latency_ms,
+                    }
+                else:
+                    final_data = {"event": "result", "found": False}
+                yield f"data: {json.dumps(final_data)}\n\n"
+                break
+
+    except asyncio.CancelledError:
+        query_task.cancel()
+        raise
+    except Exception as exc:
+        logger.error("Reasoning graph SSE error: %s", exc, exc_info=True)
+        yield f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+    finally:
+        if trace_queue:
+            trace_manager.unregister_listener(trace_id, trace_queue)
+
+
+@app.post("/query/stream/reasoning-graph", tags=["Query"])
+async def query_reasoning_graph_stream(req: OrchestrateStreamRequest) -> StreamingResponse:
+    """
+    Stream real-time trace events and ReasoningDAG edges via SSE.
+
+    This endpoint returns Server-Sent Events (SSE) that provide:
+
+    - **Real-time trace events** — ``trace`` events are pushed as the
+      orchestrator publishes them (navigation steps, critic reviews,
+      verification results, etc.).
+
+    - **ReasoningDAG graph** — After the query completes, a final
+      ``reasoning_graph`` event delivers the full Knowledge Graph of
+      reasoning edges as a standard ``{nodes, edges}`` JSON structure
+      compatible with vis-network, cytoscape.js, and d3.js.
+
+    - **Answer result** — ``result`` event with the final answer text,
+      coverage guarantee, and prediction set size.
+
+    Event types:
+        ``start``           — query started
+        ``trace``           — real-time orchestrator trace event
+        ``reasoning_graph`` — full ReasoningDAG as JSON graph
+        ``result``          — final answer with metrics
+        ``error``           — error occurred
+
+    Example client code::
+
+        const evtSource = new EventSource("/query/stream/reasoning-graph");
+        // Or with POST:
+        const response = await fetch("/query/stream/reasoning-graph", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({doc_id: "doc-123", question: "What is Q3 revenue?"}),
+        });
+        const reader = response.body.getReader();
+        // Read SSE events as they arrive...
+    """
+    return StreamingResponse(
+        _stream_reasoning_graph_sse(
+            req.question,
+            req.doc_id,
+            tenant_id=req.tenant_id,
+        ),
         media_type="text/event-stream",
     )
 

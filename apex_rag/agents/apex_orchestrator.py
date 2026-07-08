@@ -40,8 +40,10 @@ from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.orchestrator import Orchestrator
 from apex_rag.enterprise.auth.access_control import AccessControlAgent
 from apex_rag.enterprise.auth.models import TenantContext
+from apex_rag.graph.dags.reasoning_dag import ReasoningDagBuilder
 from apex_rag.models.unified_models import ApexAnswer
 from apex_rag.observability.telemetry import get_tracer
+from apex_rag.observability.trace_manager import trace_manager
 
 logger = logging.getLogger("apex_rag.agents.apex_orchestrator")
 
@@ -75,13 +77,25 @@ class ApexOrchestrator(Orchestrator):
         *,
         temporal_auditor: TemporalAuditAgent | None = None,
         conformal_wrapper: ConformalWrapperAgent | None = None,
+        reasoning_dag_builder: ReasoningDagBuilder | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        # Pull planning pipeline agents from kwargs before passing them
+        knowledge_planner = kwargs.pop("knowledge_planner", None)
+        role_planner = kwargs.pop("role_planner", None)
+        temporal_planner = kwargs.pop("temporal_planner", None)
+
+        super().__init__(
+            **kwargs,
+            knowledge_planner=knowledge_planner,
+            role_planner=role_planner,
+            temporal_planner=temporal_planner,
+        )
         self._temporal_auditor = temporal_auditor or TemporalAuditAgent()
         self._conformal_wrapper = conformal_wrapper or ConformalWrapperAgent(
             coverage_level=0.90,
         )
+        self._reasoning_dag_builder = reasoning_dag_builder
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -97,6 +111,84 @@ class ApexOrchestrator(Orchestrator):
 
     # ── Run (non-streaming) ──────────────────────────────────────────
 
+    async def _collect_trace_events(
+        self,
+        query: str,
+        doc_id: str,
+        max_iterations: int | None,
+        calibration_scores: list[float] | None,
+        ablation_mode: bool,
+        tenant_context: TenantContext | None,
+        *,
+        external_trace_id: str | None = None,
+    ) -> ApexAnswer | None:
+        """Run the full pipeline with trace event collection for ReasoningDAG.
+
+        Args:
+            external_trace_id: If provided, use this trace_id instead of generating one.
+                               Allows external SSE listeners to register with the same ID
+                               and receive real-time trace events during query execution.
+        """
+        # Use externally-set trace_id if provided, otherwise generate one.
+        # This allows external SSE listeners to register with the same trace_id
+        # and receive real-time trace events during query execution.
+        if external_trace_id:
+            self.trace_id = external_trace_id
+        elif not getattr(self, "trace_id", None):
+            self.trace_id = f"trace-{int(time.time() * 1000)}-reasoning"
+        trace_id = self.trace_id
+        trace_queue = trace_manager.register_listener(trace_id)
+        trace_events: list[dict[str, Any]] = []
+
+        try:
+            result = await self._run_inner(
+                query=query,
+                doc_id=doc_id,
+                max_iterations=max_iterations,
+                calibration_scores=calibration_scores,
+                ablation_mode=ablation_mode,
+                tenant_context=tenant_context,
+            )
+
+            # Drain trace events from the queue
+            while True:
+                try:
+                    event = trace_queue.get_nowait()
+                    trace_events.append(event)
+                except Exception:
+                    break
+
+            # Build and persist ReasoningDAG edges
+            if result is not None and self._reasoning_dag_builder is not None:
+                try:
+                    edges = await self._reasoning_dag_builder.build(
+                        trace_events=trace_events,
+                        answer=result,
+                        doc_id=doc_id,
+                        query=query,
+                        tenant_id=(
+                            tenant_context.tenant_id if tenant_context else "default"
+                        ),
+                    )
+                    storage = getattr(self.navigator, "_storage", None)
+                    if storage and edges:
+                        for edge in edges:
+                            await storage.save_knowledge_edge(edge)
+                        logger.info(
+                            "ReasoningDAG: %d edges saved for query '%s'",
+                            len(edges),
+                            query[:50],
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "ReasoningDAG build failed (non-critical): %s", exc,
+                    )
+
+            return result
+
+        finally:
+            trace_manager.unregister_listener(trace_id, trace_queue)
+
     async def run(
         self,
         query: str,
@@ -107,6 +199,7 @@ class ApexOrchestrator(Orchestrator):
         calibration_scores: list[float] | None = None,
         ablation_mode: bool = False,
         tenant_context: TenantContext | None = None,
+        external_trace_id: str | None = None,
     ) -> ApexAnswer | None:
         """Execute the full pipeline and return a populated ApexAnswer.
 
@@ -116,7 +209,8 @@ class ApexOrchestrator(Orchestrator):
         2. Scores temporal freshness and detects contradictions (skipped in ablation).
         3. Applies conformal prediction (skipped in ablation).
         4. Synthesises the final answer.
-        5. Returns an :class:`ApexAnswer` with all provenance.
+        5. Builds ReasoningDAG edges from orchestrator trace events.
+        6. Returns an :class:`ApexAnswer` with all provenance.
 
         Args:
             query:              The user's natural-language query.
@@ -126,10 +220,34 @@ class ApexOrchestrator(Orchestrator):
             calibration_scores: Optional conformal calibration scores.
             ablation_mode:      If True, run Layer 1 (AST) only, skipping
                                 temporal, causal, and conformal layers.
+            external_trace_id:  Optional trace_id for external SSE listeners to
+                                receive real-time trace events during execution.
 
         Returns:
             An :class:`ApexAnswer`, or ``None`` if no evidence found.
         """
+        return await self._collect_trace_events(
+            query=query,
+            doc_id=doc_id,
+            max_iterations=max_iterations,
+            calibration_scores=calibration_scores,
+            ablation_mode=ablation_mode,
+            tenant_context=tenant_context,
+            external_trace_id=external_trace_id,
+        )
+
+    async def _run_inner(
+        self,
+        query: str,
+        doc_id: str,
+        *,
+        max_iterations: int | None = None,
+        domain: str = "general",  # noqa: ARG002
+        calibration_scores: list[float] | None = None,
+        ablation_mode: bool = False,
+        tenant_context: TenantContext | None = None,
+    ) -> ApexAnswer | None:
+        """Inner execution without trace collection (extracted for ReasoningDAG)."""
         start = time.perf_counter()
 
         # Check for temporal query using TemporalReasoningAgent

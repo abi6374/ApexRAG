@@ -11,10 +11,12 @@ from sqlalchemy import select
 from apex_rag.core.metrics.parser import MetricValueParser, UnitType
 from apex_rag.ingestion.apex_storage import (
     ApexStorage,
-    CausalEdgeRow,
     ChangeHistoryRow,
     NodeVersionRow,
 )
+
+# Backward-compatible alias — CausalEdgeRow is now KnowledgeEdgeRow
+from apex_rag.ingestion.apex_storage import KnowledgeEdgeRow as CausalEdgeRow
 
 logger = logging.getLogger("apex_rag.temporal.reconstructor")
 

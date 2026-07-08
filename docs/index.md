@@ -6,8 +6,8 @@
 
 -   :material-rocket-launch: **Fast & Lightweight** — `pip install apex-rag` with zero heavy dependencies.
 -   :material-brain: **Agentic Navigation** — LLM-guided tree walking achieves 99.999% precision.
--   :material-magnify-expand: **Hybrid Search** — Vector similarity + keyword BM25 + structural navigation.
--   :material-shield-check: **Production Ready** — Typed exceptions, health checks, rate limiting, API key auth.
+-   :material-graph: **8 Knowledge DAGs** — Document, Entity, Citation, Temporal, Version, Policy, Fact, and Reasoning edge projections.
+-   :material-shield-check: **Production Ready** — Typed exceptions, health checks, rate limiting, API key auth, SSE streaming.
 -   :material-docker: **Docker Ready** — Official Docker Compose with Ollama + Postgres + monitoring.
 -   :material-chart-line: **Observable** — OpenTelemetry traces + Prometheus metrics + structured JSON logs.
 
@@ -21,14 +21,12 @@ This works for simple lookups, but fails for complex queries that require **unde
 ApexRAG is different. It:
 
 1. **Parses documents into a hierarchy** — real sections, chapters, and paragraphs (not arbitrary chunks).
-2. **Walks the tree with an LLM** — at each level, the agent reads the "Semantic Map" summaries and
-   decides which branch to explore.
-3. **Verifies every answer** — before returning a result, a separate LLM call confirms the content
-   actually answers the question.
-4. **Supports hybrid retrieval** — optionally augment agentic navigation with vector similarity and
-   keyword BM25 for even higher recall.
+2. **Walks the tree with an LLM** — at each level, the agent reads the "Semantic Map" summaries and decides which branch to explore.
+3. **Verifies every answer** — before returning a result, a separate LLM call confirms the content actually answers the question.
+4. **Builds 8 Knowledge DAGs** — automatically extracts Document, Entity, Citation, Temporal, Version, Policy, Fact, and Reasoning relationships into a unified edge store.
+5. **Streams real-time traces** — SSE endpoints push agent navigation steps and ReasoningDAG edges as they're generated.
 
-The result: **pinpoint-accurate answers** that cite exact sections, not hallucinated blends.
+The result: **pinpoint-accurate answers** that cite exact sections, backed by traceable reasoning graphs.
 
 ## Quick Start
 
@@ -39,11 +37,10 @@ from apex_rag import ApexIndex
 async def main():
     async with await ApexIndex.create() as index:
         doc_id = await index.ingest("report.pdf")
-        result = await index.query("What is the Q3 revenue?", doc_id)
-        if result:
-            print(f"[{result.path}] {result.title}")
-            print(result.content)
-            print(f"Verified: {result.verified} Confidence: {result.confidence:.2f}")
+        answer = await index.query("What is the Q3 revenue?", doc_id)
+        print(answer.answer_text)
+        print(f"Confidence: {answer.coverage_guarantee:.0%}")
+        print(f"Evidence packets: {answer.prediction_set_size}")
 
 asyncio.run(main())
 ```
@@ -67,13 +64,17 @@ pip install apex-rag[all]              # Everything
 | Feature | Description |
 |---------|-------------|
 | **Agentic Navigation** | LLM-guided structural tree walking with backtracking |
+| **8 Knowledge DAGs** | Automatic edge extraction: Document, Entity, Citation, Temporal, Version, Policy, Fact, Reasoning |
+| **ReasoningDAG** | Query-time tracing captured as typed reasoning edges (REASONING_CHAIN, DERIVES_FROM, INFERS, USES) |
+| **Graph Visualization** | Interactive vis-network tabs on dashboard and document pages |
+| **Global Graph API** | `GET /graph` and `GET /graph/{projection}` across all documents |
+| **SSE Streaming** | Real-time agent traces + ReasoningDAG via Server-Sent Events |
 | **Semantic Map Summaries** | 30-word summaries at every node for fast browsing |
 | **Multi-Candidate Search** | Tries best + fallback + remaining siblings exhaustively |
 | **Leaf Verification** | Separate LLM call confirms answer correctness |
 | **Semantic Cache** | Substring-based query caching for repeated questions |
 | **Global Search** | Cross-document query with LLM document selection |
 | **Hybrid Search** | Optional vector + keyword + structural ranking |
-| **Streaming API** | Real-time SSE streaming of agent decisions |
 | **Typed Exceptions** | Error hierarchy with codes and resolution hints |
 | **OpenTelemetry** | Distributed tracing + Prometheus metrics |
 | **REST API** | FastAPI with auth, rate limiting, health checks |

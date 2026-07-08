@@ -1,10 +1,16 @@
 """
 apex_storage.py — Async SQLAlchemy storage layer for the unified ApexRAG models.
 
-Stores :class:`ASTNode`, :class:`TemporalMetadata`, and :class:`CausalEdge`
+Stores :class:`ASTNode`, :class:`TemporalMetadata`, and :class:`KnowledgeEdge`
 objects in separate relational tables with proper foreign keys.
 
 Supports both **SQLite** (development) and **PostgreSQL** (production).
+
+DAG Projections:
+    The ``apex_causal_edges`` table now doubles as the unified Knowledge DAG
+    edge store.  Each row carries ``projections_json`` and ``metadata_json``
+    columns.  The ORM class is ``KnowledgeEdgeRow``; ``CausalEdgeRow`` is
+    a backward-compatible alias.
 """
 
 from __future__ import annotations
@@ -42,13 +48,17 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# Unified KnowledgeEdge model with DAG projection support
 from apex_rag.models.unified_models import (
     ASTNode,
-    CausalEdge,
     EdgeType,
+    KnowledgeEdge,
     NodeType,
     TemporalMetadata,
 )
+
+# Backward-compatible alias — CausalEdge is now KnowledgeEdge
+CausalEdge = KnowledgeEdge
 
 logger = logging.getLogger("apex_rag.storage")
 
@@ -165,8 +175,15 @@ class PageIndexEntryRow(ApexBase):
     )
 
 
-class CausalEdgeRow(ApexBase):
-    """SQL row for the :class:`CausalEdge` model."""
+class KnowledgeEdgeRow(ApexBase):
+    """SQL row for the unified :class:`KnowledgeEdge` model with DAG projection support.
+
+    This is the **single edge store** for all 8 Knowledge DAG projections:
+    document, fact, temporal, version, citation, reasoning, policy, entity.
+    Each row carries ``projections_json`` indicating which DAG(s) it belongs to.
+
+    Backward compatible — ``CausalEdgeRow`` is an alias for this class.
+    """
 
     __tablename__ = "apex_causal_edges"
 
@@ -192,11 +209,29 @@ class CausalEdgeRow(ApexBase):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    # ── DAG Projections (new columns, added by migration 004) ────────
+    projections_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default='["document"]'
+    )
+    metadata_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}"
+    )
+
     __table_args__ = (
         Index("ix_apex_edges_source", "source_node_id"),
         Index("ix_apex_edges_target", "target_node_id"),
         Index("ix_apex_edges_type", "edge_type"),
     )
+
+
+# ── Backward-compatible alias ──────────────────────────────────────────
+
+CausalEdgeRow = KnowledgeEdgeRow
+"""Alias for :class:`KnowledgeEdgeRow`.
+
+``CausalEdgeRow`` now refers to the same ORM class as ``KnowledgeEdgeRow``.
+The table name remains ``apex_causal_edges`` with new columns added.
+"""
 
 
 class QueryCacheRow(ApexBase):
@@ -426,6 +461,45 @@ class StateSnapshotRow(ApexBase):
     doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     snapshot_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     snapshot_data: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class RoleProfileRow(ApexBase):
+    """SQL row for a custom RoleProfile stored as a database object.
+
+    Every tenant can define unlimited custom roles.  This replaces the
+    hardcoded ``ROLE_CONFIGS`` dict in ``RolePlannerAgent``.
+
+    Attributes match the :class:`apex_rag.enterprise.auth.models.RoleProfile` model.
+    """
+
+    __tablename__ = "role_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ranking_weights: Mapped[str] = mapped_column(
+        Text, nullable=False, default='{"vector": 0.2, "keyword": 0.4, "structural": 0.4}'
+    )
+    visible_node_types: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hidden_node_types: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    temporal_policy: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    allowed_tools: Mapped[str] = mapped_column(Text, nullable=False, default='["read", "traverse", "search"]')
+    field_visibility: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    retrieval_preferences: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False, default="system")
+    tenant_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True, default="default"
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    __table_args__ = (
+        Index("ix_role_profiles_name", "name"),
+        Index("ix_role_profiles_tenant", "tenant_id"),
+        Index("ix_role_profiles_name_tenant", "name", "tenant_id", unique=True),
+    )
 
 
 class VersionLineageRow(ApexBase):
@@ -1048,29 +1122,36 @@ class ApexStorage:
 
         return False
 
-    async def save_causal_edge(self, edge: CausalEdge) -> None:
-        """Persist a causal edge with DAG cycle detection.
+    async def save_knowledge_edge(
+        self,
+        edge: KnowledgeEdge,
+        *,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Persist a knowledge edge with DAG cycle detection and projection support.
 
         PRINCIPLE 3 — DAG Lineage.
         PRINCIPLE 11 — Enforce DAG Acyclicity At Write Time.
 
         Before inserting a new edge, this method checks whether the
-        proposed edge would create a cycle in the causal graph.
+        proposed edge would create a cycle in the knowledge graph.
         If a cycle is detected, a :class:`ValueError` is raised and
         the edge is **not** persisted.
 
         Args:
-            edge: The :class:`CausalEdge` to save.
+            edge: The :class:`KnowledgeEdge` to save.  Includes ``projections``
+                  and ``metadata`` for DAG membership.
+            session: Optional existing session (creates one if omitted).
 
         Raises:
-            ValueError: If the edge would create a cycle in the causal graph.
+            ValueError: If the edge would create a cycle in the graph.
         """
-        async with self.session() as session:
+        async def _save(sess: AsyncSession) -> None:
             edge_type_str = (
                 edge.edge_type if isinstance(edge.edge_type, str) else edge.edge_type.value
             )
 
-            existing = await session.get(CausalEdgeRow, edge.edge_id)
+            existing = await sess.get(KnowledgeEdgeRow, edge.edge_id)
             if existing is not None:
                 existing.source_node_id = edge.source_node_id
                 existing.target_node_id = edge.target_node_id
@@ -1078,21 +1159,23 @@ class ApexStorage:
                 existing.strength = edge.strength
                 existing.evidence = edge.evidence
                 existing.discovered_at = edge.discovered_at
+                existing.projections_json = json.dumps(edge.projections)
+                existing.metadata_json = json.dumps(edge.metadata)
                 return
 
             if await self._detect_cycle_in_causal_graph(
                 edge.source_node_id,
                 edge.target_node_id,
-                session,
+                sess,
             ):
                 raise ValueError(
-                    f"Cannot add causal edge {edge.edge_id}: "
+                    f"Cannot add knowledge edge {edge.edge_id}: "
                     f"{edge.source_node_id} \u2192 {edge.target_node_id} would create a cycle "
-                    f"in the causal graph.  Cycles are rejected at write time "
+                    f"in the knowledge graph.  Cycles are rejected at write time "
                     f"(Principle 11 \u2014 DAG Acyclicity)."
                 )
 
-            row = CausalEdgeRow(
+            row = KnowledgeEdgeRow(
                 edge_id=edge.edge_id,
                 source_node_id=edge.source_node_id,
                 target_node_id=edge.target_node_id,
@@ -1100,13 +1183,38 @@ class ApexStorage:
                 strength=edge.strength,
                 evidence=edge.evidence,
                 discovered_at=edge.discovered_at,
+                projections_json=json.dumps(edge.projections),
+                metadata_json=json.dumps(edge.metadata),
             )
-            session.add(row)
+            sess.add(row)
+
+        await self._run_with_session(_save, session)
+
+    async def save_causal_edge(
+        self,
+        edge: KnowledgeEdge,
+        *,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Persist a causal edge (backward-compatible wrapper).
+
+        Delegates to :meth:`save_knowledge_edge`.  ``CausalEdge`` is now
+        an alias for ``KnowledgeEdge``, so any ``CausalEdge`` instance
+        (with or without ``projections``/``metadata``) is accepted.
+
+        Args:
+            edge: The :class:`KnowledgeEdge` (or ``CausalEdge``) to save.
+            session: Optional existing session.
+
+        Raises:
+            ValueError: If the edge would create a cycle in the graph.
+        """
+        await self.save_knowledge_edge(edge, session=session)
 
     async def get_edges_for_node(
         self, node_id: str, *, tenant_context: str | None = None
-    ) -> list[CausalEdge]:
-        """Fetch all causal edges involving a given node (source or target),
+    ) -> list[KnowledgeEdge]:
+        """Fetch all knowledge edges involving a given node (source or target),
         scoped to tenant via JOIN with ASTNodeRow.
 
         Args:
@@ -1114,7 +1222,7 @@ class ApexStorage:
             tenant_context: Required tenant ID for multi-tenant isolation.
 
         Returns:
-            A list of :class:`CausalEdge` objects belonging to the tenant.
+            A list of :class:`KnowledgeEdge` objects belonging to the tenant.
 
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
@@ -1122,29 +1230,31 @@ class ApexStorage:
         tenant_context = self._require_tenant(tenant_context, "get_edges_for_node")
         async with self.session() as session:
             stmt = (
-                select(CausalEdgeRow)
+                select(KnowledgeEdgeRow)
                 .join(
                     ASTNodeRow,
-                    CausalEdgeRow.source_node_id == ASTNodeRow.node_id,
+                    KnowledgeEdgeRow.source_node_id == ASTNodeRow.node_id,
                 )
                 .where(
-                    (CausalEdgeRow.source_node_id == node_id)
-                    | (CausalEdgeRow.target_node_id == node_id),
+                    (KnowledgeEdgeRow.source_node_id == node_id)
+                    | (KnowledgeEdgeRow.target_node_id == node_id),
                     ASTNodeRow.tenant_id == tenant_context,
                 )
             )
             result = await session.execute(stmt)
             rows = result.scalars().all()
-            return [_row_to_causal_edge(r) for r in rows]
+            return [_row_to_knowledge_edge(r) for r in rows]
 
-    async def get_all_edges(self, *, tenant_context: str | None = None) -> list[CausalEdge]:
-        """Fetch all causal edges across the graph, scoped to tenant.
+    async def get_all_edges(
+        self, *, tenant_context: str | None = None
+    ) -> list[KnowledgeEdge]:
+        """Fetch all knowledge edges across the graph, scoped to tenant.
 
         Args:
             tenant_context: Required tenant ID for multi-tenant isolation.
 
         Returns:
-            A list of all :class:`CausalEdge` objects belonging to the tenant.
+            A list of all :class:`KnowledgeEdge` objects belonging to the tenant.
 
         Raises:
             MissingTenantContextError: If tenant_context is None or empty.
@@ -1152,16 +1262,77 @@ class ApexStorage:
         tenant_context = self._require_tenant(tenant_context, "get_all_edges")
         async with self.session() as session:
             stmt = (
-                select(CausalEdgeRow)
+                select(KnowledgeEdgeRow)
                 .join(
                     ASTNodeRow,
-                    CausalEdgeRow.source_node_id == ASTNodeRow.node_id,
+                    KnowledgeEdgeRow.source_node_id == ASTNodeRow.node_id,
                 )
                 .where(ASTNodeRow.tenant_id == tenant_context)
             )
             result = await session.execute(stmt)
             rows = result.scalars().all()
-            return [_row_to_causal_edge(r) for r in rows]
+            return [_row_to_knowledge_edge(r) for r in rows]
+
+    async def get_edges_by_projection(
+        self,
+        projection: str,
+        *,
+        doc_id: str | None = None,
+        node_id: str | None = None,
+        tenant_context: str | None = None,
+        limit: int = 500,
+    ) -> list[KnowledgeEdge]:
+        """Fetch knowledge edges filtered by DAG projection tag.
+
+        Uses JSON containment (``LIKE '%"<projection>"%'``) to match edges
+        whose ``projections_json`` contains the given projection tag.
+        Optionally filtered by document or node.
+
+        Args:
+            projection:      DAG projection tag (e.g. ``"entity"``, ``"citation"``).
+            doc_id:          Optional — restrict to edges for a specific document.
+            node_id:         Optional — restrict to edges involving a specific node.
+            tenant_context:  Required tenant ID for multi-tenant isolation.
+            limit:           Maximum results (default 500).
+
+        Returns:
+            A list of :class:`KnowledgeEdge` objects matching the projection.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        tenant_context = self._require_tenant(tenant_context, "get_edges_by_projection")
+        async with self.session() as session:
+            from sqlalchemy import or_
+
+            stmt = select(KnowledgeEdgeRow).where(
+                KnowledgeEdgeRow.projections_json.like(f'%"{projection}"%'),
+            )
+
+            if node_id:
+                stmt = stmt.where(
+                    or_(
+                        KnowledgeEdgeRow.source_node_id == node_id,
+                        KnowledgeEdgeRow.target_node_id == node_id,
+                    )
+                )
+
+            # Join with ASTNodeRow for tenant isolation
+            stmt = (
+                stmt.join(
+                    ASTNodeRow,
+                    KnowledgeEdgeRow.source_node_id == ASTNodeRow.node_id,
+                )
+                .where(ASTNodeRow.tenant_id == tenant_context)
+                .limit(limit)
+            )
+
+            if doc_id:
+                stmt = stmt.where(ASTNodeRow.doc_id == doc_id)
+
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return [_row_to_knowledge_edge(r) for r in rows]
 
     # ── Page Index CRUD ────────────────────────────────────────────────────
 
@@ -1385,6 +1556,33 @@ class ApexStorage:
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
+
+    async def get_nodes_batch(
+        self, node_ids: list[str], *, tenant_context: str | None = None
+    ) -> dict[str, ASTNode]:
+        """Fetch multiple nodes by their IDs in a single query.
+
+        Args:
+            node_ids:        List of node UUID4 strings.
+            tenant_context:  Required tenant ID for multi-tenant isolation.
+
+        Returns:
+            A dict mapping ``node_id`` → :class:`ASTNode` for all found nodes.
+
+        Raises:
+            MissingTenantContextError: If tenant_context is None or empty.
+        """
+        if not node_ids:
+            return {}
+        tenant_context = self._require_tenant(tenant_context, "get_nodes_batch")
+        async with self.session() as session:
+            stmt = select(ASTNodeRow).where(
+                ASTNodeRow.node_id.in_(node_ids),
+                ASTNodeRow.tenant_id == tenant_context,
+            )
+            result = await session.execute(stmt)
+            rows = result.scalars().all()
+            return {r.node_id: _row_to_ast_node(r) for r in rows}
 
     async def get_document_root_nodes(
         self, doc_id: str, *, tenant_context: str | None = None
@@ -1908,6 +2106,155 @@ class ApexStorage:
 
         return await self._run_with_session(_get, session)
 
+    # ── RoleProfile CRUD ──────────────────────────────────────────────
+
+    async def save_role_profile(
+        self,
+        profile: RoleProfileRow,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Persist a RoleProfile (INSERT or UPDATE by id)."""
+
+        async def _save(sess: AsyncSession) -> None:
+            existing = await sess.get(RoleProfileRow, profile.id)
+            if existing is not None:
+                existing.name = profile.name
+                existing.description = profile.description
+                existing.ranking_weights = profile.ranking_weights
+                existing.visible_node_types = profile.visible_node_types
+                existing.hidden_node_types = profile.hidden_node_types
+                existing.temporal_policy = profile.temporal_policy
+                existing.allowed_tools = profile.allowed_tools
+                existing.field_visibility = profile.field_visibility
+                existing.retrieval_preferences = profile.retrieval_preferences
+                existing.created_by = profile.created_by
+                existing.tenant_id = profile.tenant_id
+                existing.version = profile.version + 1
+            else:
+                sess.add(profile)
+
+        await self._run_with_session(_save, session)
+
+    async def get_role_profile(
+        self,
+        role_name: str,
+        tenant_id: str = "default",
+        session: AsyncSession | None = None,
+    ) -> RoleProfileRow | None:
+        """Fetch a RoleProfile by name + tenant_id."""
+
+        async def _get(sess: AsyncSession) -> RoleProfileRow | None:
+            stmt = select(RoleProfileRow).where(
+                RoleProfileRow.name == role_name,
+                RoleProfileRow.tenant_id == tenant_id,
+            )
+            res = await sess.execute(stmt)
+            return res.scalars().first()
+
+        return await self._run_with_session(_get, session)
+
+    async def list_role_profiles(
+        self,
+        tenant_id: str = "default",
+        session: AsyncSession | None = None,
+    ) -> list[RoleProfileRow]:
+        """List all RoleProfiles for a tenant."""
+
+        async def _list(sess: AsyncSession) -> list[RoleProfileRow]:
+            stmt = (
+                select(RoleProfileRow)
+                .where(RoleProfileRow.tenant_id == tenant_id)
+                .order_by(RoleProfileRow.name)
+            )
+            res = await sess.execute(stmt)
+            return list(res.scalars().all())
+
+        return await self._run_with_session(_list, session)
+
+    async def delete_role_profile(
+        self,
+        role_name: str,
+        tenant_id: str = "default",
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Delete a RoleProfile by name + tenant_id.
+
+        Returns:
+            ``True`` if a profile was deleted.
+        """
+
+        async def _delete(sess: AsyncSession) -> bool:
+            stmt = select(RoleProfileRow).where(
+                RoleProfileRow.name == role_name,
+                RoleProfileRow.tenant_id == tenant_id,
+            )
+            res = await sess.execute(stmt)
+            row = res.scalars().first()
+            if row is None:
+                return False
+            await sess.delete(row)
+            return True
+
+        return await self._run_with_session(_delete, session)
+
+    async def seed_default_role_profiles(
+        self,
+        tenant_id: str = "default",
+        configs: dict[str, dict[str, Any]] | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[RoleProfileRow]:
+        """Seed default role profiles for a tenant if they don't exist.
+
+        Args:
+            tenant_id: The tenant to seed.
+            configs:   Role config dict, keys = role names, values = configs.
+                       If ``None``, the built-in ROLE_CONFIGS are loaded lazily.
+            session:   Optional existing session.
+
+        Returns:
+            The list of :class:`RoleProfileRow` objects for this tenant.
+        """
+        if configs is None:
+            # Lazy import to avoid cross-layer dependency at module level
+            from apex_rag.agents.planner.role import ROLE_CONFIGS
+
+            configs = ROLE_CONFIGS
+
+        rows: list[RoleProfileRow] = []
+
+        async def _seed(sess: AsyncSession) -> list[RoleProfileRow]:
+            import json
+            import uuid
+
+            for role_name, config in configs.items():
+                existing = await self.get_role_profile(
+                    role_name, tenant_id=tenant_id, session=sess
+                )
+                if existing is not None:
+                    rows.append(existing)
+                    continue
+
+                row = RoleProfileRow(
+                    id=str(uuid.uuid4()),
+                    name=role_name,
+                    description=f"Default {role_name} role",
+                    ranking_weights=json.dumps(config.get("ranking_weights", {})),
+                    visible_node_types=json.dumps(config.get("visible_node_types"))
+                    if config.get("visible_node_types")
+                    else None,
+                    hidden_node_types=json.dumps(config.get("hidden_node_types", [])),
+                    allowed_tools=json.dumps(["read", "traverse", "search"]),
+                    retrieval_preferences=json.dumps(config.get("retrieval_preferences", {})),
+                    created_by="system",
+                    tenant_id=tenant_id,
+                )
+                sess.add(row)
+                rows.append(row)
+
+            return rows
+
+        return await self._run_with_session(_seed, session)
+
     # ── Version Lineage CRUD ──────────────────────────────────────
 
     async def _detect_cycle_in_version_lineage(
@@ -2067,9 +2414,24 @@ def _row_to_ast_node(row: ASTNodeRow) -> ASTNode:
     )
 
 
-def _row_to_causal_edge(row: CausalEdgeRow) -> CausalEdge:
-    """Convert a database row to a :class:`CausalEdge`."""
-    return CausalEdge(
+def _row_to_knowledge_edge(row: KnowledgeEdgeRow) -> KnowledgeEdge:
+    """Convert a database row to a :class:`KnowledgeEdge`.
+
+    Handles the ``projections_json`` and ``metadata_json`` columns;
+    falls back to defaults if the columns are missing (backward compatibility
+    with rows written before migration 004).
+    """
+    try:
+        projections = json.loads(row.projections_json) if row.projections_json else ["document"]
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        projections = ["document"]
+
+    try:
+        metadata = json.loads(row.metadata_json) if row.metadata_json else {}
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        metadata = {}
+
+    return KnowledgeEdge(
         edge_id=row.edge_id,
         source_node_id=row.source_node_id,
         target_node_id=row.target_node_id,
@@ -2077,4 +2439,16 @@ def _row_to_causal_edge(row: CausalEdgeRow) -> CausalEdge:
         strength=row.strength,
         evidence=row.evidence,
         discovered_at=row.discovered_at,
+        projections=projections,
+        metadata=metadata,
     )
+
+
+# ── Backward-compatible alias ──────────────────────────────────────────
+
+_row_to_causal_edge = _row_to_knowledge_edge
+"""Alias for :func:`_row_to_knowledge_edge`.
+
+Returns a :class:`KnowledgeEdge` (which is the same as ``CausalEdge``).
+Legacy code that calls ``_row_to_causal_edge`` continues to work.
+"""
