@@ -47,11 +47,7 @@ from apex_rag.agents.planner.agent import QueryPlannerAgent
 from apex_rag.agents.synthesizer.agent import EvidenceSynthesizerAgent
 from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.exceptions import DocumentNotFoundError
-from apex_rag.graph.dags.citation_dag import CitationDagBuilder
-from apex_rag.graph.dags.document_dag import DocumentDagBuilder
-from apex_rag.graph.dags.entity_dag import EntityDagBuilder
-from apex_rag.graph.dags.policy_dag import PolicyDagBuilder
-from apex_rag.graph.dags.temporal_dag import TemporalDagBuilder
+from apex_rag.graph.dag_gating import DAGGatingService
 from apex_rag.graph.edges.causal_builder import CausalGraphBuilder
 from apex_rag.ingestion.apex_parser import ApexParser
 from apex_rag.ingestion.apex_storage import ApexStorage
@@ -130,6 +126,9 @@ class ApexIndex:
 
         self._trace_enabled = trace_enabled
         self._lock = asyncio.Lock()
+
+        # DAG gating service (controls adaptive/lazy/eager DAG building)
+        self._dag_gating: DAGGatingService = DAGGatingService(storage)
 
         # Fact extraction pipeline (lazily initialised)
         self._fact_pipeline: FactPipeline | None = None
@@ -310,45 +309,36 @@ class ApexIndex:
             for edge in edges:
                 await self._storage.save_causal_edge(edge.to_causal_edge())
 
-            # 6. Knowledge DAG Builders (deterministic edge generation)
-            document_builder = DocumentDagBuilder(self._storage)
-            doc_edges = await document_builder.build(
+            # 6. Knowledge DAG Builders — gated by DAGGatingService
+            # DocumentDAG is always built in all modes.
+            # EntityDAG, CitationDAG, PolicyDAG depend on mode:
+            #   - eager: built synchronously here
+            #   - adaptive: built lazily on first query that needs them
+            #   - minimal: never built
+            # TemporalDAG is built as a background task in adaptive mode.
+            # FactDAG is already deferred (FactPipeline).
+            # ReasoningDAG is already query-time (ApexOrchestrator).
+            eager_results = await self._dag_gating.build_eager_dags(
                 nodes, doc_id=resolved_doc_id, tenant_id="default"
             )
-            for edge in doc_edges:
-                await self._storage.save_knowledge_edge(edge)
+            for result in eager_results:
+                logger.debug(
+                    "DAG '%s': %d edges in %.1fms (%s)",
+                    result["projection"],
+                    result["edges_count"],
+                    result.get("duration_ms", 0),
+                    result.get("trigger_reason", "eager"),
+                )
 
-            entity_builder = EntityDagBuilder(self._storage)
-            entity_edges = await entity_builder.build(
-                nodes, doc_id=resolved_doc_id, tenant_id="default"
-            )
-            for edge in entity_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            citation_builder = CitationDagBuilder(self._storage)
-            citation_edges = await citation_builder.build(
-                nodes, doc_id=resolved_doc_id, tenant_id="default"
-            )
-            for edge in citation_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            temporal_builder = TemporalDagBuilder(self._storage)
-            temporal_edges = await temporal_builder.build(
-                nodes, doc_id=resolved_doc_id, tenant_id="default"
-            )
-            for edge in temporal_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            policy_builder = PolicyDagBuilder(self._storage)
-            policy_edges = await policy_builder.build(
-                nodes, doc_id=resolved_doc_id, tenant_id="default"
-            )
-            for edge in policy_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            # FactDAG is populated asynchronously by the FactPipeline after fact extraction.
-
-            # ReasoningDAG is built at query time via ApexOrchestrator.
+            # Background TemporalDAG (fire-and-forget, non-blocking)
+            # Skip in eager/minimal mode — eager builds everything synchronously;
+            # minimal never builds TemporalDAG.
+            if self._dag_gating.mode == "adaptive":
+                asyncio.create_task(
+                    self._dag_gating.build_background_dags(
+                        nodes, doc_id=resolved_doc_id, tenant_id="default"
+                    )
+                )
 
             # 7. Page Index Generation (Book-style index for headings)
             page_entries = []
@@ -439,51 +429,28 @@ class ApexIndex:
             for edge in edges:
                 await self._storage.save_causal_edge(edge.to_causal_edge())
 
-            # 5b. EntityDAG — entity extraction and linking
-            entity_builder = EntityDagBuilder(self._storage)
-            entity_edges = await entity_builder.build(
+            # 5b. Knowledge DAG Builders — gated by DAGGatingService
+            # DocumentDAG is always built. Entity/Citation/Policy DAGs
+            # depend on mode (eager/adaptive/minimal).
+            eager_results = await self._dag_gating.build_eager_dags(
                 nodes, doc_id=doc_id, tenant_id="default"
             )
-            for edge in entity_edges:
-                await self._storage.save_knowledge_edge(edge)
+            for result in eager_results:
+                logger.debug(
+                    "DAG '%s': %d edges in %.1fms (%s)",
+                    result["projection"],
+                    result["edges_count"],
+                    result.get("duration_ms", 0),
+                    result.get("trigger_reason", "eager"),
+                )
 
-            # 5c. CitationDAG — citation and cross-reference linking
-            citation_builder = CitationDagBuilder(self._storage)
-            citation_edges = await citation_builder.build(
-                nodes, doc_id=doc_id, tenant_id="default"
-            )
-            for edge in citation_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            # 5d. DocumentDAG — structural tree edges
-            document_builder = DocumentDagBuilder(self._storage)
-            doc_edges = await document_builder.build(
-                nodes, doc_id=doc_id, tenant_id="default"
-            )
-            for edge in doc_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            # 5e. TemporalDAG — chronological ordering edges
-            temporal_builder = TemporalDagBuilder(self._storage)
-            temporal_edges = await temporal_builder.build(
-                nodes, doc_id=doc_id, tenant_id="default"
-            )
-            for edge in temporal_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            # 5f. PolicyDAG — policy/regulation extraction edges
-            policy_builder = PolicyDagBuilder(self._storage)
-            policy_edges = await policy_builder.build(
-                nodes, doc_id=doc_id, tenant_id="default"
-            )
-            for edge in policy_edges:
-                await self._storage.save_knowledge_edge(edge)
-
-            # 5g. FactDAG — fact relationship edges (requires pipeline facts)
-            # Facts are extracted asynchronously via the FactPipeline — FactDAG
-            # edges will be populated as a background job after fact extraction.
-
-            # 5h. ReasoningDAG is built at query time via ApexOrchestrator.
+            # Background TemporalDAG (fire-and-forget, adaptive mode only)
+            if self._dag_gating.mode == "adaptive":
+                asyncio.create_task(
+                    self._dag_gating.build_background_dags(
+                        nodes, doc_id=doc_id, tenant_id="default"
+                    )
+                )
 
             # 6. Page Index Generation (Book-style index for headings)
             page_entries = []
@@ -892,7 +859,7 @@ class ApexIndex:
         Returns:
             List of PageIndexEntry dicts sorted alphabetically by term.
         """
-        return await self._storage.get_page_index_entries(doc_id)
+        return await self._storage.get_page_index_entries(doc_id, tenant_context="default")
 
     async def search_index(self, doc_id: str, query: str) -> list[dict[str, Any]]:
         """
@@ -934,6 +901,43 @@ class ApexIndex:
     async def list_documents(self) -> list[str]:
         """Return all doc_ids currently stored in the index."""
         return await self._storage.list_document_ids(tenant_context="default")
+
+    # ── DAG Gating ───────────────────────────────────────────────────
+
+    @property
+    def dag_gating(self) -> DAGGatingService:
+        """Access the DAG gating service (for lazy DAG triggers at query time)."""
+        return self._dag_gating
+
+    async def ensure_lazy_dags(
+        self,
+        needed: frozenset[str],
+        nodes: list[ASTNode],
+        *,
+        doc_id: str,
+        tenant_id: str = "default",
+    ) -> list[dict[str, Any]]:
+        """Ensure lazy DAGs are built for a document before a query.
+
+        Called by the orchestrator when a query is classified as needing
+        specific DAG projections.
+
+        Args:
+            needed:  Set of DAG projection tags needed for the current query.
+            nodes:   AST nodes for the document.
+            doc_id:  The document ID.
+            tenant_id: Tenant isolation boundary.
+
+        Returns:
+            Build results for any DAGs that were newly built.
+        """
+        return await self._dag_gating.ensure_dags(
+            list(needed),
+            nodes,
+            doc_id=doc_id,
+            tenant_id=tenant_id,
+            trigger_reason="query_triggered",
+        )
 
     # ── Enterprise Client ─────────────────────────────────────────────
 

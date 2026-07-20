@@ -85,9 +85,9 @@ class ASTNodeRow(ApexBase):
         String(36), ForeignKey("apex_ast_nodes.node_id", ondelete="SET NULL"), nullable=True
     )
     children_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False)
     tenant_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True, default="default"
+        String(255), nullable=False, default="default"
     )
     source_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ingestion_date: Mapped[datetime] = mapped_column(
@@ -162,11 +162,11 @@ class PageIndexEntryRow(ApexBase):
     node_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"), nullable=False
     )
-    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False)
     term: Mapped[str] = mapped_column(String(512), nullable=False)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tenant_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True, default="default"
+        String(255), nullable=False, default="default"
     )
 
     __table_args__ = (
@@ -197,12 +197,10 @@ class KnowledgeEdgeRow(ApexBase):
     source_node_id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        index=True,
     )
     target_node_id: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        index=True,
     )
     edge_type: Mapped[str] = mapped_column(String(20), nullable=False)
     strength: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
@@ -292,7 +290,6 @@ class NodeVersionRow(ApexBase):
         String(36),
         ForeignKey("apex_ast_nodes.node_id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
@@ -323,8 +320,8 @@ class NodeVersionRow(ApexBase):
         nullable=True,
     )
     validity_status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
-    doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    doc_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     __table_args__ = (
         Index("ix_node_versions_node_id", "node_id"),
@@ -479,7 +476,7 @@ class RoleProfileRow(ApexBase):
     __tablename__ = "role_profiles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     ranking_weights: Mapped[str] = mapped_column(
         Text, nullable=False, default='{"vector": 0.2, "keyword": 0.4, "structural": 0.4}'
@@ -492,7 +489,7 @@ class RoleProfileRow(ApexBase):
     retrieval_preferences: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_by: Mapped[str] = mapped_column(String(255), nullable=False, default="system")
     tenant_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True, default="default"
+        String(255), nullable=False, default="default"
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
@@ -517,7 +514,7 @@ class VersionLineageRow(ApexBase):
     __tablename__ = "version_lineage"
 
     lineage_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False)
     doc_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     tenant_id: Mapped[str] = mapped_column(
         String(255), nullable=False, index=True, default="default"

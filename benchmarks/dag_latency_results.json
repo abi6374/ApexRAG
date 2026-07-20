@@ -1,0 +1,60 @@
+{
+  "methodology": {
+    "iterations": 10,
+    "sections": 10,
+    "db_url": "sqlite+aiosqlite:///:memory:",
+    "llm": "MockLLM (no real API calls)",
+    "timer": "time.perf_counter()",
+    "modes": [
+      "eager",
+      "adaptive"
+    ]
+  },
+  "eager": {
+    "p50": 2.4919,
+    "p95": 2.9525,
+    "min": 2.4106,
+    "max": 2.9525,
+    "mean": 2.5629,
+    "stdev": 0.1838
+  },
+  "adaptive": {
+    "p50": 2.5029,
+    "p95": 3.1142,
+    "min": 2.4472,
+    "max": 3.1142,
+    "mean": 2.5758,
+    "stdev": 0.2142
+  },
+  "speedup": {
+    "p50": 1.0,
+    "p95": 0.95,
+    "mean": 0.99
+  },
+  "all_times": {
+    "eager": [
+      2.5545,
+      2.4493,
+      2.4769,
+      2.4919,
+      2.4589,
+      2.547,
+      2.4106,
+      2.4445,
+      2.9525,
+      2.8432
+    ],
+    "adaptive": [
+      2.4567,
+      2.4549,
+      2.5272,
+      2.4667,
+      2.4472,
+      2.4767,
+      2.5223,
+      2.7891,
+      3.1142,
+      2.5029
+    ]
+  }
+}

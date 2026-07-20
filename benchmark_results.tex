@@ -1,14 +1,13 @@
-\begin{table}[ht]
-\centering
-\begin{tabular}{lcccc}
+\begin{table}
+\caption{Benchmark Results}
+\begin{tabular}{lrrr}
 \toprule
-System & Faithfulness & AnswerRel. & ContextPrec. & Acc@GT \\
+System & Accuracy & Contradiction Recall & Freshness \\
 \midrule
-  LangChain & 0.000 & 0.000 & 0.000 & 0.000 \\
-  LlamaIndex & 0.000 & 0.000 & 0.000 & 0.000 \\
-  ApexRAG & 0.000 & 0.000 & 0.000 & 0.000 \\
+LangChain & 0.000 & 0.000 & NaN \\
+LlamaIndex & 0.000 & 0.000 & NaN \\
+ApexRAG-Ablation & 1.000 & 0.000 & 1.000 \\
+ApexRAG-Full & 1.000 & NaN & 1.000 \\
 \bottomrule
 \end{tabular}
-\caption{HotpotQA Benchmark Results (MOCK mode)}
-\label{tab:hotpotqa}
 \end{table}

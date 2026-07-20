@@ -76,6 +76,36 @@ class ApexSettings:
             return self._log_format_raw  # type: ignore[return-value]
         return "rich"
 
+    # ── Graph / DAG Construction ────────────────────────────────────────────
+    graph_construction_mode: str = os.getenv(
+        "APEX_GRAPH_MODE", "adaptive"
+    ).lower()
+
+    # ── DAG Router Backend ────────────────────────────────────────────────
+    router_backend: str = os.getenv(
+        "APEX_ROUTER_BACKEND", "heuristic"
+    ).lower()
+    """
+    Which classifier backend the DAGRouter should use:
+
+    - ``"heuristic"`` (default): Regex/keyword-based classifier (always
+      available, <10\u00b5s, no dependencies).
+    - ``"ml"``: Fine-tuned LogisticRegression on MiniLM sentence embeddings
+      (requires ``apex-rag[ml]`` extras installed, ~5ms inference).
+      Falls back to ``heuristic`` if the model file is not found.
+    """
+    """
+    Controls how Knowledge DAGs are built during ingestion:
+
+    - ``"adaptive"`` (default): DocumentDAG built eagerly; EntityDAG,
+      CitationDAG, and PolicyDAG built lazily on first query that needs
+      them; FactDAG and ReasoningDAG are already deferred/query-time.
+    - ``"eager"``: All DAGs built synchronously at ingest time (old
+      behavior, for backward compatibility and benchmarks).
+    - ``"minimal"``: Only DocumentDAG is built — no entity, citation,
+      or policy edges at all.  For pure hybrid-search use cases.
+    """
+
     # ── File paths ────────────────────────────────────────────────────────
     data_dir: Path = Path(os.getenv("APEX_DATA_DIR", "."))
 

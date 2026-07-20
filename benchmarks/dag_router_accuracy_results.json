@@ -1,0 +1,290 @@
+{
+  "dataset_size": 69,
+  "n_existing": 17,
+  "n_edge": 52,
+  "label_counts": {
+    "entity": 29,
+    "citation": 20,
+    "policy": 31
+  },
+  "methodology": "ML classifier trained and evaluated on the full 67-query dataset (no hold-out). Scores measure fit, not generalization. TF-IDF+LogReg is used as a proxy for MiniLM+LogReg because sentence-transformers cannot load in this environment (torchaudio DLL).",
+  "heuristic": {
+    "n_queries": 69,
+    "exact_match_accuracy": 0.6377,
+    "entity_accuracy": 0.8406,
+    "entity_precision": 1.0,
+    "entity_recall": 0.6207,
+    "entity_f1": 0.766,
+    "entity_tp": 18,
+    "entity_fp": 0,
+    "entity_fn": 11,
+    "entity_tn": 40,
+    "citation_accuracy": 0.8696,
+    "citation_precision": 0.9231,
+    "citation_recall": 0.6,
+    "citation_f1": 0.7273,
+    "citation_tp": 12,
+    "citation_fp": 1,
+    "citation_fn": 8,
+    "citation_tn": 48,
+    "policy_accuracy": 0.8696,
+    "policy_precision": 1.0,
+    "policy_recall": 0.7097,
+    "policy_f1": 0.8302,
+    "policy_tp": 22,
+    "policy_fp": 0,
+    "policy_fn": 9,
+    "policy_tn": 38
+  },
+  "ml": {
+    "n_queries": 69,
+    "exact_match_accuracy": 1.0,
+    "entity_accuracy": 1.0,
+    "entity_precision": 1.0,
+    "entity_recall": 1.0,
+    "entity_f1": 1.0,
+    "entity_tp": 29,
+    "entity_fp": 0,
+    "entity_fn": 0,
+    "entity_tn": 40,
+    "citation_accuracy": 1.0,
+    "citation_precision": 1.0,
+    "citation_recall": 1.0,
+    "citation_f1": 1.0,
+    "citation_tp": 20,
+    "citation_fp": 0,
+    "citation_fn": 0,
+    "citation_tn": 49,
+    "policy_accuracy": 1.0,
+    "policy_precision": 1.0,
+    "policy_recall": 1.0,
+    "policy_f1": 1.0,
+    "policy_tp": 31,
+    "policy_fp": 0,
+    "policy_fn": 0,
+    "policy_tn": 38
+  },
+  "latency_us": {
+    "heuristic_mean_us": 10.2,
+    "heuristic_p50_us": 10.3,
+    "ml_mean_us": 450.4,
+    "ml_p50_us": 437.8
+  },
+  "exact_match_by_category": {
+    "existing_heuristic": 1.0,
+    "existing_ml": 1.0,
+    "edge_heuristic": 0.5192,
+    "edge_ml": 1.0
+  },
+  "improvements": [
+    {
+      "query": "See page 42 for the data source",
+      "gt": [
+        "citation"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "The related work section has sources",
+      "gt": [
+        "citation"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Where does this data come from?",
+      "gt": [
+        "citation"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "What is the source of this claim?",
+      "gt": [
+        "citation"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Who published this research?",
+      "gt": [
+        "entity",
+        "citation"
+      ],
+      "heuristic_pred": [
+        "entity"
+      ]
+    },
+    {
+      "query": "What study is this based on?",
+      "gt": [
+        "citation"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Are there any constraints on data usage?",
+      "gt": [
+        "policy"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "What are the dos and don'ts for this process?",
+      "gt": [
+        "policy"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "What teams are involved in this project?",
+      "gt": [
+        "entity"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Which department owns this process?",
+      "gt": [
+        "entity"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Name the signatories on this agreement",
+      "gt": [
+        "entity"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "List the committee members",
+      "gt": [
+        "entity"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Name the regulatory bodies referenced",
+      "gt": [
+        "policy",
+        "entity",
+        "citation"
+      ],
+      "heuristic_pred": [
+        "policy",
+        "citation"
+      ]
+    },
+    {
+      "query": "What standards must our vendors meet according to the contract?",
+      "gt": [
+        "policy",
+        "entity",
+        "citation"
+      ],
+      "heuristic_pred": [
+        "policy",
+        "citation"
+      ]
+    },
+    {
+      "query": "List all personnel who need to follow the code of conduct",
+      "gt": [
+        "policy",
+        "entity"
+      ],
+      "heuristic_pred": [
+        "entity"
+      ]
+    },
+    {
+      "query": "According to the compliance team, what are the rules?",
+      "gt": [
+        "policy",
+        "entity"
+      ],
+      "heuristic_pred": [
+        "policy",
+        "citation"
+      ]
+    },
+    {
+      "query": "What regulations from the authorities apply to us?",
+      "gt": [
+        "policy",
+        "entity"
+      ],
+      "heuristic_pred": [
+        "policy"
+      ]
+    },
+    {
+      "query": "Which employees need authorisation according to section 4?",
+      "gt": [
+        "policy",
+        "entity",
+        "citation"
+      ],
+      "heuristic_pred": [
+        "entity",
+        "citation"
+      ]
+    },
+    {
+      "query": "What are the material weakness disclosures?",
+      "gt": [
+        "policy"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "What are the AML/KYC requirements for new clients?",
+      "gt": [
+        "policy",
+        "entity"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "What is our data retention schedule?",
+      "gt": [
+        "policy"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Which ISO 27001 controls apply?",
+      "gt": [
+        "policy"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "What safety protocols are mandated by OSHA?",
+      "gt": [
+        "policy",
+        "citation"
+      ],
+      "heuristic_pred": [
+        "policy"
+      ]
+    },
+    {
+      "query": "What are the board's fiduciary duties?",
+      "gt": [
+        "policy",
+        "entity"
+      ],
+      "heuristic_pred": []
+    },
+    {
+      "query": "Which courts have jurisdiction per the agreement?",
+      "gt": [
+        "entity",
+        "citation"
+      ],
+      "heuristic_pred": []
+    }
+  ]
+}

@@ -51,7 +51,7 @@ class CausalRetriever:
 
     def __init__(self, storage: StorageProvider, *, tenant_context: str | None = None) -> None:
         self._storage = storage
-        self._tenant_context = tenant_context
+        self._tenant_context = tenant_context or "default"
 
     # ── Public API ─────────────────────────────────────────────────────
 

@@ -426,25 +426,37 @@ class AnthropicProvider:
 
 class GeminiProvider:
     """
-    Provider for Google Gemini API (requires ``pip install google-generativeai``).
+    Provider for Google Gemini API using the new ``google-genai`` SDK.
+
+    Requires ``pip install google-genai``.
 
     Usage::
 
-        llm = GeminiProvider("gemini-1.5-flash", api_key="...")
+        llm = GeminiProvider("gemini-2.0-flash", api_key="...")
+        await ApexIndex.create(model=llm)
     """
 
     def __init__(
         self,
-        model: str = "gemini-1.5-flash",
+        model: str = "gemini-2.0-flash",
         api_key: str | None = None,
         **kwargs: Any,  # noqa: ARG002
     ) -> None:
-        # Lazy import — google-generativeai is an optional dependency
-        import google.generativeai as genai
+        # Lazy import — google-genai is the new SDK
+        import google.genai as genai
 
-        self.model_name = model
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(model)
+        self.model = model
+        self._api_key = api_key
+        self._client = genai.Client(api_key=api_key)
+
+    def _get_config(self, temperature: float, max_tokens: int) -> dict[str, Any]:
+        """Build generation config dict."""
+        from google.genai import types
+
+        return types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
 
     async def generate(
         self,
@@ -454,18 +466,31 @@ class GeminiProvider:
         max_tokens: int = 150,
         images: list[str] | None = None,
     ) -> str:
-        # For multi-modal Gemini, images and text are passed in a list
-        content: list[Any] = [prompt]
+        import asyncio
+
+        contents: list[str | Any] = [prompt]
         if images:
             import base64
 
-            for img in images:
-                content.append({"mime_type": "image/png", "data": base64.b64decode(img)})
+            from google.genai import types
 
-        response = await self._model.generate_content_async(
-            content, generation_config={"temperature": temperature, "max_output_tokens": max_tokens}
+            for img in images:
+                contents.append(
+                    types.Part.from_bytes(
+                        data=base64.b64decode(img),
+                        mime_type="image/png",
+                    )
+                )
+
+        config = self._get_config(temperature, max_tokens)
+
+        response = await asyncio.to_thread(
+            self._client.models.generate_content,
+            model=self.model,
+            contents=contents,
+            config=config,
         )
-        return response.text
+        return response.text or ""
 
     async def stream_generate(
         self,
@@ -475,30 +500,90 @@ class GeminiProvider:
         max_tokens: int = 150,
         images: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
-        content: list[Any] = [prompt]
+        import asyncio
+        import threading
+
+        contents: list[str | Any] = [prompt]
         if images:
             import base64
 
-            for img in images:
-                content.append({"mime_type": "image/png", "data": base64.b64decode(img)})
+            from google.genai import types
 
-        response = await self._model.generate_content_async(
-            content,
-            generation_config={"temperature": temperature, "max_output_tokens": max_tokens},
-            stream=True,
-        )
-        async for chunk in response:
-            if chunk.text:
-                yield chunk.text
+            for img in images:
+                contents.append(
+                    types.Part.from_bytes(
+                        data=base64.b64decode(img),
+                        mime_type="image/png",
+                    )
+                )
+
+        config = self._get_config(temperature, max_tokens)
+
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        stop_event = threading.Event()
+
+        # Sentinel for thread exceptions
+        _EXC_SENTINEL: Any = object()
+
+        def _producer() -> None:
+            """Run in a thread, pushing tokens to the queue.
+            Checks stop_event to allow clean cancellation.
+            """
+            try:
+                for chunk in self._client.models.generate_content_stream(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                ):
+                    if stop_event.is_set():
+                        return
+                    if chunk.text:
+                        queue.put_nowait(chunk.text)
+            except Exception as exc:
+                # Signal the consumer that an error occurred
+                queue.put_nowait(_EXC_SENTINEL)
+                queue.put_nowait(str(exc))
+                return
+            finally:
+                queue.put_nowait(None)  # sentinel
+
+        loop = asyncio.get_event_loop()
+        producer_task = loop.run_in_executor(None, _producer)
+
+        _cancelled = False
+        try:
+            while True:
+                token = await queue.get()
+                if token is None:
+                    break
+                if token is _EXC_SENTINEL:
+                    exc_msg = await queue.get()
+                    raise RuntimeError(
+                        f"GeminiProvider stream error: {exc_msg}"
+                    ) from None
+                yield token
+        except asyncio.CancelledError:
+            _cancelled = True
+            stop_event.set()
+            raise
+        finally:
+            stop_event.set()
+            # Only await producer if not cancelled — on cancel the
+            # producer thread may be stuck on I/O and blocking would
+            # prevent the CancelledError from propagating.
+            if not _cancelled:
+                await producer_task
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts using Google's embedding-004 model."""
-        import google.generativeai as genai
+        """Embed texts using Google's text-embedding-004 model."""
+        import asyncio
 
-        response = await genai.embed_content_async(
-            model="models/text-embedding-004", content=texts, task_type="retrieval_document"
+        response = await asyncio.to_thread(
+            self._client.models.embed_content,
+            model="text-embedding-004",
+            contents=texts,
         )
-        return response["embedding"]
+        return [e.values for e in response.embeddings]
 
 
 class OpenRouterProvier:

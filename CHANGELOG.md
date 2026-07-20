@@ -5,10 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.5] — 2026-07-08
+## [1.0.6] — 2026-07-20
 
-### Changed
-- Published updated `README.md` to PyPI — complete API reference, enterprise usage guide, CLI docs, LangChain integration, and environment variable table.
+### Fixed
+
+- **Packaging crisis (critical):** 1.0.5 shipped without `apex_rag/models/`
+  (specifically `unified_models.py`), making the entire package unimportable.
+  The root cause was a `.gitignore` pattern `models/` that recursively excluded
+  `apex_rag/models/` from the built sdist and wheel because hatchling respects
+  `.gitignore` patterns during builds. Fixed by:
+  - Changing `.gitignore` from `models/` to `/models/` (root-level only)
+  - Adding `"apex_rag.models"` to the explicit `packages` list in `[tool.hatch.build]`
+  - Strengthened CI build verification to check `from apex_rag import ApexIndex`
+    from both wheel and sdist artifacts
+
+## [1.0.5] — 2026-07-17
+
+### Fixed
+- **Critical regression**: `ingest()` raised `MissingTenantContextError` for all documents due to missing `tenant_context` argument in `save_page_index_entries()` call site (regression introduced in 1.0.3).
+- **Additional missing `tenant_context`**: `get_page_index_entries()` call in `ApexIndex.get_page_index()` was also missing `tenant_context` argument.
+- **Duplicate index warning**: Removed duplicate index declarations in `NodeVersionRow` (`node_id`, `doc_id`, `tenant_id`) and `RoleProfileRow` (`name`) where column-level `index=True` collided with explicit `Index()` in `__table_args__`, causing spurious warnings on fresh database creation.
+- **`CausalRetriever` tenant isolation**: Fixed default `tenant_context` from `None` to `"default"` so graph traversal operations don't raise `MissingTenantContextError`.
 
 ## [1.0.4] — 2026-07-08
 

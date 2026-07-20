@@ -38,6 +38,8 @@ from typing import Any
 from apex_rag.agents.audit.conformal_wrapper import ConformalWrapperAgent
 from apex_rag.agents.audit.temporal_audit import TemporalAuditAgent
 from apex_rag.agents.orchestrator import Orchestrator
+from apex_rag.agents.planner.dag_router import DAGRouter
+from apex_rag.config import settings
 from apex_rag.enterprise.auth.access_control import AccessControlAgent
 from apex_rag.enterprise.auth.models import TenantContext
 from apex_rag.graph.dags.reasoning_dag import ReasoningDagBuilder
@@ -96,6 +98,32 @@ class ApexOrchestrator(Orchestrator):
             coverage_level=0.90,
         )
         self._reasoning_dag_builder = reasoning_dag_builder
+        self._dag_router = self._build_router()
+
+    @staticmethod
+    def _build_router() -> DAGRouter:
+        """Create the appropriate DAGRouter based on config.
+
+        Reads ``settings.router_backend``:
+
+        - ``"ml"``: Attempt to load :class:`MLRouter`. Falls back to
+          heuristic :class:`DAGRouter` if the ML model file is missing.
+        - ``"heuristic"`` (default): Standard regex-based router.
+        """
+        if settings.router_backend == "ml":
+            try:
+                from apex_rag.agents.planner.ml_router import MLRouter
+
+                router = MLRouter()
+                if not router.check_is_using_fallback():
+                    logger.info("Using ML DAGRouter backend")
+                    return router
+                logger.info("ML DAGRouter not available, falling back to heuristic")
+            except Exception as exc:
+                logger.warning(
+                    "Failed to initialize ML DAGRouter (%s), using heuristic", exc,
+                )
+        return DAGRouter()
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -334,6 +362,11 @@ class ApexOrchestrator(Orchestrator):
                 latency_ms=round(elapsed, 1),
             )
 
+        # 0. Trigger lazy DAGs if adaptive mode is active
+        await self._ensure_lazy_dags_for_query(
+            query, doc_id, tenant_context=tenant_context,
+        )
+
         # 1. Iterative retrieval
         unified_packets = await self.execute_query(
             query, doc_id, max_iterations=max_iterations, tenant_context=tenant_context
@@ -442,6 +475,11 @@ class ApexOrchestrator(Orchestrator):
         Yields:
             Answer token chunks as they arrive from the LLM.
         """
+        # 0. Trigger lazy DAGs if adaptive mode is active (same as non-streaming)
+        await self._ensure_lazy_dags_for_query(
+            query, doc_id, tenant_context=tenant_context,
+        )
+
         # 1. Iterative retrieval (traced)
         with _otel_tracer.start_as_current_span("apex_orchestrator.stream.retrieve") as span:
             span.set_attribute("query", query)
@@ -475,6 +513,71 @@ class ApexOrchestrator(Orchestrator):
                 token_count = 1
                 yield text
             span.set_attribute("token_count", token_count)
+
+    # ── Lazy DAG triggering ─────────────────────────────────────────
+
+    async def _ensure_lazy_dags_for_query(
+        self,
+        query: str,
+        doc_id: str,
+        *,
+        tenant_context: TenantContext | None = None,
+    ) -> None:
+        """Check if the current query needs any lazy DAGs and build them.
+
+        Uses the DAGRouter to classify the query, then delegates to
+        ApexIndex.ensure_lazy_dags() if any lazy DAGs are needed.
+
+        This runs before the main planning/navigation loop so that
+        entity, citation, and policy edges are available if the query
+        needs them.
+        """
+        # Only trigger in adaptive mode
+        if settings.graph_construction_mode != "adaptive":
+            return
+
+        # Classify query via DAGRouter (heuristic, <10ms)
+        needed = self._dag_router.classify(query)
+        if not needed:
+            return
+
+        # Get the parent ApexIndex to delegate to its DAGGatingService
+        storage = getattr(self.navigator, "_storage", None)
+        if storage is None:
+            return
+
+        try:
+            # Fetch nodes for this document
+            tenant_id = tenant_context.tenant_id if tenant_context else "default"
+            nodes = await storage.get_nodes_by_doc(
+                doc_id, tenant_context=tenant_id
+            )
+            if not nodes:
+                return
+
+            # Build lazy DAGs via DAGGatingService
+            from apex_rag.graph.dag_gating import DAGGatingService
+
+            gating = DAGGatingService(storage)
+            results = await gating.ensure_dags(
+                list(needed),
+                nodes,
+                doc_id=doc_id,
+                tenant_id=tenant_id,
+                trigger_reason="query_triggered",
+            )
+            for result in results:
+                logger.info(
+                    "Lazy DAG '%s' built on-demand: %d edges in %.1fms",
+                    result["projection"],
+                    result["edges_count"],
+                    result.get("duration_ms", 0),
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to build lazy DAGs for query (non-critical): %s",
+                exc,
+            )
 
     # ── Internal helpers ──────────────────────────────────────────────
 

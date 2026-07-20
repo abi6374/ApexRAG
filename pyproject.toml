@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "apex-rag"
-version = "1.0.4"
+version = "1.0.6"
 description = "High-accuracy Structural RAG library using Abstract Syntax Trees (AST) for precise document navigation."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -54,7 +54,7 @@ dependencies = [
 anthropic = ["anthropic>=0.28.0"]
 groq = ["groq>=0.9.0"]
 ollama = ["ollama>=0.2.0"]
-gemini = ["google-generativeai>=0.7.0"]
+gemini = ["google-genai>=2.0.0"]
 openrouter = ["httpx>=0.27.0"]
 
 
@@ -64,6 +64,13 @@ web = [
     "uvicorn[standard]>=0.29.0",
     "python-multipart>=0.0.9",
     "gradio>=4.31.0",
+]
+
+# ML / Fine-tuned classifier (DAGRouter ML backend)
+ml = [
+    "scikit-learn>=1.4.0",
+    "sentence-transformers>=2.7.0",
+    "numpy>=1.26.0",
 ]
 
 # Advanced Data & Scaling
@@ -107,8 +114,11 @@ Homepage = "https://github.com/abi6374/apexrag"
 Repository = "https://github.com/abi6374/apexrag"
 Issues = "https://github.com/abi6374/apexrag/issues"
 
-[tool.hatch.build.targets.wheel]
-packages = ["apex_rag"]
+[tool.hatch.build]
+# Explicitly list apex_rag.models because hatchling respects .gitignore
+# patterns during builds, and the root-level /models/ directory pattern
+# would otherwise exclude the crate package. See .gitignore.
+packages = ["apex_rag", "apex_rag.models"]
 
 [project.scripts]
 apex-rag = "apex_rag.__main__:main"

@@ -79,3 +79,11 @@ test_user.db
 PageIndex/
 PUBLISHING.md
 replacements.txt
+
+# Trained ML models (root level only)
+/models/
+*.joblib
+
+# Torch / sentence-transformers cache
+.huggingface
+torch_home/

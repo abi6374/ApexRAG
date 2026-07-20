@@ -121,17 +121,36 @@ jobs:
       - name: Build release distributions
         run: python -m build
 
-      - name: Verify sdist installs cleanly
+      - name: Verify both wheel and sdist install cleanly
         run: |
-          SDIST=$(ls dist/*.tar.gz 2>/dev/null | head -1)
+          # ── Check wheel ──
+          WHEEL=$(ls dist/*.whl 2>/dev/null | head -1)
+          if [ -n "$WHEEL" ]; then
+            pip install "$WHEEL"
+            python -c "from apex_rag import ApexIndex; print(f'WHEEL: apex-rag v{apex_rag.__version__} import OK')"
+          pip uninstall -y apex-rag || true
+        else
+          echo "No wheel found"
+          exit 1
+        fi
 
-          if [ -z "$SDIST" ]; then
-            echo "No sdist found"
-            exit 1
-          fi
+        # ── Check sdist ──
+        SDIST=$(ls dist/*.tar.gz 2>/dev/null | head -1)
+        if [ -z "$SDIST" ]; then
+          echo "No sdist found"
+          exit 1
+        fi
 
-          pip install "$SDIST"
-          python -c "import apex_rag; print(f'apex-rag v{apex_rag.__version__} installed successfully')"
+        pip install "$SDIST"
+        python -c "from apex_rag import ApexIndex; print(f'SDIST: apex-rag v{apex_rag.__version__} import OK')"
+
+      - name: Verify test collection against built wheel (not editable source)
+        run: |
+          # Install from the built wheel to catch packaging bugs like the
+          # 1.0.5 release where apex_rag/models/ was silently omitted.
+          WHEEL=$(ls dist/*.whl 2>/dev/null | head -1)
+          pip install "$WHEEL" pytest pytest-asyncio
+          python -m pytest tests/ --collect-only -q --tb=short 2>&1 | tail -5
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
