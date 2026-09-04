@@ -7,9 +7,18 @@ Creates version chain edges from node version history with
 Strategies (deterministic, no LLM calls):
     1. **VERSION_OF** — Version row → its parent node
     2. **SUPERSEDES** — Newer version → older version (version n+1 → version n)
-    3. **REPLACED_BY** — Older version → newer version (reverse of supersedes)
-    4. **SNAPSHOT_OF** — Snapshot → node it captures
-    5. **HISTORICAL_PARENT** — Version → its historical ancestor
+    3. **SNAPSHOT_OF** — Snapshot → node it captures
+    4. **HISTORICAL_PARENT** — Version → its historical ancestor
+
+Note: REPLACED_BY (older → newer) is intentionally NOT materialized as a
+separate stored edge, even though ``RelationType.REPLACED_BY`` exists for
+other callers. It's the exact semantic inverse of SUPERSEDES between the
+same two nodes -- storing both directions as edges in the same DAG creates
+a 2-cycle, which ``ApexStorage.save_knowledge_edge()`` correctly rejects at
+write time (Principle 11 — DAG Acyclicity). Query "what replaced this
+version" by reverse-traversing SUPERSEDES (find edges where
+target_node_id == this version and edge_type == SUPERSEDES) instead of a
+separately stored inverse edge.
 
 Usage:
     builder = VersionDagBuilder(storage)
@@ -121,24 +130,8 @@ class VersionDagBuilder:
                             ).to_knowledge_edge()
                         )
 
-                    # REPLACED_BY: v_prev → v_current
-                    key_rep = (prev_vid, vid, "REPLACED_BY")
-                    if key_rep not in seen:
-                        seen.add(key_rep)
-                        all_edges.append(
-                            GraphEdge(
-                                source_id=prev_vid,
-                                target_id=vid,
-                                relation_type=RelationType.REPLACED_BY,
-                                strength=1.0,
-                                evidence=f"Version {vnum_prev} replaced by version {vnum_current}",
-                                projections=["version"],
-                                metadata={
-                                    "older_version": vnum_prev,
-                                    "newer_version": vnum_current,
-                                },
-                            ).to_knowledge_edge()
-                        )
+                    # REPLACED_BY (v_prev → v_current) is deliberately not
+                    # emitted as a separate edge -- see module docstring.
 
                 # SNAPSHOT_OF: if previous_version is set
                 prev_version_id = getattr(v_current, "previous_version", None)

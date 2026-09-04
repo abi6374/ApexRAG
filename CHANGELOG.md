@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] — 2026-09-04
+
+### Fixed
+
+- **Document version-history crash (critical):** `version_dag.py` referenced
+  `RelationType.REPLACED_BY`, which existed in `models/unified_models.py`'s
+  `EdgeType` enum but not in `graph/edges/models.py`'s separate
+  `RelationType` enum (the one actually imported by `version_dag.py`),
+  crashing all document version-history operations
+  (`AttributeError: type object 'RelationType' has no attribute
+  'REPLACED_BY'`). Also affected: `VALID_DURING` and `SNAPSHOT_OF`, the same
+  class of gap in the same enum, used by `temporal_dag.py`/`version_dag.py`
+  but never previously hit by any test.
+  - Added the three missing members to `graph/edges/models.py`'s
+    `RelationType` (kept as the canonical enum for all DAG builders --
+    every other builder already imports `RelationType` from this module,
+    confirmed by checking all 8 sibling builders; `unified_models.EdgeType`
+    remains a separate, narrower enum used for other purposes).
+  - Fixed a second, previously-masked bug in the same code path: both
+    `version_dag.py` (SUPERSEDES/REPLACED_BY) and `temporal_dag.py`
+    (SUCCESSOR/PREDECESSOR) stored the same relationship as two edges in
+    opposite directions between the same node pair, which is a 2-cycle --
+    correctly rejected at write time by `ApexStorage.save_knowledge_edge()`
+    (Principle 11 — DAG Acyclicity). Only the forward edge (SUPERSEDES /
+    SUCCESSOR) is now stored; the inverse relationship is available by
+    reverse-traversing it rather than duplicating it as a contradictory
+    stored edge.
+
 ## [1.0.6] — 2026-09-04
 
 ### Added

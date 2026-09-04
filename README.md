@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ApexRAG-v1.0.6-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.6">
+  <img src="https://img.shields.io/badge/ApexRAG-v1.0.7-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.7">
   <img src="https://img.shields.io/pypi/v/apex-rag?style=for-the-badge&color=6366f1" alt="PyPI Version">
   <img src="https://img.shields.io/pypi/pyversions/apex-rag?style=for-the-badge" alt="Python Versions">
   <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License">
@@ -455,7 +455,10 @@ ApexRAG is configured via environment variables:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-### v1.0.6 — Latest
+### v1.0.7 — Latest
+- **Fixed document version-history crash** — `RelationType.REPLACED_BY` (and `VALID_DURING`, `SNAPSHOT_OF`) were missing from the enum actually used by the DAG builders, crashing all version-history operations. Also fixed a masked bug where version/temporal edges were stored in both directions between the same node pair, violating DAG acyclicity.
+
+### v1.0.6
 - **`EnterpriseClient.calibrate_conformal()`** — Real split-conformal calibration from a held-out labeled set, so `answer.coverage_guarantee` reflects an actual statistical guarantee instead of the uncalibrated default. See [Conformal Calibration](#conformal-calibration).
 - **Packaging fix** — `apex_rag/models/` is now correctly included in the built sdist/wheel (was silently excluded by a `.gitignore` pattern, making 1.0.5 unimportable from a fresh install).
 

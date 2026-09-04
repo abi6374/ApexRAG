@@ -31,7 +31,7 @@ if not logger.handlers:
 try:
     __version__ = version("apex-rag")
 except PackageNotFoundError:
-    __version__ = "1.0.6"
+    __version__ = "1.0.7"
 
 # ── Primary Library Exports ───────────────────────────────────────────────
 

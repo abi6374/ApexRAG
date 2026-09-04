@@ -6,9 +6,17 @@ and version history with ``projection=["temporal"]``.
 
 Strategies (deterministic, no LLM calls):
     1. **SUCCESSOR** — Older node → newer node (chronological order)
-    2. **PREDECESSOR** — Newer node → older node (reverse chronological)
-    3. **VALID_DURING** — Node → its effective time window
-    4. **OVERRIDES** — Newer contradictory source overrides older
+    2. **VALID_DURING** — Node → its effective time window
+    3. **OVERRIDES** — Newer contradictory source overrides older
+
+Note: PREDECESSOR (newer → older) is intentionally NOT materialized as a
+separate stored edge, even though ``RelationType.PREDECESSOR`` exists for
+other callers. It's the exact semantic inverse of SUCCESSOR between the
+same two nodes -- storing both directions as edges in the same DAG creates
+a 2-cycle, which ``ApexStorage.save_knowledge_edge()`` correctly rejects at
+write time (Principle 11 — DAG Acyclicity; same issue as version_dag.py's
+SUPERSEDES/REPLACED_BY pair). Query "what precedes this node" by
+reverse-traversing SUCCESSOR instead of a separately stored inverse edge.
 
 Usage:
     builder = TemporalDagBuilder(storage)
@@ -70,7 +78,7 @@ class TemporalDagBuilder:
             key=lambda n: (n.source_date or datetime.min),
         )
 
-        # 1. SUCCESSOR / PREDECESSOR edges
+        # 1. SUCCESSOR edges (chronological order)
         for i in range(len(dated_nodes) - 1):
             older = dated_nodes[i]
             newer = dated_nodes[i + 1]
@@ -94,24 +102,8 @@ class TemporalDagBuilder:
                     ).to_knowledge_edge()
                 )
 
-            # PREDECESSOR: newer → older
-            key_pred = (newer.node_id, older.node_id, "PREDECESSOR")
-            if key_pred not in seen:
-                seen.add(key_pred)
-                all_edges.append(
-                    GraphEdge(
-                        source_id=newer.node_id,
-                        target_id=older.node_id,
-                        relation_type=RelationType.PREDECESSOR,
-                        strength=0.9,
-                        evidence=f"Temporal: node {newer.node_id[:8]} succeeds {older.node_id[:8]}",
-                        projections=["temporal"],
-                        metadata={
-                            "newer_date": newer.source_date.isoformat() if newer.source_date else None,
-                            "older_date": older.source_date.isoformat() if older.source_date else None,
-                        },
-                    ).to_knowledge_edge()
-                )
+            # PREDECESSOR (newer → older) is deliberately not emitted as a
+            # separate edge -- see module docstring.
 
         # 2. VALID_DURING edges (source_date as effective period)
         for node in dated_nodes:

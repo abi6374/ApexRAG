@@ -43,9 +43,12 @@ class RelationType(str, Enum):
     PREDECESSOR = "PREDECESSOR"
     VERSION_OF = "VERSION_OF"
     SUPERSEDES = "SUPERSEDES"
+    REPLACED_BY = "REPLACED_BY"
+    VALID_DURING = "VALID_DURING"
 
     # Structural Retrieval Graph extensions
     REFERENCES_TABLE = "REFERENCES_TABLE"
+    SNAPSHOT_OF = "SNAPSHOT_OF"
 
     @classmethod
     def from_edge_type(cls, et: EdgeType | str) -> RelationType:

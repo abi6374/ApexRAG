@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "apex-rag"
-version = "1.0.6"
+version = "1.0.7"
 description = "High-accuracy Structural RAG library using Abstract Syntax Trees (AST) for precise document navigation."
 readme = "README.md"
 license = { file = "LICENSE" }
