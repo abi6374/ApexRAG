@@ -1,0 +1,198 @@
+{
+  "mock": true,
+  "provider": "gemini",
+  "results": [
+    {
+      "baseline": "LangChain",
+      "answer": "Mocked LangChain answer for: What is ApexRAG?...",
+      "contexts": [
+        "# Project Apex\nApexRAG is a structural RAG library.\nIt uses ASTs for navigation."
+      ],
+      "mocked": true,
+      "ground_truth": "A structural RAG library",
+      "domain": "scientific",
+      "is_contradiction": null
+    },
+    {
+      "baseline": "LangChain",
+      "answer": "Mocked LangChain answer for: What was the 2024 revenue?...",
+      "contexts": [
+        "## Financials\nRevenue was $10M in 2023.\nIn 2024, it grew to $15M."
+      ],
+      "mocked": true,
+      "ground_truth": "$15M",
+      "domain": "financial",
+      "is_contradiction": null
+    },
+    {
+      "baseline": "LangChain",
+      "answer": "Mocked LangChain answer for: How much notice is needed for ...",
+      "contexts": [
+        "# Agreement\nClause 1: Termination requires 30 days notice.\nAmendment: Notice period is now 60 days."
+      ],
+      "mocked": true,
+      "ground_truth": "60 days (amended)",
+      "domain": "legal",
+      "is_contradiction": true
+    },
+    {
+      "baseline": "LlamaIndex",
+      "answer": "Mocked LlamaIndex answer for: What is ApexRAG?...",
+      "contexts": [
+        "# Project Apex\nApexRAG is a structural RAG library.\nIt uses ASTs for navigation."
+      ],
+      "mocked": true,
+      "ground_truth": "A structural RAG library",
+      "domain": "scientific",
+      "is_contradiction": null
+    },
+    {
+      "baseline": "LlamaIndex",
+      "answer": "Mocked LlamaIndex answer for: What was the 2024 revenue?...",
+      "contexts": [
+        "## Financials\nRevenue was $10M in 2023.\nIn 2024, it grew to $15M."
+      ],
+      "mocked": true,
+      "ground_truth": "$15M",
+      "domain": "financial",
+      "is_contradiction": null
+    },
+    {
+      "baseline": "LlamaIndex",
+      "answer": "Mocked LlamaIndex answer for: How much notice is needed for ...",
+      "contexts": [
+        "# Agreement\nClause 1: Termination requires 30 days notice.\nAmendment: Notice period is now 60 days."
+      ],
+      "mocked": true,
+      "ground_truth": "60 days (amended)",
+      "domain": "legal",
+      "is_contradiction": true
+    },
+    {
+      "baseline": "ApexRAG-Minimal",
+      "answer": "A structural RAG library [Node ID: mock-1]",
+      "contexts": [
+        "ApexRAG is a structural RAG library.\nIt uses ASTs for navigation."
+      ],
+      "mocked": true,
+      "ground_truth": "A structural RAG library",
+      "domain": "scientific",
+      "is_contradiction": null,
+      "coverage": 1.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Minimal",
+      "answer": "$15M [Node ID: mock-1]",
+      "contexts": [
+        "Revenue was $10M in 2023.\nIn 2024, it grew to $15M."
+      ],
+      "mocked": true,
+      "ground_truth": "$15M",
+      "domain": "financial",
+      "is_contradiction": null,
+      "coverage": 1.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Minimal",
+      "answer": "60 days (amended) [Node ID: mock-1]",
+      "contexts": [
+        "Clause 1: Termination requires 30 days notice.\nAmendment: Notice period is now 60 days."
+      ],
+      "mocked": true,
+      "ground_truth": "60 days (amended)",
+      "domain": "legal",
+      "is_contradiction": true,
+      "coverage": 1.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Ablation",
+      "answer": "A structural RAG library [Node ID: mock-1]",
+      "contexts": [
+        "ApexRAG is a structural RAG library.\nIt uses ASTs for navigation."
+      ],
+      "mocked": true,
+      "ground_truth": "A structural RAG library",
+      "domain": "scientific",
+      "is_contradiction": null,
+      "coverage": 1.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Ablation",
+      "answer": "$15M [Node ID: mock-1]",
+      "contexts": [
+        "Revenue was $10M in 2023.\nIn 2024, it grew to $15M."
+      ],
+      "mocked": true,
+      "ground_truth": "$15M",
+      "domain": "financial",
+      "is_contradiction": null,
+      "coverage": 1.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Ablation",
+      "answer": "60 days (amended) [Node ID: mock-1]",
+      "contexts": [
+        "Clause 1: Termination requires 30 days notice.\nAmendment: Notice period is now 60 days."
+      ],
+      "mocked": true,
+      "ground_truth": "60 days (amended)",
+      "domain": "legal",
+      "is_contradiction": true,
+      "coverage": 1.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Full",
+      "answer": "A structural RAG library [Node ID: mock-1]",
+      "contexts": [
+        "ApexRAG is a structural RAG library.\nIt uses ASTs for navigation."
+      ],
+      "mocked": true,
+      "ground_truth": "A structural RAG library",
+      "domain": "scientific",
+      "is_contradiction": null,
+      "coverage": 0.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Full",
+      "answer": "$15M [Node ID: mock-1]",
+      "contexts": [
+        "Revenue was $10M in 2023.\nIn 2024, it grew to $15M."
+      ],
+      "mocked": true,
+      "ground_truth": "$15M",
+      "domain": "financial",
+      "is_contradiction": null,
+      "coverage": 0.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    },
+    {
+      "baseline": "ApexRAG-Full",
+      "answer": "60 days (amended) [Node ID: mock-1]",
+      "contexts": [
+        "Clause 1: Termination requires 30 days notice.\nAmendment: Notice period is now 60 days."
+      ],
+      "mocked": true,
+      "ground_truth": "60 days (amended)",
+      "domain": "legal",
+      "is_contradiction": true,
+      "coverage": 0.0,
+      "contradictions": 0,
+      "freshness": 1.0
+    }
+  ]
+}

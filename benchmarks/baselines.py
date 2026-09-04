@@ -5,7 +5,13 @@ Provides Baseline A (LangChain) and Baseline B (LlamaIndex) implementations
 to compare against ApexRAG on HotpotQA and other datasets.
 
 LangChain 1.x compat: uses ``langchain_classic`` for chain API and
-``langchain_community`` / ``langchain_openai`` for vector stores and LLMs.
+``langchain_community`` / ``langchain_openai`` / ``langchain_google_genai``
+for vector stores and LLMs.
+
+Both baselines accept a ``provider`` of ``"openai"`` or ``"gemini"`` and
+fall back to a clearly-labeled mock only when no matching API key is set
+(see :func:`_has_key`) or the required package isn't installed -- they
+never silently produce a mock result while claiming to be a real run.
 """
 
 from __future__ import annotations
@@ -41,15 +47,35 @@ _patch_ragas_imports()
 
 logger = logging.getLogger("apex_rag.benchmarks.baselines")
 
+_GEMINI_MODEL = "gemini-2.0-flash"
+_GEMINI_EMBED_MODEL = "models/embedding-001"
+
 
 @dataclass
 class BaselineResult:
     answer: str
     contexts: list[str]
+    mocked: bool = False
 
 
 class RAGBaseline(Protocol):
     async def query(self, question: str, text_context: str) -> BaselineResult: ...
+
+
+def _has_key(provider: str) -> bool:
+    if provider == "gemini":
+        return bool(os.getenv("GEMINI_API_KEY"))
+    if provider == "openai":
+        return bool(os.getenv("OPENAI_API_KEY"))
+    raise ValueError(f"Unknown provider: {provider}")
+
+
+def _mock_result(system: str, question: str, text_context: str) -> BaselineResult:
+    return BaselineResult(
+        answer=f"Mocked {system} answer for: {question[:30]}...",
+        contexts=[text_context[:200]],
+        mocked=True,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -61,44 +87,53 @@ class LangChainBaseline:
     """Baseline using standard LangChain components.
 
     Uses ``langchain_classic.chains.RetrievalQA`` for a standard
-    ``Retrieve -> Synthesize`` pipeline with ``FAISS`` vector store.
+    ``Retrieve -> Synthesize`` pipeline with a ``FAISS`` vector store.
+    LLM/embeddings backend is selected by ``provider`` ("openai" or
+    "gemini").
     """
 
-    def __init__(self, model_name: str = "gpt-4o-mini"):
-        self.model_name = model_name
+    def __init__(self, provider: str = "openai", model_name: str | None = None):
+        self.provider = provider
+        self.model_name = model_name or ("gpt-4o-mini" if provider == "openai" else _GEMINI_MODEL)
+
+    def _build_llm_and_embeddings(self):
+        if self.provider == "gemini":
+            from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+
+            llm = ChatGoogleGenerativeAI(model=self.model_name, temperature=0)
+            embeddings = GoogleGenerativeAIEmbeddings(model=_GEMINI_EMBED_MODEL)
+            return llm, embeddings
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+
+        llm = ChatOpenAI(model=self.model_name, temperature=0)
+        embeddings = OpenAIEmbeddings()
+        return llm, embeddings
 
     async def query(self, question: str, text_context: str) -> BaselineResult:
-        # Early exit: if no API key, return a mock result immediately
-        # without triggering any OpenAI client initialisation.
-        if not os.getenv("OPENAI_API_KEY"):
-            return BaselineResult(
-                answer=f"Mocked LangChain answer for: {question[:30]}...",
-                contexts=[text_context[:200]],
-            )
+        # Early exit: if no matching API key, return a clearly-labeled mock
+        # result immediately, without triggering any client initialisation.
+        if not _has_key(self.provider):
+            return _mock_result("LangChain", question, text_context)
 
         try:
             from langchain_classic.chains import RetrievalQA
             from langchain_community.vectorstores import FAISS
             from langchain_core.documents import Document
-            from langchain_openai import ChatOpenAI, OpenAIEmbeddings
             from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+            llm, embeddings = self._build_llm_and_embeddings()
         except (ImportError, RuntimeError) as exc:
             logger.warning("LangChain baseline unavailable (%s). Using mock.", exc)
-            return BaselineResult(
-                f"Mocked LangChain answer for: {question[:30]}...",
-                [text_context[:200]],
-            )
+            return _mock_result("LangChain", question, text_context)
 
         # 1. Chunk
         splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
         docs = [Document(page_content=x) for x in splitter.split_text(text_context)]
 
         # 2. Embed & Index
-        embeddings = OpenAIEmbeddings()
         vectorstore = FAISS.from_documents(docs, embeddings)
 
         # 3. Retrieve & Synthesize
-        llm = ChatOpenAI(model=self.model_name, temperature=0)
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
@@ -120,32 +155,52 @@ class LangChainBaseline:
 
 
 class LlamaIndexBaseline:
-    """Baseline using LlamaIndex Sentence Window retrieval."""
+    """Baseline using LlamaIndex Sentence Window retrieval.
 
-    def __init__(self, model_name: str = "gpt-4o-mini"):
-        self.model_name = model_name
+    LLM/embeddings backend is selected by ``provider`` ("openai" or
+    "gemini"). Note: ``llama-index-llms-openai`` / ``llama-index-embeddings-openai``
+    and ``llama-index-llms-gemini`` / ``llama-index-embeddings-gemini`` must
+    be installed for the corresponding provider -- otherwise this falls
+    back to a clearly-labeled mock rather than silently mis-scoring.
+    """
+
+    def __init__(self, provider: str = "openai", model_name: str | None = None):
+        self.provider = provider
+        self.model_name = model_name or ("gpt-4o-mini" if provider == "openai" else _GEMINI_MODEL)
+
+    def _build_llm_and_embed_model(self):
+        if self.provider == "gemini":
+            from llama_index.embeddings.gemini import GeminiEmbedding
+            from llama_index.llms.gemini import Gemini
+
+            llm = Gemini(model=f"models/{self.model_name}", temperature=0)
+            embed_model = GeminiEmbedding(model_name=_GEMINI_EMBED_MODEL)
+            return llm, embed_model
+        from llama_index.embeddings.openai import OpenAIEmbedding
+        from llama_index.llms.openai import OpenAI
+
+        llm = OpenAI(model=self.model_name, temperature=0)
+        embed_model = OpenAIEmbedding()
+        return llm, embed_model
 
     async def query(self, question: str, text_context: str) -> BaselineResult:
-        # Early exit: if no API key, return a mock result immediately.
-        if not os.getenv("OPENAI_API_KEY"):
-            return BaselineResult(
-                answer=f"Mocked LlamaIndex answer for: {question[:30]}...",
-                contexts=[text_context[:200]],
-            )
+        # Early exit: if no matching API key, return a clearly-labeled mock.
+        if not _has_key(self.provider):
+            return _mock_result("LlamaIndex", question, text_context)
 
         try:
-            from llama_index.core import Document, VectorStoreIndex
+            from llama_index.core import Document, Settings, VectorStoreIndex
             from llama_index.core.node_parser import SentenceWindowNodeParser
             from llama_index.core.postprocessor import (
                 MetadataReplacementPostProcessor,
             )
-            from llama_index.llms.openai import OpenAI
+
+            llm, embed_model = self._build_llm_and_embed_model()
         except (ImportError, RuntimeError) as exc:
             logger.warning("LlamaIndex baseline unavailable (%s). Using mock.", exc)
-            return BaselineResult(
-                f"Mocked LlamaIndex answer for: {question[:30]}...",
-                [text_context[:200]],
-            )
+            return _mock_result("LlamaIndex", question, text_context)
+
+        Settings.embed_model = embed_model
 
         # 1. Parse with Sentence Window
         node_parser = SentenceWindowNodeParser.from_defaults(
@@ -153,7 +208,6 @@ class LlamaIndexBaseline:
             window_metadata_key="window",
             original_text_metadata_key="original_text",
         )
-        llm = OpenAI(model=self.model_name, temperature=0)
 
         doc = Document(text=text_context)
         index = VectorStoreIndex.from_documents([doc], transformations=[node_parser])

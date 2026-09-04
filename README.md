@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/ApexRAG-v1.0.5-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.5">
+  <img src="https://img.shields.io/badge/ApexRAG-v1.0.6-6366f1?style=for-the-badge&logo=python&logoColor=white" alt="ApexRAG v1.0.6">
   <img src="https://img.shields.io/pypi/v/apex-rag?style=for-the-badge&color=6366f1" alt="PyPI Version">
   <img src="https://img.shields.io/pypi/pyversions/apex-rag?style=for-the-badge" alt="Python Versions">
   <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License">
@@ -166,6 +166,13 @@ async def main():
 
 asyncio.run(main())
 ```
+
+> **Note:** `answer.coverage_guarantee` reads as `0.0` until the conformal
+> predictor has been calibrated at least once — see
+> [`index.enterprise.calibrate_conformal(...)`](#-enterprise-features) with
+> a held-out labeled set. Uncalibrated, every retrieved packet passes
+> through unfiltered; this is intentional (a conservative default), not a
+> bug, but it means the coverage guarantee isn't real until you calibrate.
 
 ### Supported LLM Providers
 
@@ -351,6 +358,26 @@ history = await enterprise.get_version_history(node_id)
 lineage = await enterprise.get_version_lineage(node_id)
 ```
 
+### Conformal Calibration
+
+Calibrate the conformal-prediction coverage guarantee from a held-out
+labeled set — required once before `answer.coverage_guarantee` reflects a
+real statistical guarantee rather than the uncalibrated default of `0.0`:
+
+```python
+summary = await enterprise.calibrate_conformal([
+    ("What was Q1 revenue?", "doc1", "$10M"),
+    ("Who is the CEO?", "doc1", "Jane Smith"),
+    # ... at least 10 examples, held out from whatever you'll report on
+])
+print(summary)  # {"threshold": 0.42, "calibrated": True, ...}
+
+# Every subsequent index.query() call now uses the calibrated threshold —
+# no other API change needed.
+answer = await index.query("What was Q2 revenue?", "doc1")
+print(answer.coverage_guarantee)
+```
+
 ---
 
 ## 🛠️ CLI Interface
@@ -428,7 +455,11 @@ ApexRAG is configured via environment variables:
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-### v1.0.5 — Latest
+### v1.0.6 — Latest
+- **`EnterpriseClient.calibrate_conformal()`** — Real split-conformal calibration from a held-out labeled set, so `answer.coverage_guarantee` reflects an actual statistical guarantee instead of the uncalibrated default. See [Conformal Calibration](#conformal-calibration).
+- **Packaging fix** — `apex_rag/models/` is now correctly included in the built sdist/wheel (was silently excluded by a `.gitignore` pattern, making 1.0.5 unimportable from a fresh install).
+
+### v1.0.5
 - **8 Knowledge DAG Projections** — Document, Entity, Citation, Temporal, Version, Policy, Fact, and Reasoning DAGs with unified `KnowledgeEdge` store.
 - **ReasoningDAG** — Orchestrator trace events captured and persisted as typed reasoning edges (REASONING_CHAIN, DERIVES_FROM, INFERS, USES).
 - **SSE Streaming with ReasoningDAG** — `POST /query/stream/reasoning-graph` streams real-time agent traces + final ReasoningDAG JSON graph.

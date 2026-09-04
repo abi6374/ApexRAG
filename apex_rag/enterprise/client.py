@@ -259,3 +259,96 @@ class EnterpriseClient:
             coverage_guarantee=1.0,
             prediction_set_size=len(result.packets),
         )
+
+    # ── Conformal Calibration ────────────────────────────────────────
+
+    async def calibrate_conformal(
+        self,
+        calibration_examples: list[tuple[str, str, str]],
+    ) -> dict[str, Any]:
+        """Calibrate the conformal-prediction coverage guarantee from a
+        held-out labeled calibration set.
+
+        Without calling this, ``ApexIndex.query()``'s conformal threshold
+        stays at its uncalibrated default (0.0), which means every
+        retrieved packet passes through unfiltered and
+        ``answer.coverage_guarantee`` reports ``0.0`` — the "statistically
+        grounded coverage guarantee" is decorative until calibration runs
+        at least once. This method makes it real.
+
+        Standard split-conformal calibration (Angelopoulos & Bates, 2022):
+        for each labeled example, run the query, find the nonconformity
+        score of the evidence packet that actually contains the gold
+        answer (the "true" packet), and calibrate the threshold from the
+        distribution of those scores. A calibration example whose gold
+        answer wasn't retrieved at all is scored as maximally nonconforming
+        (1.0) rather than dropped, so retrieval misses still count against
+        the guarantee instead of being silently excluded.
+
+        Because the underlying :class:`ConformalWrapperAgent` keeps its
+        calibrated threshold as instance state on the orchestrator, calling
+        this once makes **every subsequent** ``index.query()`` call use the
+        calibrated threshold automatically — no other API changes needed.
+
+        Args:
+            calibration_examples: A held-out list of
+                ``(question, doc_id, gold_answer_substring)`` tuples —
+                held out meaning disjoint from whatever queries you'll
+                report results on. Needs at least ``min_calibration_size``
+                (default 10) examples with valid scores, or the threshold
+                falls back to a conservative 0.0 (matching today's
+                behavior) — see :class:`ConformalCalibrator`.
+
+        Returns:
+            A summary dict: ``threshold``, ``n_examples``,
+            ``n_retrieval_hits`` (how many calibration queries actually
+            retrieved their gold answer), ``coverage_level``, and
+            ``calibrated`` (``False`` if too few examples produced a
+            real threshold).
+
+        Usage::
+
+            summary = await index.enterprise.calibrate_conformal([
+                ("What was Q1 revenue?", "doc1", "$10M"),
+                ("Who is the CEO?", "doc1", "Jane Smith"),
+                # ... at least 10 examples, held out from your eval set
+            ])
+            print(summary)  # {"threshold": 0.42, "calibrated": True, ...}
+
+            # Now real:
+            answer = await index.query("What was Q2 revenue?", "doc1")
+            print(answer.coverage_guarantee)  # reflects the calibrated level
+        """
+        wrapper = self._orchestrator.conformal_wrapper
+        scorer = wrapper.scorer
+
+        scores: list[float] = []
+        n_hits = 0
+        for question, doc_id, gold_answer in calibration_examples:
+            answer = await self._orchestrator.run(
+                query=question,
+                doc_id=doc_id,
+                ablation_mode=True,  # raw retrieval packets; conformal/temporal not needed here
+            )
+            if answer is None or not answer.evidence_packets:
+                scores.append(1.0)
+                continue
+
+            gold_lower = gold_answer.lower()
+            matching = [p for p in answer.evidence_packets if gold_lower in p.content.lower()]
+            if matching:
+                n_hits += 1
+                scores.append(min(scorer.score_many(matching)))  # type: ignore[arg-type]
+            else:
+                # Gold answer wasn't retrieved -- worst-case nonconformity,
+                # not silently dropped.
+                scores.append(1.0)
+
+        threshold = wrapper.calibrate(scores)
+        return {
+            "threshold": threshold,
+            "n_examples": len(calibration_examples),
+            "n_retrieval_hits": n_hits,
+            "coverage_level": wrapper.calibrator.coverage_level,
+            "calibrated": threshold > 0.0,
+        }

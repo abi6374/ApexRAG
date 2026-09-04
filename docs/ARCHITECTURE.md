@@ -87,7 +87,7 @@ When a complex query enters the system, it follows this path:
 
 6. **Temporal Audit** (`TemporalAuditAgent`) — Scores freshness and detects contradictions across evidence packets (skipped in ablation mode).
 
-7. **Conformal Prediction** (`ConformalWrapperAgent`) — Produces a statistically-grounded coverage guarantee for the answer.
+7. **Conformal Prediction** (`ConformalWrapperAgent`) — Produces a statistically-grounded coverage guarantee for the answer, *once calibrated*. The threshold defaults to an uncalibrated `0.0` (all packets pass, `coverage_guarantee` reports `0.0`) until `index.enterprise.calibrate_conformal(...)` is run against a held-out labeled set — see the README's Conformal Calibration section.
 
 8. **Synthesis** (`EvidenceSynthesizerAgent`) — Generates the final answer with inline citations.
 

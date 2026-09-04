@@ -90,6 +90,11 @@ benchmarks = [
     "llama-index-core>=0.10.0",
     "datasets>=2.19.0",
     "pandas>=2.2.0",
+    "matplotlib>=3.8.0",
+    "faiss-cpu>=1.8.0",
+    "langchain-google-genai>=2.0.0",
+    "llama-index-llms-gemini>=0.3.0",
+    "llama-index-embeddings-gemini>=0.2.0",
 ]
 
 # Development

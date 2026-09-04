@@ -7,7 +7,7 @@
     "citation": 20,
     "policy": 31
   },
-  "methodology": "ML classifier trained and evaluated on the full 67-query dataset (no hold-out). Scores measure fit, not generalization. TF-IDF+LogReg is used as a proxy for MiniLM+LogReg because sentence-transformers cannot load in this environment (torchaudio DLL).",
+  "methodology": "'ml' (TF-IDF+LogReg) is trained AND evaluated on this same 69-query dataset (no hold-out) -- it measures in-sample fit, not generalization, and should not be compared directly to the heuristic as if it were a fair evaluation. 'ml_real_holdout' (when present) is the actual production MiniLM+LogReg classifier (apex_rag/agents/planner/ml_router.py), trained by scripts/train_dag_router.py on an independent 200-query templated dataset (models/training_data.json) that does not overlap this eval set -- its score here is a genuine zero-shot generalization number.",
   "heuristic": {
     "n_queries": 69,
     "exact_match_accuracy": 0.6377,
@@ -36,7 +36,7 @@
     "policy_fn": 9,
     "policy_tn": 38
   },
-  "ml": {
+  "ml_in_sample_fit": {
     "n_queries": 69,
     "exact_match_accuracy": 1.0,
     "entity_accuracy": 1.0,
@@ -64,17 +64,49 @@
     "policy_fn": 0,
     "policy_tn": 38
   },
+  "ml_real_holdout": {
+    "n_queries": 69,
+    "exact_match_accuracy": 0.6667,
+    "entity_accuracy": 0.8551,
+    "entity_precision": 0.913,
+    "entity_recall": 0.7241,
+    "entity_f1": 0.8077,
+    "entity_tp": 21,
+    "entity_fp": 2,
+    "entity_fn": 8,
+    "entity_tn": 38,
+    "citation_accuracy": 0.8986,
+    "citation_precision": 1.0,
+    "citation_recall": 0.65,
+    "citation_f1": 0.7879,
+    "citation_tp": 13,
+    "citation_fp": 0,
+    "citation_fn": 7,
+    "citation_tn": 49,
+    "policy_accuracy": 0.8986,
+    "policy_precision": 1.0,
+    "policy_recall": 0.7742,
+    "policy_f1": 0.8727,
+    "policy_tp": 24,
+    "policy_fp": 0,
+    "policy_fn": 7,
+    "policy_tn": 38
+  },
   "latency_us": {
-    "heuristic_mean_us": 10.2,
-    "heuristic_p50_us": 10.3,
-    "ml_mean_us": 450.4,
-    "ml_p50_us": 437.8
+    "heuristic_mean_us": 10.3,
+    "heuristic_p50_us": 10.2,
+    "ml_in_sample_fit_mean_us": 588.4,
+    "ml_in_sample_fit_p50_us": 564.7,
+    "ml_real_holdout_mean_us": 268389.3,
+    "ml_real_holdout_p50_us": 16500.8
   },
   "exact_match_by_category": {
     "existing_heuristic": 1.0,
     "existing_ml": 1.0,
     "edge_heuristic": 0.5192,
-    "edge_ml": 1.0
+    "edge_ml": 1.0,
+    "existing_ml_real_holdout": 0.8235,
+    "edge_ml_real_holdout": 0.6154
   },
   "improvements": [
     {
@@ -108,8 +140,8 @@
     {
       "query": "Who published this research?",
       "gt": [
-        "entity",
-        "citation"
+        "citation",
+        "entity"
       ],
       "heuristic_pred": [
         "entity"
@@ -167,25 +199,25 @@
     {
       "query": "Name the regulatory bodies referenced",
       "gt": [
+        "citation",
         "policy",
-        "entity",
-        "citation"
+        "entity"
       ],
       "heuristic_pred": [
-        "policy",
-        "citation"
+        "citation",
+        "policy"
       ]
     },
     {
       "query": "What standards must our vendors meet according to the contract?",
       "gt": [
+        "citation",
         "policy",
-        "entity",
-        "citation"
+        "entity"
       ],
       "heuristic_pred": [
-        "policy",
-        "citation"
+        "citation",
+        "policy"
       ]
     },
     {
@@ -205,8 +237,8 @@
         "entity"
       ],
       "heuristic_pred": [
-        "policy",
-        "citation"
+        "citation",
+        "policy"
       ]
     },
     {
@@ -222,13 +254,13 @@
     {
       "query": "Which employees need authorisation according to section 4?",
       "gt": [
+        "citation",
         "policy",
-        "entity",
-        "citation"
+        "entity"
       ],
       "heuristic_pred": [
-        "entity",
-        "citation"
+        "citation",
+        "entity"
       ]
     },
     {
@@ -263,8 +295,8 @@
     {
       "query": "What safety protocols are mandated by OSHA?",
       "gt": [
-        "policy",
-        "citation"
+        "citation",
+        "policy"
       ],
       "heuristic_pred": [
         "policy"
@@ -281,8 +313,8 @@
     {
       "query": "Which courts have jurisdiction per the agreement?",
       "gt": [
-        "entity",
-        "citation"
+        "citation",
+        "entity"
       ],
       "heuristic_pred": []
     }

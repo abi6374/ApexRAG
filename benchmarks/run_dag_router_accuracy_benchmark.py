@@ -2,11 +2,26 @@
 """
 benchmarks/run_dag_router_accuracy_benchmark.py
 
-Accuracy benchmark: heuristic DAGRouter vs. TF-IDF + LogisticRegression ML classifier.
+Accuracy benchmark: heuristic DAGRouter vs. two ML variants:
+
+1. **TF-IDF + LogisticRegression, in-sample fit** — trained AND scored on
+   this file's own 69-query `_EVAL_SET`. This number measures how well the
+   model can memorize this specific set, not how it generalizes. Kept for
+   reference only; never compare it to the heuristic as if it were a fair
+   fight (see ``methodology`` in the output JSON).
+2. **Real MiniLM + LogisticRegression, held-out generalization** — the
+   actual production classifier (`apex_rag/agents/planner/ml_router.py`),
+   trained by ``scripts/train_dag_router.py`` on an independent 200-query
+   templated dataset (`models/training_data.json`) and evaluated here,
+   zero-shot, on this file's 69-query `_EVAL_SET`. Since the eval set was
+   never seen during training, this is a legitimate generalization number.
+   Requires ``models/dag_router_model.joblib`` to exist — run
+   ``python scripts/train_dag_router.py --n 200 --cv 5`` first.
 
 Dataset:
     - 17 existing test cases from tests/test_dag_gating.py (TestDAGRouter)
-    - 50 hand-labeled edge cases covering known heuristic weaknesses
+    - 52 hand-labeled edge cases covering known heuristic weaknesses
+    - 69 queries total
 
 Metrics:
     - Per-label accuracy, precision, recall, F1
@@ -34,6 +49,9 @@ from sklearn.multioutput import MultiOutputClassifier
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from apex_rag.agents.planner.dag_router import DAGRouter
+
+_REAL_MODEL_PATH = Path("models/dag_router_model.joblib")
+_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
@@ -155,6 +173,43 @@ def train_ml_classifier(
     return vectorizer, clf
 
 
+def evaluate_real_model_holdout(
+    queries: list[str],
+) -> tuple[list[frozenset[str]], list[float]] | None:
+    """Zero-shot-evaluate the real, production MiniLM+LogReg model against
+    ``queries`` (the 69-query _EVAL_SET, which the model has never seen).
+
+    Returns ``None`` if ``models/dag_router_model.joblib`` doesn't exist yet
+    (i.e. ``scripts/train_dag_router.py`` hasn't been run), so callers can
+    skip this section gracefully instead of crashing.
+    """
+    if not _REAL_MODEL_PATH.exists():
+        logger.warning(
+            "  [!] %s not found -- skipping real held-out MiniLM+LogReg eval.\n"
+            "      Run `python scripts/train_dag_router.py --n 200 --cv 5` first.",
+            _REAL_MODEL_PATH,
+        )
+        return None
+
+    import joblib
+    from sentence_transformers import SentenceTransformer
+
+    clf = joblib.load(_REAL_MODEL_PATH)
+    embedder = SentenceTransformer(_EMBEDDING_MODEL)
+    embedder.encode("warmup", normalize_embeddings=True)  # exclude cold-start from timings
+
+    preds: list[frozenset[str]] = []
+    times: list[float] = []
+    for q in queries:
+        t0 = time.perf_counter()
+        emb = embedder.encode(q, normalize_embeddings=True).reshape(1, -1)
+        y_pred = clf.predict(emb)
+        elapsed = time.perf_counter() - t0
+        preds.append(frozenset({_LABEL_NAMES[j] for j in range(3) if y_pred[0, j] == 1}))
+        times.append(elapsed)
+    return preds, times
+
+
 # ===========================================================================
 # Metrics
 # ===========================================================================
@@ -226,9 +281,15 @@ def main() -> None:
     labels_gt = [s["labels"] for s in _EVAL_SET]
 
     # NOTE: ML trained on full dataset (no hold-out). Scores measure fit, not generalization.
-    logger.info("\n  Training TF-IDF + LogisticRegression classifier (full dataset)...")
+    logger.info("\n  Training TF-IDF + LogisticRegression classifier (in-sample fit)...")
     vectorizer, ml_clf = train_ml_classifier(queries, [set(l) for l in labels_gt])
     X_eval = vectorizer.transform(queries)
+
+    logger.info(
+        "\n  Evaluating real MiniLM + LogisticRegression classifier "
+        "(held-out generalization -- trained on an independent 200-query set)..."
+    )
+    real_result = evaluate_real_model_holdout(queries)
 
     # Run heuristic
     heuristic = DAGRouter()
@@ -258,10 +319,29 @@ def main() -> None:
     heuristic_metrics = compute_metrics(labels_gt, heuristic_preds)
     ml_metrics = compute_metrics(labels_gt, ml_preds)
 
+    real_metrics: dict[str, Any] | None = None
+    real_avg = real_p50 = None
+    if real_result is not None:
+        real_preds, real_times = real_result
+        real_metrics = compute_metrics(labels_gt, real_preds)
+        real_avg = sum(real_times) / len(real_times)
+        real_p50 = sorted(real_times)[len(real_times) // 2]
+
     # Print results
     print(f"\n{'=' * 78}")
-    print("  Results  (ML trained+evaluated on same 67 queries -- measures fit)")
+    print("  Results  (TF-IDF column = in-sample fit on these 69 queries, NOT generalization)")
     print(f"{'=' * 78}")
+    if real_metrics is not None:
+        print(
+            f"  Real MiniLM+LogReg held-out exact-match accuracy: "
+            f"{real_metrics['exact_match_accuracy']:.2%}  "
+            f"(trained on an independent 200-query set, never seen this eval set)"
+        )
+    else:
+        print(
+            "  [!] Real MiniLM+LogReg held-out eval skipped -- "
+            "run `python scripts/train_dag_router.py --n 200 --cv 5` first."
+        )
 
     # Exact match
     print(f"\n  {'Metric':<30} {'Heuristic':>12} {'ML (TF-IDF)':>12} {'Diff':>8}")
@@ -269,6 +349,9 @@ def main() -> None:
     hema = heuristic_metrics["exact_match_accuracy"]
     mlema = ml_metrics["exact_match_accuracy"]
     print(f"  {'Exact match accuracy':<30} {hema:>10.2%}  {mlema:>10.2%}  {mlema - hema:>+7.2%}")
+    if real_metrics is not None:
+        rema = real_metrics["exact_match_accuracy"]
+        print(f"  {'  (real MiniLM, held-out)':<30} {'':>12} {rema:>10.2%}  {rema - hema:>+7.2%} vs heuristic")
 
     # Per-label
     for label in _LABEL_NAMES:
@@ -298,6 +381,9 @@ def main() -> None:
     print(f"  {'Latency (per query)':<30} {'Heuristic':>12} {'ML (TF-IDF)':>12}")
     print(f"  {'Mean':<30} {h_avg*1e6:>10.1f}us  {m_avg*1e6:>10.1f}us")
     print(f"  {'p50':<30} {h_p50*1e6:>10.1f}us  {m_p50*1e6:>10.1f}us")
+    if real_avg is not None and real_p50 is not None:
+        print(f"  {'Real MiniLM+LogReg mean':<30} {real_avg*1e6:>10.1f}us  (includes embedding cost)")
+        print(f"  {'Real MiniLM+LogReg p50':<30} {real_p50*1e6:>10.1f}us")
 
     # Category breakdown
     print(f"\n  -- Category breakdown (exact match) --")
@@ -307,7 +393,12 @@ def main() -> None:
             continue
         h_acc = sum(1 for i in idx if heuristic_preds[i] == labels_gt[i]) / len(idx)
         m_acc = sum(1 for i in idx if ml_preds[i] == labels_gt[i]) / len(idx)
-        print(f"  {name:<20} n={len(idx):>3}  heuristic={h_acc:.0%}  ml={m_acc:.0%}  diff={m_acc - h_acc:>+7.2%}")
+        line = f"  {name:<20} n={len(idx):>3}  heuristic={h_acc:.0%}  ml(in-sample)={m_acc:.0%}"
+        if real_metrics is not None:
+            real_preds_for_cat = real_result[0]  # type: ignore[index]
+            r_acc = sum(1 for i in idx if real_preds_for_cat[i] == labels_gt[i]) / len(idx)
+            line += f"  ml(held-out)={r_acc:.0%}"
+        print(line)
 
     # Error analysis
     print(f"\n  -- Where ML beats heuristic (examples) --")
@@ -335,18 +426,27 @@ def main() -> None:
         "n_edge": n_edge,
         "label_counts": {lbl: label_counts.get(lbl, 0) for lbl in _LABEL_NAMES},
         "methodology": (
-            "ML classifier trained and evaluated on the full 67-query dataset "
-            "(no hold-out). Scores measure fit, not generalization. "
-            "TF-IDF+LogReg is used as a proxy for MiniLM+LogReg because "
-            "sentence-transformers cannot load in this environment (torchaudio DLL)."
+            "'ml' (TF-IDF+LogReg) is trained AND evaluated on this same "
+            f"{len(_EVAL_SET)}-query dataset (no hold-out) -- it measures "
+            "in-sample fit, not generalization, and should not be compared "
+            "directly to the heuristic as if it were a fair evaluation. "
+            "'ml_real_holdout' (when present) is the actual production "
+            "MiniLM+LogReg classifier (apex_rag/agents/planner/ml_router.py), "
+            "trained by scripts/train_dag_router.py on an independent "
+            "200-query templated dataset (models/training_data.json) that "
+            "does not overlap this eval set -- its score here is a genuine "
+            "zero-shot generalization number."
         ),
         "heuristic": heuristic_metrics,
-        "ml": ml_metrics,
+        "ml_in_sample_fit": ml_metrics,
+        "ml_real_holdout": real_metrics,
         "latency_us": {
             "heuristic_mean_us": round(h_avg * 1e6, 1),
             "heuristic_p50_us": round(h_p50 * 1e6, 1),
-            "ml_mean_us": round(m_avg * 1e6, 1),
-            "ml_p50_us": round(m_p50 * 1e6, 1),
+            "ml_in_sample_fit_mean_us": round(m_avg * 1e6, 1),
+            "ml_in_sample_fit_p50_us": round(m_p50 * 1e6, 1),
+            "ml_real_holdout_mean_us": round(real_avg * 1e6, 1) if real_avg is not None else None,
+            "ml_real_holdout_p50_us": round(real_p50 * 1e6, 1) if real_p50 is not None else None,
         },
         "exact_match_by_category": {
             "existing_heuristic": round(
@@ -361,6 +461,14 @@ def main() -> None:
             "edge_ml": round(
                 sum(1 for i in edge_idx if ml_preds[i] == labels_gt[i]) / n_edge, 4
             ) if n_edge else 0,
+            "existing_ml_real_holdout": (
+                round(sum(1 for i in existing_idx if real_result[0][i] == labels_gt[i]) / n_existing, 4)
+                if real_result is not None and n_existing else None
+            ),
+            "edge_ml_real_holdout": (
+                round(sum(1 for i in edge_idx if real_result[0][i] == labels_gt[i]) / n_edge, 4)
+                if real_result is not None and n_edge else None
+            ),
         },
         "improvements": [
             {"query": _EVAL_SET[i]["query"], "gt": list(gt), "heuristic_pred": list(h_pred)}
