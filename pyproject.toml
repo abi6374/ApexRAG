@@ -102,6 +102,7 @@ dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=5.0.0",
+    "pytest-timeout>=2.3.0",
     "mypy>=1.10.0",
     "ruff>=0.4.0",
     "tox>=4.0.0",
@@ -153,3 +154,10 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore::pytest.PytestUnhandledThreadExceptionWarning",
 ]
+# Per-test hard cap. Without this, a leaked resource (e.g. an unclosed
+# ApexIndex/DB engine -- see tests/conftest.py::_dispose_apex_indexes) can
+# silently hang the whole suite instead of failing loudly. thread-method
+# dumps a stack trace of all threads on timeout, which is what surfaced the
+# original hang in the first place.
+timeout = 60
+timeout_method = "thread"
